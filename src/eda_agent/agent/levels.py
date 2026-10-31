@@ -169,6 +169,20 @@ def unique_reviews(r: dict) -> list[tuple[dict, int]]:
     return [(v, n) for v, n in seen.values()]
 
 
+def _assess_testgen(r: dict, add) -> None:
+    """Issues of a write-tests receipt (new tests against surviving mutants)."""
+    decision = (r.get("gate") or {}).get("decision") or {}
+    if not decision.get("passed", False):
+        add("fatal", "The evidence gate rejected the report", quote="; ".join(decision.get("reasons", [])),
+            source="gate")
+    for t in r.get("results", []):
+        verdict = (t.get("review") or {}).get("verdict", "")
+        if t.get("status") == "closed" and verdict == "reject":
+            add("fatal", f"Reviewer rejected the new test for mutant {t.get('mutant')}", source="review")
+        elif t.get("status") != "closed":
+            add("error", f"Mutant {t.get('mutant')}: gap not closed", quote=t.get("note") or "", source="testgen")
+
+
 def assess(r: dict) -> list[Issue]:
     """All issues of a receipt, Fatal first, then Error, then Warning."""
     from .human_gate import content_sha256  # human_gate uses assess() for its policy
@@ -176,6 +190,9 @@ def assess(r: dict) -> list[Issue]:
     def add(level: str, text: str, quote: str = "", source: str = "") -> None:
         out.append(Issue(level, text, _short(quote, 400), source))
     a = r.get("approval") or {}
+    if r.get("kind") == "testgen":
+        _assess_testgen(r, add)
+        return sorted(out, key=lambda i: LEVELS.index(i.level))
 
     # the run and the gate
     saved = r.get("_source", r)  # the receipt as saved, not a display copy with trace data

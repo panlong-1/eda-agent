@@ -266,6 +266,17 @@ def rules_review(run: AuthorRun, rtl_rules: dict | None) -> Review:
                             f"setup WNS {m.get('wns')} (corner {m.get('worst_corner')}), hold WNS {m.get('hold_wns')}")
         elif name == "check_sdc" and r.get("status") == "fail":
             add("medium", f"check_sdc: {r.get('summary', '')}")
+        elif name == "perf":
+            for case in m.get("slower") or []:
+                row = (m.get("comparison") or {}).get(case, {})
+                add("high", f"perf: {case} is slower than the approved baseline: {row.get(m.get('key'))} vs "
+                            f"{row.get('reference')} {m.get('key')} ({row.get('delta_pct')}%)")
+            if m.get("comparison") is None:
+                add("info", "perf ran without an approved baseline: its numbers were not compared with anything")
+        elif name == "mutate" and (m.get("survived") or m.get("perf_killed")):
+            add("info", f"mutate {m.get('file')}: {m.get('survived', 0)} mutant(s) survive the chosen cases"
+                        + (f", {m['perf_killed']} caught only by a cycle-count change" if m.get("perf_killed") else "")
+                        + " (test gaps, not design bugs)")
     hashes = {(t["result"].get("metrics") or {}).get("sdc_sha256") for t in results
               if (t["result"].get("metrics") or {}).get("sdc_sha256") not in (None, "missing")}
     if len(hashes) > 1:  # allowed (the gate voids the older ones), but a person should know

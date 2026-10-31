@@ -44,4 +44,6 @@ def run_cases(project: Project, cmd: list[str], env: dict) -> Outcome | str:
         return "no summary produced; tail of output:\n" + proc.output[-800:]
     rows = parse_summary(summary_path.read_text())
     diags = {name: _log_tail(detail, name) for name, status, detail in rows if status == "FAIL"}
-    return Outcome(rows, [artifact(summary_path)], diags)
+    logs = {name: str(Path(detail) / f"{name}.sim.log") for name, status, detail in rows
+            if status != "SKIP" and (Path(detail) / f"{name}.sim.log").is_file()}
+    return Outcome(rows, [artifact(summary_path)], diags, logs=logs)

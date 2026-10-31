@@ -77,7 +77,7 @@ def run_regress(project: Project, cases: list[str] | None = None, max_diagnostic
     ok = bool(passed) and not failed and not missing
     metrics = {"passed": len(passed), "failed": len(failed), "cases": len(rows),
                "passed_cases": [r[0] for r in passed], "failed_cases": [r[0] for r in failed],
-               "format": cfg.format}
+               "format": cfg.format, "case_logs": outcome.logs}
     sub_text = ""
     if outcome.subtests:
         totals = {k: sum(s.get(k, 0) for s in outcome.subtests.values()) for k in ("passed", "failed", "total")}

@@ -3,6 +3,10 @@
     eda-agent init ~/project/mydesign --out projects/mydesign.toml       (draft a project config)
     eda-agent doctor --project projects/mydesign.toml                   (is everything there?)
     eda-agent check  --project projects/torv.toml [--full]              (fixed lint/regress[/synth] task)
+    eda-agent mutate --project projects/torv.toml --file rtl/x.sv       (mutation run, no model)
+    eda-agent perf --project projects/torv.toml                         (cycle counts, no model)
+    eda-agent perf-baseline runs/perf/<result>.json                     (a person approves a baseline)
+    eda-agent write-tests --mutate-run <dir> --mutants 3 --provider deepseek  (new tests vs mutants)
     eda-agent run --project projects/torv.toml "Lint the design and run the smoke case"
     eda-agent run --provider deepseek --review I2 --project projects/torv.toml "..."
     eda-agent review <run_id> --review I3 --project projects/torv.toml   (review a finished run)
@@ -310,6 +314,105 @@ def _doctor(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def _mutate(args: argparse.Namespace) -> int:
+    """No model: run the mutate tool directly and print where its report is."""
+    from .tools.mutate import run_mutate
+    project = load_project(resolve_project(args.project))
+    res = run_mutate(project, args.file, count=args.count, types=args.types, cases=args.cases, seed=args.seed,
+                     confirm_full=args.confirm_full, equivalence=not args.no_equiv, jobs=args.jobs)
+    print(f"mutate {args.file}: {res.status} — {res.summary}")
+    for d in res.diagnostics:
+        label = {"SURVIVED": "survived", "PERF_KILLED": "perf-killed"}.get(d.code, d.code.lower())
+        print(f"  {label} {d.file}:{d.line}  {d.msg}")
+    for r in res.residual_risk:
+        print(f"  risk: {r}")
+    if work := res.metrics.get("work_dir"):
+        print(f"report: {work}/report.md  matrix: {work}/kill_matrix.csv")
+        Path(work, "envelope.json").write_text(json.dumps(res.to_dict(), indent=2) + "\n")
+    return {"pass": 0, "fail": 1}.get(res.status, 2)
+
+
+def _perf(args: argparse.Namespace) -> int:
+    """No model: run the perf tool, print the table and keep the result for perf-baseline."""
+    from .tools.perf import run_perf
+    project = load_project(resolve_project(args.project))
+    res = run_perf(project, args.cases)
+    print(f"perf: {res.status} — {res.summary}")
+    m = res.metrics
+    for case, v in (m.get("cases") or {}).items():
+        row = (m.get("comparison") or {}).get(case)
+        vs = f"  vs baseline {row['reference']} ({row['delta']:+g}, {row['delta_pct']:+g}%) {row['verdict']}" \
+            if row and row.get("delta") is not None else ""
+        print(f"  {case:24} " + " ".join(f"{k}={x}" for k, x in v.items()) + vs)
+    for r in res.residual_risk:
+        print(f"  risk: {r}")
+    out = Path("runs/perf") / f"{project.name}_{datetime.now():%Y%m%d_%H%M%S}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(res.to_dict(), indent=2) + "\n")
+    print(f"result: {out}  (a person may record it: eda-agent perf-baseline {out})")
+    return {"pass": 0, "fail": 1}.get(res.status, 2)
+
+
+def _perf_baseline(args: argparse.Namespace) -> int:
+    """A person records a perf result as the approved baseline (never done by the agent)."""
+    from .tools.perf import record_baseline
+    project = load_project(resolve_project(args.project))
+    try:
+        new, loosened = record_baseline(project, Path(args.result), by=args.by or human_gate.default_approver(),
+                                        reason=args.reason or "", tolerance_pct=args.tolerance_pct,
+                                        allow_loosen=args.allow_loosen)
+    except (ValueError, OSError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    print(f"baseline for {project.name} recorded by {new['recorded_by']} at {new['recorded_at']}: "
+          f"{len(new['cases'])} cases, {new['key']}, tolerance {new['tolerance_pct']}%"
+          + (f"; loosened: {'; '.join(loosened)} (reason: {new['reason']})" if loosened else ""))
+    print(f"file: {project.perf.baseline}")
+    return 0
+
+
+async def _write_tests(args: argparse.Namespace) -> int:
+    """The test-generation loop (agent/testgen.py) for mutants of one mutate run, then the human gate."""
+    import time
+
+    from .agent import testgen
+    t0 = time.monotonic()
+    project = load_project(args.project)
+    run_id = args.run_id or f"tg_{datetime.now():%Y%m%d_%H%M%S}"
+    model_name = args.model or DEFAULT_MODELS[args.provider]
+    system, review_system = load_prompt(testgen.PROMPT), load_prompt(testgen.REVIEW_PROMPT)
+    usage: dict = {}
+    results = []
+    async with mcp_tools(sys.executable, _server_args(args.project)) as (_, execute, _instructions):
+        for mid in args.mutants:
+            r = await testgen.close_gap(make_model(args.provider, model_name, args.effort), execute, system,
+                                        run_id=run_id, mutate_run=args.mutate_run, mutant=mid, usage=usage,
+                                        attempts=args.attempts)
+            if r.status == "closed" and not args.no_review:
+                reviewer = make_model(args.provider, args.review_model or model_name, args.effort)
+                r.review = await testgen.review_test(reviewer, review_system, Path(r.test).read_text(), r.diff,
+                                                     r.scores[-1], usage)
+            print(f"mutant {mid}: {r.status}" + (f" — {r.test}" if r.test else f" — {r.note}"))
+            results.append(r)
+    gate = testgen.gate_results(results)
+    closed = [r for r in results if r.status == "closed"]
+    receipt = {
+        "kind": "testgen", "run_id": run_id, "project": project.name, "provider": args.provider,
+        "model": model_name, "prompt": testgen.PROMPT, "review_prompt": testgen.REVIEW_PROMPT,
+        "mutate_run": args.mutate_run, "targets": args.mutants,
+        "results": [testgen.to_dict(r) for r in results], "gate": gate, "final_claims": gate["report"],
+        "usage": usage, "wall_s": round(time.monotonic() - t0, 1),
+        "status": "done" if closed and gate["decision"]["passed"] else "failed",
+    }
+    if receipt["status"] == "done":
+        human_gate.request_approval(receipt, "new tests",
+                                    "a person decides whether the new test(s) and patch enter the regression")
+    js, md = write_receipt(receipt, Path("runs"))
+    print(gate["report"])
+    print(f"\nreceipt: {md} (json: {js})")
+    return 0 if receipt["status"] == "done" else 1
+
+
 def _add_run_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--project", help=f"project config (default: {PROJECT_FILE} here or in a parent directory)")
     p.add_argument("--provider", default="anthropic", choices=sorted(DEFAULT_MODELS))
@@ -363,6 +466,44 @@ def main() -> None:
     doc = sub.add_parser("doctor", help="check that a project's tools, files and keys are all there")
     doc.add_argument("--project", help=f"project config (default: {PROJECT_FILE} here or in a parent)")
     doc.add_argument("--provider", choices=sorted(DEFAULT_MODELS), help="also require this provider's API key")
+
+    mut = sub.add_parser("mutate", help="mutation run on one RTL file, no model: which mutants the "
+                                        "regression cases miss")
+    mut.add_argument("--project", help=f"project config (default: {PROJECT_FILE} here or in a parent)")
+    mut.add_argument("--file", required=True, help="RTL file relative to the project root")
+    mut.add_argument("--count", type=int, default=20)
+    mut.add_argument("--types", nargs="*", help="avl-core mutation classes (default: [mutation] types, else all)")
+    mut.add_argument("--cases", nargs="*", help="regression cases (default: [mutation] cases)")
+    mut.add_argument("--seed", type=int, default=1)
+    mut.add_argument("--jobs", type=int, help="copies run in parallel (default: [mutation] jobs)")
+    mut.add_argument("--confirm-full", action="store_true", help="re-run survivors on the whole case list")
+    mut.add_argument("--no-equiv", action="store_true", help="skip the equivalence check of survivors")
+
+    prf = sub.add_parser("perf", help="cycle counts per case, no model; compared with the approved baseline")
+    prf.add_argument("--project", help=f"project config (default: {PROJECT_FILE} here or in a parent)")
+    prf.add_argument("--cases", nargs="*", help="regression cases (default: [perf] cases)")
+
+    pb = sub.add_parser("perf-baseline", help="record a perf result as the approved baseline (a person decides)")
+    pb.add_argument("result", help="a perf result file written by `eda-agent perf` (runs/perf/*.json)")
+    pb.add_argument("--project", help=f"project config (default: {PROJECT_FILE} here or in a parent)")
+    pb.add_argument("--by", help="who decides (default: git user.name, else the login name)")
+    pb.add_argument("--reason", help="why; required with --allow-loosen")
+    pb.add_argument("--tolerance-pct", type=float, help="allowed difference in percent (default: [perf] tolerance_pct)")
+    pb.add_argument("--allow-loosen", action="store_true",
+                    help="accept a baseline that is slower, has a larger tolerance or drops cases (needs --reason)")
+
+    wt = sub.add_parser("write-tests", help="write new tests that kill surviving mutants of a mutate run "
+                                           "(model writes, tools judge, a person approves the patch)")
+    wt.add_argument("--project", help=f"project config (default: {PROJECT_FILE} here or in a parent)")
+    wt.add_argument("--mutate-run", required=True, help="work directory name of a mutate run (runs/work/<name>)")
+    wt.add_argument("--mutants", type=int, nargs="+", required=True, help="mutant ids to close")
+    wt.add_argument("--provider", default="anthropic", choices=sorted(DEFAULT_MODELS))
+    wt.add_argument("--model")
+    wt.add_argument("--effort", default="high", choices=["low", "medium", "high", "xhigh", "max"])
+    wt.add_argument("--review-model", help="reviewer model (default: the author's)")
+    wt.add_argument("--no-review", action="store_true")
+    wt.add_argument("--attempts", type=int, default=3)
+    wt.add_argument("--run-id")
 
     rev = sub.add_parser("review", help="review a finished run (writes into its receipt)")
     rev.add_argument("run_id")
@@ -426,6 +567,15 @@ def main() -> None:
         sys.exit(_receipt(args))
     if args.cmd == "review-ui":
         sys.exit(_review_ui(args))
+    if args.cmd == "mutate":
+        sys.exit(_mutate(args))
+    if args.cmd == "perf":
+        sys.exit(_perf(args))
+    if args.cmd == "perf-baseline":
+        sys.exit(_perf_baseline(args))
+    if args.cmd == "write-tests":
+        args.project = resolve_project(args.project)
+        sys.exit(asyncio.run(_write_tests(args)))
     if args.cmd == "check":
         args.preset = "full" if args.full else "check"
         args.task = load_preset(args.preset)

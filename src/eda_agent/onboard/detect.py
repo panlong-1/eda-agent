@@ -215,6 +215,12 @@ def detect(root: Path, run_fusesoc: bool = True) -> Detection:
     if (found := _summary(root)) and det.regress["cmd"].value != ["TODO"]:
         det.regress["summary_regex"] = Guess(found[0], f"the summary line {found[1].relative_to(root)} "
                                                        "prints; its counts then decide too", confirm=True)
+    singles = [p for pat in ("run_case*", "run_test*", "run_one*") for p in _files(root, pat, depth=2)
+               if p.is_file() and p.suffix in ("", ".sh", ".py")]
+    if singles:
+        rel = str(singles[0].relative_to(root))
+        det.notes.append(f"{rel} looks like it runs one test: for write_case/score_tests add "
+                         f'[tests] run = ["{rel}", "{{file}}"] (check its options, e.g. a cycle limit)')
     lists = _files(root, "*.list", depth=3)
     if lists:
         det.notes.append(f"case list(s) found: {', '.join(str(p.relative_to(root)) for p in lists)}. "

@@ -131,6 +131,68 @@ class FlowConfig:
 
 
 @dataclass(frozen=True)
+class MutationConfig:
+    """Mutation runs ([mutation]): which files may be mutated and which cases judge the mutants.
+    Each mutant is applied in a copy of the root, never in the root itself."""
+    files: tuple[str, ...] = ()         # relative to the root; empty = any .sv/.v file under it
+    cases: tuple[str, ...] = ()         # default cases per mutant; empty = the whole case list
+    types: tuple[str, ...] = ()         # avl-core mutation classes; empty = all
+    # Paths (relative to the root) left out of the copy, e.g. build and result directories. They are
+    # also emptied in the copy after each mutant, so results do not pile up.
+    copy_exclude: tuple[str, ...] = (".git",)
+    jobs: int = 2                       # copies run in parallel
+    timeout_s: int = 900                # per mutant, all its cases together
+    equiv_cycles: int = 8               # bound of the equivalence check on survivors
+
+    def __post_init__(self) -> None:
+        if self.jobs < 1 or self.timeout_s < 1 or self.equiv_cycles < 1:
+            raise ValueError("mutation jobs, timeout_s and equiv_cycles must be positive")
+
+
+@dataclass(frozen=True)
+class NewTestsConfig:
+    """How one new test file is run ([tests]); used by write_case and score_tests. Pass/fail is
+    judged as for the regression: exit status plus [regress] pass/fail/summary regexes."""
+    run: tuple[str, ...]        # runs ONE test file: {file} (absolute path), {name} (its stem)
+    log: str = ""               # the test's detailed output, relative to the root ({name}); default:
+                                # the command's own output
+    register: str = ""          # line the patch adds to [regress] case_list ({name}, {path})
+    examples: tuple[str, ...] = ()  # cases to imitate; default: those that kill most mutants of the file
+
+    def __post_init__(self) -> None:
+        if not any("{file}" in a for a in self.run):
+            raise ValueError("[tests] run must contain {file}, e.g. [\"scripts/run_case.sh\", \"{file}\"]")
+
+
+@dataclass(frozen=True)
+class PerfConfig:
+    """Performance numbers the testbench already prints ([perf]), read per case with regexes.
+    Each pattern's named groups become that case's numbers, e.g. cycles, instr, ipc."""
+    patterns: tuple[str, ...]
+    key: str = "cycles"                 # the number that decides slower / same / faster
+    lower_is_better: bool = True        # cycles: fewer is faster; set false for e.g. ipc
+    cases: tuple[str, ...] = ()         # default cases for perf; empty = the whole case list
+    # Allowed difference, in percent of the reference, before a case counts as slower or faster.
+    # RTL simulation is deterministic, so 0 is the default.
+    tolerance_pct: float = 0.0
+    # Where a case's output is, when the regression format does not say: {root}, {case}, {detail}.
+    log: str = ""
+    # The person-approved expectations (case -> key value); see `eda-agent perf-baseline`.
+    baseline: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.patterns:
+            raise ValueError("[perf] needs at least one pattern")
+        for p in self.patterns:
+            if not re.compile(p).groupindex:
+                raise ValueError(f"[perf] pattern {p!r} has no named group, e.g. (?P<cycles>\\d+)")
+        if not any(self.key in re.compile(p).groupindex for p in self.patterns):
+            raise ValueError(f"[perf] key {self.key!r} is not a named group of any pattern")
+        if self.tolerance_pct < 0:
+            raise ValueError("[perf] tolerance_pct must not be negative")
+
+
+@dataclass(frozen=True)
 class Project:
     name: str
     root: Path
@@ -143,6 +205,42 @@ class Project:
     allowed_commands: tuple[str, ...] = ()
     allowed_images: tuple[str, ...] = ()
     flow: FlowConfig | None = None   # None: synth and check_sdc refuse (no [flow] section)
+    mutation: MutationConfig | None = None  # None: mutate refuses (no [mutation] section)
+    perf: PerfConfig | None = None          # None: perf refuses (no [perf] section)
+    tests: NewTestsConfig | None = None     # None: write_case / score_tests refuse (no [tests])
+
+
+def _tests(data: dict | None) -> NewTestsConfig | None:
+    if data is None:
+        return None
+    unknown = set(data) - set(NewTestsConfig.__dataclass_fields__)
+    if unknown:
+        raise ValueError(f"unknown [tests] key(s) {sorted(unknown)}")
+    return NewTestsConfig(**{k: tuple(v) if k in ("run", "examples") else v for k, v in data.items()})
+
+
+def _perf(data: dict | None, config: Path) -> PerfConfig | None:
+    """[perf]; the baseline defaults to <config stem>.perf-baseline.json next to the config."""
+    if data is None:
+        return None
+    unknown = set(data) - set(PerfConfig.__dataclass_fields__)
+    if unknown:
+        raise ValueError(f"unknown [perf] key(s) {sorted(unknown)}")
+    base = data.get("baseline") or f"{config.stem}.perf-baseline.json"
+    baseline = Path(os.path.expanduser(base))
+    data = {**data, "baseline": str(baseline if baseline.is_absolute() else (config.parent / baseline).resolve())}
+    tuples = ("patterns", "cases")
+    return PerfConfig(**{k: tuple(v) if k in tuples else v for k, v in data.items()})
+
+
+def _mutation(data: dict | None) -> MutationConfig | None:
+    if data is None:
+        return None
+    unknown = set(data) - set(MutationConfig.__dataclass_fields__)
+    if unknown:
+        raise ValueError(f"unknown [mutation] key(s) {sorted(unknown)}")
+    tuples = ("files", "cases", "types", "copy_exclude")
+    return MutationConfig(**{k: tuple(v) if k in tuples else v for k, v in data.items()})
 
 
 def _flow(data: dict | None, root: Path) -> FlowConfig | None:
@@ -174,6 +272,9 @@ def load_project(path: str | Path) -> Project:
         allowed_commands=tuple(data.get("allowed_commands", ())),
         allowed_images=tuple(data.get("allowed_images", ())),
         flow=_flow(data.get("flow"), root),
+        mutation=_mutation(data.get("mutation")),
+        perf=_perf(data.get("perf"), Path(path)),
+        tests=_tests(data.get("tests")),
         lint=LintConfig(
             top=lint["top"],
             filelists=tuple(lint.get("filelists", ())),

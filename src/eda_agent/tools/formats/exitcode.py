@@ -70,6 +70,7 @@ def run_cases(project: Project, cmds: dict[str, list[str]], env: dict, log_dir: 
         log.write_text(proc.output)
         out.rows.append((name, status, detail))
         out.artifacts.append(artifact(log.resolve()))
+        out.logs[name] = str(log.resolve())
         if (sub := read_subtests(proc.output, cfg)) is not None:
             out.subtests[name] = sub
         if status == "FAIL":

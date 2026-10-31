@@ -66,6 +66,7 @@ def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, p
             "diagnostics": (c["result"].get("diagnostics") or [])[:MAX_DIAGNOSTICS],
             "diagnostics_total": c["result"].get("diagnostics_total", 0),
             **_timing(c["result"], void),
+            **_perf(c["result"]),
         } for c in envelopes],
         "other_tool_calls": [{"tool": c["tool"], "args": c["args"],
                               "status": (c["result"] or {}).get("status", "")} for c in others],
@@ -99,6 +100,15 @@ def _timing(result: dict, void: list[dict]) -> dict:
                                                "timing_met", "cells", "area", "latches")}
         out["timing"]["void"] = any(result is v for v in void)
     return out
+
+
+def _perf(result: dict) -> dict:
+    """The per-case table of a perf result (and the baseline it was compared with); nothing else."""
+    if result.get("tool") != "perf":
+        return {}
+    m = result.get("metrics") or {}
+    return {"perf": {k: m.get(k) for k in ("key", "cases", "comparison", "slower", "faster",
+                                           "baseline_sha256", "baseline_by")}}
 
 
 def _cell(text: str) -> str:
@@ -212,8 +222,15 @@ def write_receipt(receipt: dict, out_dir: Path, base: Path | None = None) -> tup
     """runs/<id>.receipt.json (with its `levels` brought up to date), plus the rendered .md and
     .html next to it. `base`: where the receipt's trace may be found (default out_dir)."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    receipt["levels"] = levels_record(with_trace_data(receipt, base or out_dir))
     js = out_dir / f"{receipt['run_id']}.receipt.json"
+    if receipt.get("kind") == "testgen":
+        # eda-agent write-tests keeps its own Markdown layout for now (no levels, no HTML page yet).
+        from .testgen import render_markdown as render_testgen
+        js.write_text(json.dumps(receipt, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        md = out_dir / f"{receipt['run_id']}.receipt.md"
+        md.write_text(render_testgen(receipt), encoding="utf-8")
+        return js, md
+    receipt["levels"] = levels_record(with_trace_data(receipt, base or out_dir))
     js.write_text(json.dumps(receipt, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     md, _ = render_files(receipt, out_dir, base=base)
     return js, md
