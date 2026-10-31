@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from eda_agent.projects import expand_vars, read_filelist
+from eda_agent.core.project import expand_vars, read_filelist
 from eda_agent.tools.lint import parse_verilator
-from eda_agent.tools.regress import parse_summary
+from eda_agent.tools.formats.torv import parse_summary
 
 VERILATOR_OUT = """\
 %Warning-UNUSEDSIGNAL: /work/rtl/a.sv:12:5: Signal is not used: 'x'

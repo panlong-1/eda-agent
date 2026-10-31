@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from eda_agent.projects import load_project, regress_cases
+from eda_agent.core.project import load_project, regress_cases
 from eda_agent.tools.describe import MAX_LINES, describe_cases, leading_comment, list_cases
 
 TORV_STYLE = """\

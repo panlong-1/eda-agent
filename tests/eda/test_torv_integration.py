@@ -8,10 +8,10 @@ import pytest
 
 from eda_agent.agent.loop import run_agent
 from eda_agent.agent.mcp_client import mcp_tools
-from eda_agent.agent.model import ScriptedAdapter, ToolCall, Turn
-from eda_agent.projects import load_project
+from eda_agent.agent.models import ScriptedAdapter, ToolCall, Turn
+from eda_agent.core.project import load_project
 
-PROJECT = Path(__file__).parent.parent / "projects" / "torv.toml"
+PROJECT = Path(__file__).parents[2] / "projects" / "torv.toml"
 pytestmark = [
     pytest.mark.eda,
     pytest.mark.skipif(shutil.which("verilator") is None or not load_project(PROJECT).root.is_dir(),
@@ -30,7 +30,7 @@ async def test_mcp_lint_and_regress_round_trip():
                               "no coverage or mutation score."),
     ]
     model = ScriptedAdapter(script)
-    async with mcp_tools(sys.executable, ["-m", "eda_agent.mcp_server", "--project", str(PROJECT)]) as (tools, ex):
+    async with mcp_tools(sys.executable, ["-m", "eda_agent.server.mcp_server", "--project", str(PROJECT)]) as (tools, ex):
         assert {t.name for t in tools} == {"lint", "list_regress_cases", "describe_case", "regress"}
         report = await run_agent(model, tools, ex, "check torv", "sys")
 

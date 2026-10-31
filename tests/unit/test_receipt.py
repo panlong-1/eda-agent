@@ -1,7 +1,7 @@
 import json
 
 from eda_agent.agent.loop import run_agent
-from eda_agent.agent.model import ScriptedAdapter, ToolCall, ToolSpec, Turn
+from eda_agent.agent.models import ScriptedAdapter, ToolCall, ToolSpec, Turn
 from eda_agent.agent.receipt import build_receipt, write_receipt
 
 TOOLS = [ToolSpec(n, n, {"type": "object", "properties": {}}) for n in ("describe_case", "regress")]

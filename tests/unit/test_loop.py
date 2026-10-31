@@ -1,7 +1,7 @@
 import json
 
 from eda_agent.agent.loop import Budget, run_agent
-from eda_agent.agent.model import ScriptedAdapter, ToolCall, ToolSpec, Turn
+from eda_agent.agent.models import ScriptedAdapter, ToolCall, ToolSpec, Turn
 
 TOOLS = [ToolSpec("lint", "lint the design", {"type": "object", "properties": {}})]
 RISK = "\n\nResidual risk: lint says nothing about function; no simulation was run."

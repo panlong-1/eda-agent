@@ -8,10 +8,10 @@ import argparse
 
 from mcp.server.mcpserver import MCPServer
 
-from .projects import Project, load_project
-from .tools.describe import describe_cases, list_cases
-from .tools.lint import run_lint
-from .tools.regress import run_regress
+from ..core.project import Project, load_project
+from ..tools.describe import describe_cases, list_cases
+from ..tools.lint import run_lint
+from ..tools.regress import run_regress
 
 INSTRUCTIONS = (
     "Tools for one digital design project. Every result carries status, evidence_level "

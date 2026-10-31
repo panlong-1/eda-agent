@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from .gate import GateDecision, check_report, rejection_message
-from .model import ModelAdapter, ToolOutcome, ToolSpec
+from .models import ModelAdapter, ToolOutcome, ToolSpec
 
 # (tool name, arguments) -> (result text, is_error)
 Executor = Callable[[str, dict], Awaitable[tuple[str, bool]]]

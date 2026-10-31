@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 from dataclasses import asdict, dataclass, field
 
-from ..envelope import EVIDENCE_LEVELS
+from ..core.envelope import EVIDENCE_LEVELS
 
 # Level a passing result must reach before the report may use strong claim words.
 STRONG_CLAIM_MIN_LEVEL = "E3"

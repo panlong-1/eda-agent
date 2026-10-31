@@ -5,9 +5,9 @@ import re
 from collections import Counter
 from pathlib import Path
 
-from ..envelope import Diagnostic, ToolResult
-from ..projects import Project, project_env, read_filelist
-from .proc import run, tool_version
+from ..core.envelope import Diagnostic, ToolResult
+from ..core.project import Project, project_env, read_filelist
+from ..core.proc import run, tool_version
 
 # %Warning-UNUSEDSIGNAL: /path/file.sv:12:5: Signal is not used: 'x'
 # %Error: /path/file.sv:265:22: Can't find definition ...

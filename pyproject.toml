@@ -14,7 +14,7 @@ dependencies = ["anthropic>=2", "mcp>=2", "openai>=1.40"]
 dev = ["pytest>=8", "pytest-asyncio>=0.23"]
 
 [project.scripts]
-eda-mcp = "eda_agent.mcp_server:main"
+eda-mcp = "eda_agent.server.mcp_server:main"
 eda-agent = "eda_agent.cli:main"
 
 [tool.setuptools.packages.find]

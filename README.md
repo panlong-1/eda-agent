@@ -19,22 +19,37 @@ a plain-code gate checks the final report against those results before the run e
 
 ```
 src/eda_agent/
-  envelope.py        ToolResult: status, evidence_level, claim_scope, metrics, diagnostics, sha256
-  projects.py        per-design TOML: env script, filelists, regression entry point, case list
-  tools/lint.py      Verilator --lint-only, parsed diagnostics (E0)
-  tools/describe.py  what a regression case covers: source file + its leading comment
-  tools/regress.py   the project's own regression, result format torv | junit | exitcode (E2)
-  mcp_server.py      MCP server (stdio): lint / list_regress_cases / describe_case / regress
-  agent/model.py     ModelAdapter protocol; AnthropicAdapter; OpenAICompatAdapter (DeepSeek);
-                     ScriptedAdapter for tests
-  agent/loop.py      tool loop with budgets: turns, tool calls, 2-strike retry stop; JSONL trace
-  agent/gate.py      evidence gate on the final report (no LLM), up to 2 rewrites
-  agent/receipt.py   runs/<id>.receipt.json + .md at the end of every run
-  agent/mcp_client.py  connects the loop to the MCP server
-  cli.py             eda-agent run ...
-projects/torv.toml      TORV rv32m SoC (format torv)
-projects/picorv32.toml  YosysHQ PicoRV32 (format exitcode + pass/fail regex)
+  core/                  shared parts; depend on no tool and no model
+    envelope.py          ToolResult: status, evidence_level, claim_scope, metrics, diagnostics, sha256
+    project.py           per-design TOML: env script, filelists, regression entry point, case list
+    proc.py              subprocess with a hard timeout that also kills child processes
+  tools/                 one EDA capability per file; each only returns an envelope (facts)
+    lint.py              Verilator --lint-only, parsed diagnostics (E0)
+    describe.py          what a regression case covers: source file + its leading comment
+    regress.py           the project's own regression (E2), read by one of formats/
+    formats/             torv.py | junit.py | exitcode.py: run cases, read results, claim_scope
+  server/mcp_server.py   MCP server (stdio): registers lint / list_regress_cases / describe_case / regress
+  agent/                 the agent runtime; reaches the tools only through MCP
+    models/              base.py (ModelAdapter protocol), anthropic.py, openai_compat.py (DeepSeek),
+                         scripted.py (for tests)
+    loop.py              tool loop with budgets: turns, tool calls, 2-strike retry stop; JSONL trace
+    gate.py              evidence gate on the final report (no LLM), up to 2 rewrites
+    receipt.py           runs/<id>.receipt.json + .md at the end of every run
+    mcp_client.py        connects the loop to the MCP server
+  cli.py                 eda-agent run ...
+projects/torv.toml       TORV rv32m SoC (format torv)
+projects/picorv32.toml   YosysHQ PicoRV32 (format exitcode + pass/fail regex)
+prompts/system.v1.md     system prompt; the name is recorded in every receipt (--prompt to change)
+tests/unit/              offline and free, a few seconds
+tests/eda/               marker "eda": needs Verilator and the design checkouts
+tests/fixtures/          recorded tool output and model replies (for later tests)
+docs/examples/           two real run receipts (PicoRV32, TORV hazard task)
+runs/                    traces, receipts and logs of your runs (not in git)
 ```
+
+Dependencies point one way: `core` ← `tools` ← `server`, and `core` ← `agent`. The agent
+never imports `tools`, so the MCP server can serve any other agent too. Nothing in `src/`
+is specific to one design; that lives in `projects/*.toml`.
 
 ## Use
 

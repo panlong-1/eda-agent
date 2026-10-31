@@ -3,7 +3,7 @@ import json
 from openai.types.chat import ChatCompletion
 
 from eda_agent.agent.loop import run_agent
-from eda_agent.agent.model import OpenAICompatAdapter, ToolSpec
+from eda_agent.agent.models import OpenAICompatAdapter, ToolSpec
 
 TOOLS = [ToolSpec("lint", "lint the design", {"type": "object", "properties": {}})]
 REPORT = "lint pass (E0)\n\nResidual risk: lint says nothing about function."
@@ -73,6 +73,6 @@ async def test_bad_arguments_and_tool_error_are_visible():
     assert turn.stop == "tool_use" and turn.text == ""
     assert turn.tool_calls[0].input == {"_unparsed_arguments": "{oops"}
 
-    from eda_agent.agent.model import ToolOutcome
+    from eda_agent.agent.models import ToolOutcome
     model.add_tool_results([ToolOutcome("c", "bad args", is_error=True)])
     assert model.messages[-1]["content"] == "[tool error] bad args"

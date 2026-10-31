@@ -9,13 +9,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ..envelope import EVIDENCE_LEVELS
+from ..core.envelope import EVIDENCE_LEVELS
 from .gate import described_cases, executed_cases, split_residual
 from .loop import RunReport
 
 
 def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, project: str,
-                  all_cases: list[str], trace: str = "") -> dict:
+                  all_cases: list[str], trace: str = "", prompt: str = "") -> dict:
     envelopes = [c for c in report.checks if c["result"] and c["result"].get("evidence_level") in EVIDENCE_LEVELS]
     others = [c for c in report.checks if all(c is not e for e in envelopes)]
     # Same definitions as gate rule R4, so the receipt and the gate never disagree.
@@ -33,6 +33,7 @@ def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, p
         "task": task,
         "provider": provider,
         "model": report.model,
+        "prompt": prompt,
         "project": project,
         "stop_reason": report.stop_reason,
         "status": report.status,
@@ -71,7 +72,8 @@ def render_markdown(r: dict) -> str:
         f"# Run receipt {r['run_id']}",
         "",
         f"- **Task:** {r['task']}",
-        f"- **Project:** {r['project']}  ·  **Model:** {r['provider']} / {r['model']}",
+        f"- **Project:** {r['project']}  ·  **Model:** {r['provider']} / {r['model']}"
+        f"  ·  **Prompt:** {r.get('prompt') or 'n/a'}",
         f"- **Stop:** {r['stop_reason']}  ·  **Status:** {r['status']}  ·  "
         f"**Gate:** {gate['status']} ({gate['rewrites']} rewrite(s))",
         f"- **Cost:** {r['turns']} turns, {r['tool_calls']} tool calls ({r['tool_errors']} errors), "

@@ -8,10 +8,10 @@ import pytest
 
 from eda_agent.agent.loop import run_agent
 from eda_agent.agent.mcp_client import mcp_tools
-from eda_agent.agent.model import ScriptedAdapter, ToolCall, Turn
-from eda_agent.projects import load_project
+from eda_agent.agent.models import ScriptedAdapter, ToolCall, Turn
+from eda_agent.core.project import load_project
 
-PROJECT = Path(__file__).parent.parent / "projects" / "picorv32.toml"
+PROJECT = Path(__file__).parents[2] / "projects" / "picorv32.toml"
 pytestmark = [
     pytest.mark.eda,
     pytest.mark.skipif(
@@ -30,7 +30,7 @@ async def test_picorv32_lint_describe_regress():
                               "Residual risk: one firmware image; exit status and output pattern only."),
     ]
     model = ScriptedAdapter(script)
-    async with mcp_tools(sys.executable, ["-m", "eda_agent.mcp_server", "--project", str(PROJECT)]) as (tools, ex):
+    async with mcp_tools(sys.executable, ["-m", "eda_agent.server.mcp_server", "--project", str(PROJECT)]) as (tools, ex):
         report = await run_agent(model, tools, ex, "check picorv32", "sys")
 
     lint, described = (json.loads(r.content) for r in model.received[0])

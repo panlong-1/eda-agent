@@ -35,7 +35,7 @@ class CaseSpec:
     list_entry: str = ""    # the raw case-list line, if the case came from a list file
 
 
-# How the regression reports results (see tools/regress.py):
+# How the regression reports results (see tools/formats/):
 #   torv     "Result directory: <dir>" in the output, <dir>/<summary_file> rows name,STATUS,detail
 #   junit    a JUnit XML file written by the run
 #   exitcode the command's exit status per case, optionally confirmed by pass/fail regexes

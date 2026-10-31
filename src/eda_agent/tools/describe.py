@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 
-from ..projects import CaseSpec, Project, case_specs
+from ..core.project import CaseSpec, Project, case_specs
 
 MAX_LINES = 20
 MAX_CHARS = 1200

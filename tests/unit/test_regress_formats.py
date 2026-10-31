@@ -5,8 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from eda_agent.projects import RegressConfig, load_project
-from eda_agent.tools.regress import judge_exitcode, parse_junit, run_regress
+from eda_agent.core.project import RegressConfig, load_project
+from eda_agent.tools.formats.exitcode import judge_exitcode
+from eda_agent.tools.formats.junit import parse_junit
+from eda_agent.tools.regress import run_regress
 
 JUNIT = """\
 <testsuites><testsuite name="tb">
