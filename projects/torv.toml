@@ -20,6 +20,7 @@ defines = ["FUNCTIONAL"]
 flags = ["-Wall", "-Wno-fatal", "--timing", "-Wno-TIMESCALEMOD", "-Wno-ASSIGNIN"]
 
 [regress]
+format = "torv"
 cmd = ["scripts/regress.sh"]
 case_list = "regress/cases/soc.list"
 case_flag = "--case"

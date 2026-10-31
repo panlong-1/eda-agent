@@ -26,6 +26,11 @@ src/eda_agent/
     envelope.py          ToolResult: status, evidence_level, claim_scope, metrics, diagnostics, sha256
     project.py           per-design TOML: env script, filelists, regression entry point, case list
     proc.py              subprocess with a hard timeout that also kills child processes
+    flow_sources.py      [flow] from a LibreLane config; PDK presets (IHP SG13G2)
+    settings.py          finds eda-agent.toml; personal defaults in ~/.config/eda-agent/config.toml
+  onboard/               connecting a new design (no model involved)
+    detect.py, init.py   eda-agent init: guess a draft config, each value with where it came from
+    doctor.py            eda-agent doctor: are the tools, files, image and API key all there?
   tools/                 one EDA capability per file; each only returns an envelope (facts)
     lint.py              Verilator --lint-only, parsed diagnostics (E0)
     describe.py          what a regression case covers: source file + its leading comment
@@ -46,11 +51,11 @@ src/eda_agent/
     reviewer.py          independent review I0-I3 (context assembled by code) + rule-based reviewer
     human_gate.py        awaiting_approval / approve / reject, recorded in the receipt
     mcp_client.py        connects the loop to the MCP server
-  cli.py                 eda-agent run | review | approve | reject
+  cli.py                 eda-agent init | doctor | check | run | review | approve | reject
 projects/torv.toml       TORV rv32m SoC (format torv)
 projects/picorv32.toml   YosysHQ PicoRV32 (format exitcode + pass/fail regex)
-src/eda_agent/prompts/  system.v2.md (default; v1 kept), reviewer.v1.md; the prompt name is
-                         recorded in every receipt (--prompt picks another, or a path to a draft .md)
+src/eda_agent/prompts/  system.v2.md (default; v1 kept), reviewer.v1.md, presets.v1.toml (the fixed
+                         tasks of `check`); names and versions are recorded in every receipt
 tests/unit/              offline and free, a few seconds
 tests/eda/               marker "eda": needs Verilator and the design checkouts; the synth test also
                          needs docker, the LibreLane image and the IHP PDK (skipped otherwise)
@@ -113,6 +118,46 @@ command and the pass/fail patterns, and describes its one case (`firmware`).
 
 ### Adding a project
 
+Start from a draft instead of an empty file:
+
+```bash
+.venv/bin/eda-agent init ~/project/mydesign --out projects/mydesign.toml   # writes a DRAFT
+.venv/bin/eda-agent doctor --project projects/mydesign.toml --provider deepseek
+.venv/bin/eda-agent check  --project projects/mydesign.toml --provider deepseek    # lint + one case
+.venv/bin/eda-agent check  --project projects/mydesign.toml --provider deepseek --full
+```
+
+`init` reads what the repository already has: a FuseSoC `.core` (lint top and options; it
+runs `fusesoc run --setup --target lint` so Verilator gets FuseSoC's own command file), a
+LibreLane `config.yaml` (top, files, clock, SDC), `*.f` filelists, Makefile test targets or a
+regress script, and the pass/fail lines the testbench prints. Every value in the draft says
+where it came from; the ones marked `CHECK` are guesses a person must confirm. The draft is
+not used until a person has read it: the config decides what each check means. `doctor`
+then checks that every tool, file, container image and API key it names is there (key
+values are never printed). Put the file in the design directory as `eda-agent.toml` and
+`--project` can be left out; `~/.config/eda-agent/config.toml` holds personal defaults such
+as `provider = "deepseek"` and `review = "I2"`.
+
+Left out, a project gets defaults: lint flags `-Wall -Wno-fatal`, `[versions]` with
+Verilator, regress format `exitcode` with no case flag, and with no case list one case,
+`all`, that runs the whole command. The smallest config is seven lines:
+
+```toml
+name = "mycore"
+root = "~/project/mycore"
+[lint]
+top = "mycore"
+files = ["rtl/mycore.v"]
+[regress]
+cmd = ["make", "test"]
+```
+
+For a FuseSoC project `[lint]` can take `command_files` (Verilator `-f` files; lint runs
+from the file's directory, because its paths are relative to it), `external` (path prefixes
+of third-party code: their warnings are left out and counted in `external_warnings_dropped`)
+and `copy_of_root` (FuseSoC's copy of the core's own files under `build/`, mapped back to the
+original files so their warnings stay ours and point at the real lines).
+
 A project is one TOML file. `[lint]` gives the top and the files (`filelists` and/or
 `files`). `[regress]` gives the command and how to read its result:
 
@@ -155,8 +200,12 @@ port, unconstrained endpoints, loops) and reports facts at E0: a complete SDC ra
 The SDC is a design input written by people; the tools only read it. `[flow]` names it with
 `top`, `files`/`filelists`, `sdc`, `clock_port`, `clock_period` (also handed to the SDC as
 `$::env(CLOCK_PERIOD)`, as LibreLane does), `liberty`, `[flow.corners]`, `image`, `pdk_root`
-and PDK details (`dont_use_file`, tie and buffer cells, ABC driving cell and load). TORV's
-section mirrors its `librelane/config.yaml`; on TORV the estimate is within about 0.7 ns of
+and PDK details (`dont_use_file`, tie and buffer cells, ABC driving cell and load). Most of this
+need not be copied: `librelane = "librelane/config.yaml"` reads top, files, include dirs,
+frontend, Booth multiplier, clock and SDC from the LibreLane config, and a known PDK
+(`ihp-sg13g2` today) fills the library, corner and cell settings; keys written in `[flow]`
+win. A test checks that these two lines give exactly the same setup as the hand-written
+section in `projects/torv.toml`. TORV's section mirrors its `librelane/config.yaml`; on TORV the estimate is within about 0.7 ns of
 LibreLane's own pre-PnR STA per corner. A project without `[flow]` (PicoRV32 today) gets a
 clean `not_configured` refusal. Containers come from an allowlist (`ghcr.io/librelane/librelane`
 built in; `allowed_images` adds more) and may only start allowlisted programs.
@@ -257,6 +306,8 @@ Ideas only, unless marked as a dependency; no code was copied.
 
 M1 case descriptions, evidence gate, receipts · M1.1 tool versions, command allowlist,
 whole tool results in traces · M2 (done) synth + pre-PnR STA under the SDC, check_sdc, gate
-R5, reviewer I0–I3 + rule-based reviewer, human gate · M2.5 test generation scored by mutants · M3
+R5, reviewer I0–I3 + rule-based reviewer, human gate · M1.2 (done) init, doctor, check
+presets, defaults, LibreLane/FuseSoC inputs; tried on a third design, an INT8 linear-layer
+accelerator (FuseSoC, pulp IP) · M2.5 test generation scored by mutants · M3
 simulation-failure localisation (logs, waveforms), lessons store · M4 LibreLane flow tool
 (PPA, DRC/LVS).

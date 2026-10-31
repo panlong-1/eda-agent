@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from eda_agent.core.project import RegressConfig, load_project
+from eda_agent.core.project import RegressConfig, case_specs, load_project
 from eda_agent.tools.formats.exitcode import judge_exitcode
 from eda_agent.tools.formats.junit import parse_junit
 from eda_agent.tools.regress import run_regress
@@ -49,8 +49,17 @@ def test_config_validation():
         RegressConfig(cmd=("x",), case_list="l", format="vcs")
     with pytest.raises(ValueError, match="junit_file"):
         RegressConfig(cmd=("x",), case_list="l", format="junit")
-    with pytest.raises(ValueError, match="case_list or inline"):
-        RegressConfig(cmd=("x",))
+    with pytest.raises(ValueError, match="needs case_list"):
+        RegressConfig(cmd=("x",), format="torv")
+    assert RegressConfig(cmd=("x",)).format == "exitcode"  # the default; no cases = one case, all
+
+
+def test_minimal_project_gets_defaults_and_one_case(tmp_path):
+    project = _project(tmp_path, 'cmd = ["make", "test"]', allowed="")
+    assert project.lint.flags == ("-Wall", "-Wno-fatal") and "verilator" in project.versions
+    assert (project.regress.format, project.regress.case_flag) == ("exitcode", "")
+    (case,) = case_specs(project)
+    assert case.name == "all" and "make test" in case.description
 
 
 EXITCODE_CASES = """
@@ -109,7 +118,7 @@ def test_torv_format(tmp_path):
                       'echo "Result directory: $d"\n')
     script.chmod(0o755)
     (tmp_path / "cases.list").write_text("smoke asm x.S\nalu asm y.S\n")
-    project = _project(tmp_path, 'cmd = ["./regress.sh"]\ncase_list = "cases.list"')
+    project = _project(tmp_path, 'format = "torv"\ncmd = ["./regress.sh"]\ncase_list = "cases.list"')
     r = run_regress(project, ["alu"])
     assert r.status == "pass" and r.metrics["passed_cases"] == ["alu"]
     assert "testbench's own self-check" in r.claim_scope and r.artifacts[0]["path"].endswith("summary.rpt")

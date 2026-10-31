@@ -39,6 +39,12 @@ def parse_verilator(output: str) -> list[Diagnostic]:
     return diags
 
 
+def lint_cwd(project: Project) -> Path:
+    """Where lint runs: the first command file's directory (its paths are relative to it), else the root."""
+    cf = project.lint.command_files
+    return (project.root / cf[0]).parent if cf else project.root
+
+
 def lint_command(project: Project, env: dict[str, str]) -> list[str]:
     cfg, root = project.lint, project.root
     files: list[Path] = []
@@ -51,8 +57,30 @@ def lint_command(project: Project, env: dict[str, str]) -> list[str]:
         "--top-module", cfg.top,
         *(f"-I{root / d}" for d in cfg.include_dirs),
         *(f"-D{d}" for d in cfg.defines),
+        *(a for cf in cfg.command_files for a in ("-f", str(root / cf))),
         *map(str, files),
     ]
+
+
+def source_path(path: str, cwd: Path, project: Project) -> str:
+    """An absolute path for a file Verilator names: relative paths are taken from where lint ran,
+    and a file inside a copy of the project root (lint.copy_of_root) is mapped to the original."""
+    p = Path(path) if path.startswith("/") else (cwd / path).resolve()
+    for copy in project.lint.copy_of_root:
+        base = (project.root / copy).resolve()
+        if p.is_relative_to(base):
+            original = project.root / p.relative_to(base)
+            if original.is_file():
+                return str(original)
+    return str(p)
+
+
+def is_ours(path: str, project: Project) -> bool:
+    root = project.root
+    if not path.startswith(str(root)):
+        return False
+    rel = path[len(str(root)) + 1:]
+    return not any(rel == e or rel.startswith(e.rstrip("/") + "/") for e in project.lint.external)
 
 
 def run_lint(project: Project, max_diagnostics: int = 20, include_external: bool = False) -> ToolResult:
@@ -60,7 +88,13 @@ def run_lint(project: Project, max_diagnostics: int = 20, include_external: bool
     cmd = lint_command(project, env)
     if refused := check_allowed(cmd, project.root, project.allowed_commands):
         return ToolResult("lint", "error", "E0", CLAIM_SCOPE, summary=refused, error_class="not_allowed")
-    proc = run(cmd, project.root, env, timeout_s=300)
+    missing = [cf for cf in project.lint.command_files if not (project.root / cf).is_file()]
+    if missing:
+        return ToolResult("lint", "error", "E0", CLAIM_SCOPE, error_class="infra",
+                          summary=f"lint command file(s) missing: {missing}; regenerate them "
+                                  "(e.g. run the project's own lint setup once) and retry")
+    cwd = lint_cwd(project)
+    proc = run(cmd, cwd, env, timeout_s=300)
     versions = {"verilator": tool_version(["verilator", "--version"], env)}
     if proc.returncode is None:
         return ToolResult("lint", "timeout", "E0", CLAIM_SCOPE, summary="lint timed out after 300 s",
@@ -72,13 +106,17 @@ def run_lint(project: Project, max_diagnostics: int = 20, include_external: bool
                           summary="verilator failed without parseable diagnostics: " + proc.output[-500:],
                           tool_versions=versions, error_class="infra")
 
-    diags = all_diags
     root = str(project.root)
+    for d in all_diags:  # paths from a command file are relative to where lint ran
+        if d.file:
+            d.file = source_path(d.file, cwd, project)
+    diags = all_diags
     if not include_external:
         # PDK / third-party models are not ours to fix; keep errors from them, drop warnings.
-        diags = [d for d in diags if d.severity == "error" or not d.file or d.file.startswith(root)]
+        diags = [d for d in diags if d.severity == "error" or not d.file or is_ours(d.file, project)]
     errors = [d for d in diags if d.severity == "error"]
     warnings = [d for d in diags if d.severity == "warning"]
+    external_warnings = sum(1 for d in all_diags if d.severity == "warning") - len(warnings)
 
     for d in diags:  # report paths relative to the project root
         if d.file.startswith(root):
@@ -91,6 +129,7 @@ def run_lint(project: Project, max_diagnostics: int = 20, include_external: bool
         claim_scope=CLAIM_SCOPE,
         summary=f"{len(errors)} error(s), {len(warnings)} warning(s), top={project.lint.top}",
         metrics={"errors": len(errors), "warnings": len(warnings),
+                 "external_warnings_dropped": external_warnings,
                  "by_code": dict(Counter(d.code for d in diags).most_common())},
         diagnostics=shown,
         diagnostics_total=len(diags),

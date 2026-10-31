@@ -13,7 +13,7 @@ from pathlib import Path
 from ..core.envelope import Diagnostic, ToolResult
 from ..core.proc import check_allowed, run, tool_version
 from ..core.project import Project, project_env
-from .lint import lint_command, parse_verilator
+from .lint import is_ours, lint_command, lint_cwd, parse_verilator, source_path
 
 CLAIM_SCOPE = (
     "Fixed rules over the RTL: Verilator warnings BLKSEQ, COMBDLY, WIDTHTRUNC, LATCH, MULTIDRIVEN "
@@ -84,6 +84,18 @@ def scan_reset_polarity(path: Path, text: str) -> list[Diagnostic]:
     return diags
 
 
+def _command_file_sources(project: Project, cwd: Path) -> list[str]:
+    """Source files named in the lint command files, as absolute paths."""
+    out = []
+    for cf in project.lint.command_files:
+        path = project.root / cf
+        if path.is_file():
+            for line in path.read_text(errors="replace").split():
+                if line.endswith((".v", ".sv")) and not line.startswith(("-", "+")):
+                    out.append(source_path(line, cwd, project))
+    return out
+
+
 def run_rtl_rules(project: Project, max_diagnostics: int = 30) -> ToolResult:
     env = project_env(project)
     cmd = lint_command(project, env)
@@ -92,19 +104,23 @@ def run_rtl_rules(project: Project, max_diagnostics: int = 30) -> ToolResult:
     if refused := check_allowed(cmd, project.root, project.allowed_commands):
         return ToolResult("rtl_rules", "error", "E0", CLAIM_SCOPE, summary=refused, error_class="not_allowed")
     versions = {"verilator": tool_version(["verilator", "--version"], env)}
-    proc = run(cmd, project.root, env, timeout_s=300)
+    cwd = lint_cwd(project)
+    proc = run(cmd, cwd, env, timeout_s=300)
     if proc.returncode is None:
         return ToolResult("rtl_rules", "timeout", "E0", CLAIM_SCOPE, summary="verilator timed out after 300 s",
                           tool_versions=versions, error_class="timeout")
     root = str(project.root)
     findings: list[Diagnostic] = []
     for d in parse_verilator(proc.output):
-        if d.code not in VERILATOR_RULES or (d.file and not d.file.startswith(root + "/")):
+        if d.file:
+            d.file = source_path(d.file, cwd, project)
+        if d.code not in VERILATOR_RULES or (d.file and not is_ours(d.file, project)):
             continue
         rule, severity, meaning = VERILATOR_RULES[d.code]
         findings.append(Diagnostic(severity, rule.upper(), f"{meaning}: {d.msg}",
                                    d.file[len(root) + 1:] if d.file.startswith(root + "/") else d.file, d.line, d.col))
-    sources = [Path(p) for p in cmd if p.startswith(root + "/") and p.endswith((".v", ".sv"))]
+    sources = [p for p in (Path(a) for a in cmd + _command_file_sources(project, cwd))
+               if str(p).startswith(root + "/") and p.suffix in (".v", ".sv") and is_ours(str(p), project)]
     for src in sources:
         for d in scan_reset_polarity(src.relative_to(project.root), src.read_text(errors="replace")):
             findings.append(d)

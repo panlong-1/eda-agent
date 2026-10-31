@@ -1,0 +1,13 @@
+# Fixed tasks for `eda-agent check` (quick) and `eda-agent check --full`. The receipt records
+# the preset name with this file's version, e.g. "preset check@presets.v1".
+
+check = """\
+Lint the design. Then list the regression cases, read their summaries and run the quickest \
+one that exercises the design end to end (a smoke case if there is one; the only case if \
+there is just one). Report what each result proves and what it does not, ending with a \
+section headed Residual risk."""
+
+full = """\
+Lint the design and run the whole regression. If the synth tool is available, synthesize the \
+design, estimate timing at the project clock and check that the SDC constrains every endpoint. \
+Report what each result proves and what it does not, ending with a section headed Residual risk."""

@@ -14,6 +14,12 @@ from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
 
+from .flow_sources import resolve_flow
+
+
+DEFAULT_LINT_FLAGS = ("-Wall", "-Wno-fatal")
+DEFAULT_VERSIONS = {"verilator": ("verilator", "--version")}
+
 
 @dataclass(frozen=True)
 class LintConfig:
@@ -22,7 +28,16 @@ class LintConfig:
     files: tuple[str, ...] = ()
     include_dirs: tuple[str, ...] = ()
     defines: tuple[str, ...] = ()
-    flags: tuple[str, ...] = ()
+    flags: tuple[str, ...] = DEFAULT_LINT_FLAGS
+    # Verilator command files (-f), e.g. the .vc that FuseSoC/edalize writes. Paths inside one
+    # are relative to its own directory, so lint runs from there.
+    command_files: tuple[str, ...] = ()
+    # Path prefixes (relative to the root) of third-party code: their warnings are not ours to
+    # fix and are left out; their errors are kept.
+    external: tuple[str, ...] = ()
+    # Directories (relative to the root) that hold a copy of the project's own files, e.g. FuseSoC's
+    # build/<core>/src/<core>; diagnostics there are reported against the original file.
+    copy_of_root: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -47,8 +62,8 @@ class RegressConfig:
     cmd: tuple[str, ...]
     case_list: str = ""
     cases: tuple[CaseSpec, ...] = ()  # inline cases, used when there is no case_list
-    case_flag: str = "--case"
-    format: str = "torv"
+    case_flag: str = ""
+    format: str = "exitcode"
     summary_file: str = "summary.rpt"
     junit_file: str = ""
     pass_regex: str = ""
@@ -60,8 +75,8 @@ class RegressConfig:
             raise ValueError(f"unknown regress format {self.format!r}; use one of {REGRESS_FORMATS}")
         if self.format == "junit" and not self.junit_file:
             raise ValueError("regress format 'junit' needs junit_file")
-        if not self.case_list and not self.cases:
-            raise ValueError("regress needs case_list or inline [[regress.cases]]")
+        if self.format == "torv" and not self.case_list:
+            raise ValueError("regress format 'torv' needs case_list")
 
 
 @dataclass(frozen=True)
@@ -114,9 +129,10 @@ class Project:
     flow: FlowConfig | None = None   # None: synth and check_sdc refuse (no [flow] section)
 
 
-def _flow(data: dict | None) -> FlowConfig | None:
+def _flow(data: dict | None, root: Path) -> FlowConfig | None:
     if data is None:
         return None
+    data = resolve_flow(data, root)
     tuples = ("files", "filelists", "include_dirs", "defines", "synth_flags")
     known = set(FlowConfig.__dataclass_fields__)
     unknown = set(data) - known
@@ -126,26 +142,32 @@ def _flow(data: dict | None) -> FlowConfig | None:
 
 
 def load_project(path: str | Path) -> Project:
+    """Load a project config. Left out, these default: lint flags -Wall -Wno-fatal; [versions]
+    Verilator; regress format exitcode with no case flag; no case list = one case, `all`."""
     data = tomllib.loads(Path(path).read_text(encoding="utf-8"))
     root = Path(os.path.expanduser(data["root"])).resolve()
     lint = data["lint"]
     regress = data["regress"]
+    fmt = regress.get("format", "exitcode")
     return Project(
         name=data["name"],
         root=root,
         env_script=data.get("env_script"),
         env_defaults=data.get("env_defaults", {}),
-        versions={k: tuple(v) for k, v in data.get("versions", {}).items()},
+        versions={k: tuple(v) for k, v in data.get("versions", DEFAULT_VERSIONS).items()},
         allowed_commands=tuple(data.get("allowed_commands", ())),
         allowed_images=tuple(data.get("allowed_images", ())),
-        flow=_flow(data.get("flow")),
+        flow=_flow(data.get("flow"), root),
         lint=LintConfig(
             top=lint["top"],
             filelists=tuple(lint.get("filelists", ())),
             files=tuple(lint.get("files", ())),
             include_dirs=tuple(lint.get("include_dirs", ())),
             defines=tuple(lint.get("defines", ())),
-            flags=tuple(lint.get("flags", ())),
+            flags=tuple(lint.get("flags", DEFAULT_LINT_FLAGS)),
+            command_files=tuple(lint.get("command_files", ())),
+            external=tuple(lint.get("external", ())),
+            copy_of_root=tuple(lint.get("copy_of_root", ())),
         ),
         regress=RegressConfig(
             cmd=tuple(regress["cmd"]),
@@ -153,8 +175,8 @@ def load_project(path: str | Path) -> Project:
             cases=tuple(CaseSpec(name=c["name"], args=tuple(c.get("args", ())),
                                  source=c.get("source", ""), description=c.get("description", ""))
                         for c in regress.get("cases", ())),
-            case_flag=regress.get("case_flag", "--case"),
-            format=regress.get("format", "torv"),
+            case_flag=regress.get("case_flag", "--case" if fmt == "torv" else ""),
+            format=fmt,
             summary_file=regress.get("summary_file", "summary.rpt"),
             junit_file=regress.get("junit_file", ""),
             pass_regex=regress.get("pass_regex", ""),
@@ -206,15 +228,20 @@ def read_filelist(path: Path, env: dict[str, str], root: Path) -> list[Path]:
     return files
 
 
+IMPLICIT_CASE = "all"  # the only case of a project that lists none
+
+
 def case_specs(project: Project) -> list[CaseSpec]:
-    """Cases from the inline config, else from the case list file.
+    """Cases from the inline config, else from the case list file, else one case: `all`.
 
     In a list file the first column is the name; the first later column that names
     an existing file under the project root is taken as the case's source.
     """
     cfg = project.regress
     if not cfg.case_list:
-        return list(cfg.cases)
+        return list(cfg.cases) or [CaseSpec(
+            name=IMPLICIT_CASE,
+            description=f"The project's whole regression, run as one command: {' '.join(cfg.cmd)}")]
     specs = []
     for raw in (project.root / cfg.case_list).read_text().splitlines():
         line = raw.strip()

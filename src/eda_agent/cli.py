@@ -1,10 +1,16 @@
 """Command line entry point.
 
+    eda-agent init ~/project/mydesign --out projects/mydesign.toml       (draft a project config)
+    eda-agent doctor --project projects/mydesign.toml                   (is everything there?)
+    eda-agent check  --project projects/torv.toml [--full]              (fixed lint/regress[/synth] task)
     eda-agent run --project projects/torv.toml "Lint the design and run the smoke case"
     eda-agent run --provider deepseek --review I2 --project projects/torv.toml "..."
     eda-agent review <run_id> --review I3 --project projects/torv.toml   (review a finished run)
     eda-agent approve <run_id>                                          (human gate)
     eda-agent reject <run_id> --reason "..."
+
+--project may be left out when the current directory (or a parent) has eda-agent.toml.
+Personal defaults (provider, model, effort, review) live in ~/.config/eda-agent/config.toml.
 """
 from __future__ import annotations
 
@@ -12,6 +18,7 @@ import argparse
 import asyncio
 import json
 import sys
+import tomllib
 from dataclasses import asdict
 from datetime import datetime
 from importlib.resources import files
@@ -24,6 +31,7 @@ from .agent.models import AnthropicAdapter, OpenAICompatAdapter
 from .agent.receipt import build_receipt, write_receipt
 from .agent.reviewer import LEVELS, load_trace, model_review, rules_review
 from .core.project import load_project, regress_cases
+from .core.settings import PROJECT_FILE, find_project, user_defaults
 
 DEFAULT_MODELS = {"anthropic": "claude-opus-5-5", "deepseek": "deepseek-v4-pro"}
 # An I3 reviewer must not be the author's model; with only one vendor available, the
@@ -35,12 +43,28 @@ I3_ALTERNATIVE = {"deepseek-v4-pro": "deepseek-v4-flash", "deepseek-v4-flash": "
 DEFAULT_PROMPT = "system.v2"  # v2 (M2): the timing rule; system.v1 stays loadable by name
 REVIEW_PROMPT = "reviewer.v1"
 REVIEW_CHOICES = ("none", "rules", *LEVELS)
+PRESETS = "presets.v1"  # fixed tasks for `eda-agent check`
 
 
 def load_prompt(name: str) -> str:
     if name.endswith(".md"):
         return Path(name).read_text(encoding="utf-8").strip()
     return (files("eda_agent") / "prompts" / f"{name}.md").read_text(encoding="utf-8").strip()
+
+
+def load_preset(name: str) -> str:
+    data = tomllib.loads((files("eda_agent") / "prompts" / f"{PRESETS}.toml").read_text(encoding="utf-8"))
+    return data[name].strip()
+
+
+def resolve_project(given: str | None) -> str:
+    """--project, else eda-agent.toml in the current directory or a parent."""
+    if given:
+        return given
+    found = find_project()
+    if not found:
+        raise SystemExit(f"error: no --project given and no {PROJECT_FILE} in this directory or its parents")
+    return str(found)
 
 
 def make_model(provider: str, model: str, effort: str):
@@ -120,6 +144,8 @@ async def _run(args: argparse.Namespace) -> int:
         receipt = build_receipt(report, run_id=run_id, task=args.task, provider=args.provider,
                                 project=project.name, all_cases=regress_cases(project), trace=str(trace),
                                 prompt=args.prompt)
+        if getattr(args, "preset", None):
+            receipt["preset"] = f"{args.preset}@{PRESETS}"
         if args.review != "none":
             try:
                 receipt["reviews"] = await run_reviews(args, receipt, trace, tools, execute)
@@ -178,6 +204,62 @@ def _decide(args: argparse.Namespace, decision: str) -> int:
     return 0
 
 
+def _init(args: argparse.Namespace) -> int:
+    from .onboard.doctor import diagnose
+    from .onboard.init import write_draft
+    design = Path(args.design_dir).expanduser()
+    out = Path(args.out or f"projects/{design.resolve().name}.toml")
+    try:
+        path, det = write_draft(design, out, f"{datetime.now():%Y-%m-%d}", env_script=args.env_script,
+                                run_fusesoc=not args.no_fusesoc, force=args.force)
+    except FileExistsError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    print(f"draft written: {path}")
+    confirm = [f"[{s}] {k}" for s, d in (("lint", det.lint), ("regress", det.regress), ("flow", det.flow))
+               for k, g in d.items() if g.confirm]
+    if confirm:
+        print("check these first: " + ", ".join(confirm))
+    for n in det.notes:
+        print(f"note: {n}")
+    print("\nprobe (doctor on the draft):")
+    checks = diagnose(path)
+    _print_checks(checks)
+    print(f"\nnext: read {path}, fix what is marked, then: eda-agent doctor --project {path}")
+    return 0
+
+
+def _print_checks(checks) -> None:
+    mark = {"ok": "ok  ", "warn": "WARN", "fail": "FAIL"}
+    for c in checks:
+        print(f"  {mark[c.status]} {c.name}: {c.detail}")
+
+
+def _doctor(args: argparse.Namespace) -> int:
+    from .onboard.doctor import diagnose
+    checks = diagnose(Path(resolve_project(args.project)), provider=args.provider)
+    _print_checks(checks)
+    failed = sum(c.status == "fail" for c in checks)
+    print(f"\n{failed} problem(s)" if failed else "\nall checks passed")
+    return 1 if failed else 0
+
+
+def _add_run_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--project", help=f"project config (default: {PROJECT_FILE} here or in a parent directory)")
+    p.add_argument("--provider", default="anthropic", choices=sorted(DEFAULT_MODELS))
+    p.add_argument("--model", help="defaults per provider: " + ", ".join(
+        f"{prov}={m}" for prov, m in DEFAULT_MODELS.items()))
+    p.add_argument("--effort", default="high", choices=["low", "medium", "high", "xhigh", "max"])
+    p.add_argument("--prompt", default=DEFAULT_PROMPT,
+                   help=f"prompt name in eda_agent/prompts/, or a path to a .md file (default {DEFAULT_PROMPT})")
+    p.add_argument("--max-turns", type=int, default=30)
+    p.add_argument("--max-tool-calls", type=int, default=60)
+    p.add_argument("--trace")
+    p.add_argument("--no-approval", action="store_true",
+                   help="end with status done instead of awaiting_approval (no human gate)")
+    _add_review_args(p, "none")
+
+
 def _add_review_args(p: argparse.ArgumentParser, default: str) -> None:
     p.add_argument("--review", default=default, choices=REVIEW_CHOICES,
                    help="independent review after the run: rules (no model) or I0-I3 (rules + a model "
@@ -195,25 +277,39 @@ def main() -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
     run = sub.add_parser("run", help="run one task against a project")
     run.add_argument("task")
-    run.add_argument("--project", required=True)
-    run.add_argument("--provider", default="anthropic", choices=sorted(DEFAULT_MODELS))
-    run.add_argument("--model", help="defaults per provider: " + ", ".join(
-        f"{p}={m}" for p, m in DEFAULT_MODELS.items()))
-    run.add_argument("--effort", default="high", choices=["low", "medium", "high", "xhigh", "max"])
-    run.add_argument("--prompt", default=DEFAULT_PROMPT,
-                     help=f"prompt name in eda_agent/prompts/, or a path to a .md file (default {DEFAULT_PROMPT})")
-    run.add_argument("--max-turns", type=int, default=30)
-    run.add_argument("--max-tool-calls", type=int, default=60)
-    run.add_argument("--trace")
-    run.add_argument("--no-approval", action="store_true",
-                     help="end with status done instead of awaiting_approval (no human gate)")
-    _add_review_args(run, "none")
+    _add_run_args(run)
+
+    check = sub.add_parser("check", help="run a fixed task: lint + one regression case (--full: whole "
+                                         "regression + synth)")
+    check.add_argument("--full", action="store_true")
+    _add_run_args(check)
+
+    init = sub.add_parser("init", help="draft a project config from a design repository")
+    init.add_argument("design_dir")
+    init.add_argument("--out", help="where to write the draft (default projects/<dir name>.toml)")
+    init.add_argument("--env-script", help="script to source before running the design's tools")
+    init.add_argument("--no-fusesoc", action="store_true", help="do not run fusesoc --setup")
+    init.add_argument("--force", action="store_true", help="overwrite an existing draft")
+
+    doc = sub.add_parser("doctor", help="check that a project's tools, files and keys are all there")
+    doc.add_argument("--project", help=f"project config (default: {PROJECT_FILE} here or in a parent)")
+    doc.add_argument("--provider", choices=sorted(DEFAULT_MODELS), help="also require this provider's API key")
 
     rev = sub.add_parser("review", help="review a finished run (writes into its receipt)")
     rev.add_argument("run_id")
-    rev.add_argument("--project", required=True)
+    rev.add_argument("--project", help=f"project config (default: {PROJECT_FILE} here or in a parent)")
     rev.add_argument("--runs-dir", default="runs")
     _add_review_args(rev, "I2")
+
+    # Personal defaults apply to run and check; anything on the command line wins.
+    try:
+        defaults = user_defaults()
+    except ValueError as e:
+        raise SystemExit(f"error: {e}")
+    run.set_defaults(**defaults)
+    check.set_defaults(**defaults)
+    if "provider" in defaults:
+        doc.set_defaults(provider=defaults["provider"])
 
     for name, help_text in (("approve", "approve a run awaiting approval"), ("reject", "reject a run")):
         p = sub.add_parser(name, help=help_text)
@@ -226,7 +322,16 @@ def main() -> None:
                            help="approve a run the evidence gate rejected (needs --reason)")
 
     args = ap.parse_args()
-    if args.cmd == "run":
+    if args.cmd == "init":
+        sys.exit(_init(args))
+    if args.cmd == "doctor":
+        sys.exit(_doctor(args))
+    if args.cmd == "check":
+        args.preset = "full" if args.full else "check"
+        args.task = load_preset(args.preset)
+    if args.cmd in ("run", "check", "review"):
+        args.project = resolve_project(args.project)
+    if args.cmd in ("run", "check"):
         sys.exit(asyncio.run(_run(args)))
     if args.cmd == "review":
         sys.exit(asyncio.run(_review(args)))
