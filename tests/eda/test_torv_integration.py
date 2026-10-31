@@ -31,7 +31,7 @@ async def test_mcp_lint_and_regress_round_trip():
     ]
     model = ScriptedAdapter(script)
     async with mcp_tools(sys.executable, ["-m", "eda_agent.server.mcp_server", "--project", str(PROJECT)]) as (tools, ex, instructions):
-        assert {t.name for t in tools} == {"lint", "list_regress_cases", "describe_case", "regress"}
+        assert {"lint", "list_regress_cases", "describe_case", "regress"} <= {t.name for t in tools}
         assert "claim_scope" in instructions
         report = await run_agent(model, tools, ex, "check torv", "sys")
 

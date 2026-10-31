@@ -1,0 +1,65 @@
+ time 1ns
+ capacitance 1pF
+ resistance 1kohm
+ voltage 1v
+ current 1uA
+ power 1pW
+ distance 1um
+EDA_CLOCK CLK 10.000000 hclk
+Startpoint: _27317_ (rising edge-triggered flip-flop clocked by CLK)
+Endpoint: d_htrans[1] (output port clocked by CLK)
+Path Group: CLK
+Path Type: max
+
+Fanout      Cap     Slew    Delay     Time   Description
+---------------------------------------------------------------------------------
+                   0.000    0.000    0.000   clock CLK (rise edge)
+                            0.000    0.000   clock network delay (ideal)
+                   0.000    0.000    0.000 ^ _27317_/CLK (sg13g2_dfrbpq_1)
+     4    0.010    0.078    0.271    0.271 ^ _27317_/Q (sg13g2_dfrbpq_1)
+     5    0.021    0.293    0.324    0.595 ^ _12857_/Y (sg13g2_nor2b_1)
+    10    0.044    0.292    0.376    0.971 ^ _12858_/X (sg13g2_buf_1)
+     3    0.008    0.081    0.354    1.325 v _13002_/X (sg13g2_mux2_1)
+     8    0.025    0.587    0.512    1.838 ^ _13004_/Y (sg13g2_a221oi_1)
+     3    0.011    0.268    0.343    2.181 ^ _13005_/Y (sg13g2_xnor2_1)
+     2    0.006    0.065    0.219    2.399 ^ _13011_/X (sg13g2_and2_1)
+     1    0.003    0.111    0.128    2.528 v _13012_/Y (sg13g2_nand3_1)
+     4    0.014    0.263    0.264    2.792 ^ _13018_/Y (sg13g2_o21ai_1)
+     3    0.011    0.183    0.247    3.039 v _13023_/Y (sg13g2_a221oi_1)
+     2    0.008    0.193    0.230    3.268 ^ _13032_/Y (sg13g2_o21ai_1)
+     2    0.005    0.100    0.134    3.402 v _13038_/Y (sg13g2_nand2_1)
+     3    0.009    0.148    0.154    3.557 ^ _13039_/Y (sg13g2_nor2_1)
+     4    0.014    0.108    0.250    3.807 ^ _13060_/X (sg13g2_a21o_1)
+     2    0.008    0.115    0.158    3.965 v _13070_/Y (sg13g2_a21oi_1)
+     2    0.008    0.177    0.214    4.178 ^ _13077_/Y (sg13g2_o21ai_1)
+     1    0.003    0.080    0.088    4.266 v _13078_/Y (sg13g2_a21oi_1)
+     3    0.010    0.180    0.180    4.446 ^ _13079_/Y (sg13g2_a21oi_1)
+     2    0.008    0.077    0.241    4.687 ^ _13083_/X (sg13g2_a21o_1)
+     2    0.008    0.120    0.137    4.823 v _13090_/Y (sg13g2_a21oi_1)
+     2    0.006    0.153    0.101    4.924 ^ _13105_/Y (sg13g2_o21ai_1)
+     2    0.005    0.124    0.183    5.108 v _13106_/Y (sg13g2_nand3_1)
+     1    0.005    0.154    0.100    5.208 ^ _13107_/Y (sg13g2_o21ai_1)
+     5    0.061    0.806    0.688    5.895 ^ _13113_/Y (sg13g2_xnor2_1)
+     5    0.014    0.126    0.426    6.322 ^ _13611_/X (sg13g2_a21o_1)
+     1    0.003    0.095    0.105    6.426 v _13615_/Y (sg13g2_nand2_1)
+     2    0.053    0.702    0.575    7.002 ^ _13616_/Y (sg13g2_a21oi_1)
+                   0.702    0.000    7.002 ^ d_htrans[1] (out)
+                                     7.002   data arrival time
+
+                   0.000   10.000   10.000   clock CLK (rise edge)
+                            0.000   10.000   clock network delay (ideal)
+                           -0.300    9.700   clock uncertainty
+                            0.000    9.700   clock reconvergence pessimism
+                           -2.000    7.700   output external delay
+                                     7.700   data required time
+---------------------------------------------------------------------------------
+                                     7.700   data required time
+                                    -7.002   data arrival time
+---------------------------------------------------------------------------------
+                                     0.698   slack (MET)
+
+
+worst slack max 0.698
+tns max 0.000
+worst slack min 0.291
+tns min 0.000

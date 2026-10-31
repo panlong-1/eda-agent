@@ -1,0 +1,15 @@
+ time 1ns
+ capacitance 1pF
+ resistance 1kohm
+ voltage 1v
+ current 1uA
+ power 1pW
+ distance 1um
+EDA_CLOCK CLK 10.000000 hclk
+Warning: There are 169 unconstrained endpoints.
+  d_haddr[0]
+  d_haddr[10]
+  d_hwdata[9]
+  s_hwdata[9]
+  s_hwrite
+Warning: There is 1 combinational loop in the design.

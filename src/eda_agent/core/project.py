@@ -65,6 +65,41 @@ class RegressConfig:
 
 
 @dataclass(frozen=True)
+class FlowConfig:
+    """Synthesis and timing setup ([flow]). Paths are relative to the project root unless
+    absolute; ${VAR}s (e.g. ${PDK_ROOT}) are expanded from the project environment."""
+    top: str
+    sdc: str
+    clock_port: str
+    clock_period: float              # ns; also given to the SDC as $::env(CLOCK_PERIOD)
+    liberty: str                     # the library synthesis maps to
+    image: str                       # container image that holds yosys and sta
+    pdk: str = ""
+    pdk_root: str = "${PDK_ROOT}"    # mounted read-only into the container
+    files: tuple[str, ...] = ()
+    filelists: tuple[str, ...] = ()
+    include_dirs: tuple[str, ...] = ()
+    defines: tuple[str, ...] = ()
+    frontend: str = "slang"          # slang (SystemVerilog plugin) | verilog (read_verilog -sv)
+    synth_flags: tuple[str, ...] = ()
+    dont_use_file: str = ""          # one cell name per line, kept out of mapping
+    tie_hi: str = ""                 # cell/pin, e.g. sg13g2_tiehi/L_HI
+    tie_lo: str = ""
+    buffer: str = ""                 # cell/in/out, for wires joined to ports
+    abc_driving_cell: str = ""       # what ABC assumes drives its inputs; enables fanout buffering
+    abc_load: float = 0.0
+    # corner name -> Liberty file; STA runs on each, the worst one decides. Default: liberty only.
+    corners: dict = field(default_factory=dict, hash=False, compare=False)
+    timeout_s: int = 1800
+
+    def __post_init__(self) -> None:
+        if self.frontend not in ("slang", "verilog"):
+            raise ValueError(f"unknown flow frontend {self.frontend!r}; use slang or verilog")
+        if self.clock_period <= 0:
+            raise ValueError("flow clock_period must be positive (ns)")
+
+
+@dataclass(frozen=True)
 class Project:
     name: str
     root: Path
@@ -75,6 +110,19 @@ class Project:
     # tool name -> command that prints its version; recorded in every result that ran it
     versions: dict = field(default_factory=dict, hash=False, compare=False)
     allowed_commands: tuple[str, ...] = ()
+    allowed_images: tuple[str, ...] = ()
+    flow: FlowConfig | None = None   # None: synth and check_sdc refuse (no [flow] section)
+
+
+def _flow(data: dict | None) -> FlowConfig | None:
+    if data is None:
+        return None
+    tuples = ("files", "filelists", "include_dirs", "defines", "synth_flags")
+    known = set(FlowConfig.__dataclass_fields__)
+    unknown = set(data) - known
+    if unknown:
+        raise ValueError(f"unknown [flow] key(s) {sorted(unknown)}")
+    return FlowConfig(**{k: tuple(v) if k in tuples else v for k, v in data.items()})
 
 
 def load_project(path: str | Path) -> Project:
@@ -89,6 +137,8 @@ def load_project(path: str | Path) -> Project:
         env_defaults=data.get("env_defaults", {}),
         versions={k: tuple(v) for k, v in data.get("versions", {}).items()},
         allowed_commands=tuple(data.get("allowed_commands", ())),
+        allowed_images=tuple(data.get("allowed_images", ())),
+        flow=_flow(data.get("flow")),
         lint=LintConfig(
             top=lint["top"],
             filelists=tuple(lint.get("filelists", ())),

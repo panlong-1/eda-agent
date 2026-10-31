@@ -25,3 +25,38 @@ case_list = "regress/cases/soc.list"
 case_flag = "--case"
 summary_file = "summary.rpt"
 timeout_s = 1800
+
+# Synthesis + pre-PnR timing estimate (synth, check_sdc). Mirrors librelane/config.yaml:
+# DESIGN_NAME, VERILOG_FILES, USE_SLANG, SYNTH_MUL_BOOTH, CLOCK_PORT, CLOCK_PERIOD and the SDC.
+# The SDC is the design team's; the agent only reads it.
+[flow]
+top = "torv_cpu"
+files = [
+    "rtl/torv_addr_decode.sv", "rtl/torv_pc_unit.sv", "rtl/torv_regfile.sv", "rtl/torv_imm_gen.sv",
+    "rtl/torv_decoder.sv", "rtl/torv_alu_ctrl.sv", "rtl/torv_alu.sv", "rtl/torv_muldiv_unit.sv",
+    "rtl/torv_forwarding_unit.sv", "rtl/torv_hazard_unit.sv", "rtl/torv_lsu.sv", "rtl/torv_core.sv",
+    "rtl/torv_ahb_dport.sv", "rtl/torv_ahb_fetch.sv", "rtl/torv_cpu.sv",
+]
+include_dirs = ["rtl"]
+frontend = "slang"
+synth_flags = ["-booth"]
+sdc = "librelane/constraints.sdc"
+clock_port = "hclk"
+clock_period = 10.0
+image = "ghcr.io/librelane/librelane:3.0.16"
+pdk = "ihp-sg13g2"
+pdk_root = "${PDK_ROOT}"
+liberty = "${PDK_ROOT}/ihp-sg13g2/libs.ref/sg13g2_stdcell/lib/sg13g2_stdcell_typ_1p20V_25C.lib"
+dont_use_file = "${PDK_ROOT}/ihp-sg13g2/libs.tech/librelane/sg13g2_stdcell/synth_exclude.cells"
+tie_hi = "sg13g2_tiehi/L_HI"
+tie_lo = "sg13g2_tielo/L_LO"
+buffer = "sg13g2_buf_1/A/X"
+# LibreLane's SYNTH_DRIVING_CELL / ABC load for IHP: without them ABC does not buffer high fanout
+abc_driving_cell = "sg13g2_buf_4"
+abc_load = 6.0
+
+# Same three corners as LibreLane's STA_CORNERS for IHP SG13G2.
+[flow.corners]
+typ = "${PDK_ROOT}/ihp-sg13g2/libs.ref/sg13g2_stdcell/lib/sg13g2_stdcell_typ_1p20V_25C.lib"
+slow = "${PDK_ROOT}/ihp-sg13g2/libs.ref/sg13g2_stdcell/lib/sg13g2_stdcell_slow_1p08V_125C.lib"
+fast = "${PDK_ROOT}/ihp-sg13g2/libs.ref/sg13g2_stdcell/lib/sg13g2_stdcell_fast_1p32V_m40C.lib"
