@@ -20,11 +20,12 @@ A decision is final: a rejected run is fixed by a new run, not by approving the 
 from __future__ import annotations
 
 import getpass
-import hashlib
 import json
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+
+from ..core import hashing
 
 AWAITING = "awaiting_approval"
 # Fields left out of the decided content: what the decision itself writes, plus derived or
@@ -39,8 +40,7 @@ def _now() -> str:
 def content_sha256(receipt: dict) -> str:
     """Hash of what the person decided on: the receipt without NOT_HASHED, so it can be
     re-checked on the saved receipt."""
-    body = {k: v for k, v in receipt.items() if k not in NOT_HASHED and not k.startswith("_")}
-    return hashlib.sha256(json.dumps(body, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    return hashing.content_sha256(receipt, NOT_HASHED)
 
 
 def request_approval(receipt: dict, step: str, why: str) -> dict:

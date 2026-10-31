@@ -12,7 +12,6 @@ reason. For a mutant the reference is the unmodified design run in the same copy
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import re
@@ -21,6 +20,8 @@ from datetime import datetime
 from pathlib import Path
 
 from ..core.envelope import Diagnostic, ToolResult, artifact
+from ..core.hashing import sha256_file
+from ..core.numbers import parse_number
 from ..core.proc import check_allowed, run
 from ..core.project import PerfConfig, Project, case_specs, project_env
 from .formats.exitcode import judge_exitcode
@@ -33,10 +34,6 @@ CLAIM_SCOPE = (
 )
 
 
-def _num(text: str) -> int | float:
-    return int(text) if re.fullmatch(r"[+-]?\d+", text) else float(text)
-
-
 def parse_perf(text: str, patterns: tuple[str, ...]) -> dict[str, int | float]:
     """Named groups of every pattern, as numbers; when a line repeats, the last one counts."""
     out: dict[str, int | float] = {}
@@ -45,7 +42,7 @@ def parse_perf(text: str, patterns: tuple[str, ...]) -> dict[str, int | float]:
             for k, v in m.groupdict().items():
                 if v is not None:
                     try:
-                        out[k] = _num(v)
+                        out[k] = parse_number(v)
                     except ValueError:
                         pass
     return out
@@ -91,11 +88,6 @@ def compare(values: dict[str, dict], reference: dict[str, float], cfg: PerfConfi
 def load_baseline(path: str | Path) -> dict | None:
     p = Path(path)
     return json.loads(p.read_text()) if p.is_file() else None
-
-
-def sha256(path: str | Path) -> str | None:
-    p = Path(path)
-    return hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None
 
 
 def timing_list(project: Project) -> str:
@@ -145,7 +137,7 @@ def run_perf(project: Project, cases: list[str] | None = None, log_dir: Path = L
     if baseline is not None and baseline.get("key") != cfg.key:
         baseline = None  # recorded for another number; not comparable
     scope = CLAIM_SCOPE.format(cases=", ".join(chosen), key=cfg.key,
-                               ref=f", against the approved baseline (sha256 {sha256(cfg.baseline)[:12]}…)"
+                               ref=f", against the approved baseline (sha256 {sha256_file(cfg.baseline)[:12]}…)"
                                if baseline else "; no approved baseline, so nothing is called slower")
     regress_part = [c for c in chosen if c in known]
     res = run_regress(project, regress_part, log_dir=log_dir) if regress_part else \
@@ -195,7 +187,7 @@ def run_perf(project: Project, cases: list[str] | None = None, log_dir: Path = L
         metrics={"key": cfg.key, "lower_is_better": cfg.lower_is_better, "cases": good,
                  "comparison": comparison, "slower": slower, "faster": faster,
                  "passed_cases": sorted(good), "failed_cases": sorted(failed),
-                 "baseline_sha256": sha256(cfg.baseline) if baseline else None,
+                 "baseline_sha256": sha256_file(cfg.baseline) if baseline else None,
                  "baseline_by": baseline.get("recorded_by") if baseline else None,
                  "baseline_recorded_at": baseline.get("recorded_at") if baseline else None,
                  "baseline_reason": baseline.get("reason") if baseline else None,
@@ -249,7 +241,7 @@ def record_baseline(project: Project, source: Path, by: str, reason: str = "", t
              "recorded_at": datetime.now().astimezone().isoformat(timespec="seconds"),
              "reason": reason, "loosened": loosened,
              "justified_by": justified_by,  # e.g. the run/receipt of the functional fix that costs cycles
-             "source": {"path": str(source), "sha256": sha256(source)}}
+             "source": {"path": str(source), "sha256": sha256_file(source)}}
     history = (old or {}).get("history", [])
     if old:
         history = [*history, {k: v for k, v in old.items() if k != "history"}]

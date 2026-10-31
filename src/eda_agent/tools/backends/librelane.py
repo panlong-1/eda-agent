@@ -6,11 +6,11 @@ names). Runs locally in the LibreLane container image without network.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from pathlib import Path
 
+from ...core.hashing import sha256_file
 from ...core.pnr import NEVER_OVERRIDE
 from ...core.proc import docker_command
 from ..reports.librelane import read_run as _read_run
@@ -161,8 +161,7 @@ def lineage(run: Path) -> dict:
 
     def entry(path: str) -> dict:
         if path not in cache:
-            p = Path(path)
-            cache[path] = hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None
+            cache[path] = sha256_file(path)
         try:
             shown = str(Path(path).relative_to(run))
         except ValueError:

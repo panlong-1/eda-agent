@@ -27,7 +27,7 @@ from dataclasses import replace
 from pathlib import Path
 from queue import Queue
 
-from ..core.envelope import Diagnostic, ToolResult, artifact
+from ..core.envelope import Diagnostic, ToolResult, artifact, not_configured
 from ..core.proc import check_allowed, run
 from ..core.project import Project, case_specs, project_env
 from .formats.exitcode import judge_exitcode
@@ -43,12 +43,12 @@ _KIND_PERF = re.compile(r"kind\s*=\s*perf\b", re.I)
 
 def _refuse(tool: str, project: Project) -> ToolResult | None:
     if project.tests is None:
-        return ToolResult(tool, "error", "E0", "Nothing was written or run.", error_class="not_configured",
-                          summary=f"project '{project.name}' has no [tests] section (run = command that runs one "
-                                  "test file, with {file})")
+        return not_configured(tool, "E0", "Nothing was written or run.",
+                              f"project '{project.name}' has no [tests] section (run = command that runs one "
+                              "test file, with {file})")
     if project.mutation is None:
-        return ToolResult(tool, "error", "E0", "Nothing was written or run.", error_class="not_configured",
-                          summary=f"project '{project.name}' has no [mutation] section")
+        return not_configured(tool, "E0", "Nothing was written or run.",
+                              f"project '{project.name}' has no [mutation] section")
     return None
 
 

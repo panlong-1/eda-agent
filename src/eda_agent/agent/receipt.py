@@ -17,7 +17,7 @@ from .loop import RunReport
 from . import receipt_lineage
 from .levels import levels_record
 from .receipt_tables import with_trace_data
-from .receipt_view import (render_data_md, render_html, render_narrative_md, render_summary_md, static_linker,
+from .receipt_view import (md_cell, render_data_md, render_html, render_narrative_md, render_summary_md, static_linker,
                            summarize)
 from .sources import Sources, project_roots
 
@@ -143,11 +143,6 @@ def _flow(result: dict) -> dict:
     return {}
 
 
-def _cell(text: str) -> str:
-    """A Markdown table cell: '|' escaped (GFM honours it inside code spans too), one line."""
-    return " ".join(str(text).split()).replace("|", "\\|")
-
-
 def render_markdown(r: dict) -> str:
     """The review summary, the model-written summary if there is one, the data tables; then the
     full receipt (details) and the long lists."""
@@ -181,8 +176,8 @@ def render_details(r: dict) -> str:
     ]
     for c in r["checks_run"]:
         summary = c["summary"].splitlines()[0] if c["summary"] else ""
-        out.append(f"| {_cell(c['tool'])} | `{_cell(json.dumps(c['args']))}` | {_cell(c['status'])} "
-                   f"| {_cell(c['evidence_level'])} | {_cell(summary)} |")
+        out.append(f"| {md_cell(c['tool'])} | `{md_cell(json.dumps(c['args']))}` | {md_cell(c['status'])} "
+                   f"| {md_cell(c['evidence_level'])} | {md_cell(summary)} |")
     for c in r["checks_run"]:
         out += ["", f"**{c['tool']} {json.dumps(c['args'])}** claim scope: {c['claim_scope']}"]
         out += [f"- artifact `{a['path']}` sha256 `{a['sha256']}`" for a in c["artifacts"]]

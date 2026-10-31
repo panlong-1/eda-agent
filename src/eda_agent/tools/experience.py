@@ -18,7 +18,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ..core.project import Project
-from .backends.base import sha256_file
+from ..core.hashing import sha256_file
 
 RUNS_FILE = "eda_agent_runs.jsonl"
 SUMMARY_FILE = "summary.json"

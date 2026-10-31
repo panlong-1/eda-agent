@@ -11,15 +11,15 @@ The design checkout and the PDK are mounted read-only; only this run's work dire
 """
 from __future__ import annotations
 
-import hashlib
 import json
-import math
 import os
 import re
 from datetime import datetime
 from pathlib import Path
 
-from ..core.envelope import Diagnostic, ToolResult, artifact
+from ..core.envelope import Diagnostic, ToolResult, artifact, not_configured
+from ..core.hashing import sha256_file
+from ..core.numbers import parse_float
 from ..core.proc import docker_command, image_digest, run
 from ..core.project import FlowConfig, Project, expand_vars, project_env, read_command_file, read_filelist
 from .lint import source_path
@@ -65,10 +65,6 @@ _CHECK_WARN = re.compile(r"^Warning: (There (?:is|are) \d+ .*)$", re.M)
 _YOSYS_ERROR = re.compile(r"^(?:ERROR|error): (.*)$|^\S+:\d+:\d+: error: (.*)$", re.M)
 _PROBLEMS = re.compile(r"Found and reported (\d+) problems")
 _LATCHES = re.compile(r"^(\d+) objects?\.", re.M)
-
-
-def sha256_file(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 class _Setup:
@@ -193,17 +189,9 @@ def sta_script(setup: _Setup, work: Path, liberty: Path, check_only: bool = Fals
     ]) + "\n"
 
 
-def _num(text: str) -> float | None:
-    try:
-        value = float(text)
-    except ValueError:
-        return None
-    return None if math.isinf(value) else value  # INF: no constrained path
-
-
 def parse_sta(text: str) -> dict:
-    worst = {k: _num(v) for k, v in _WORST.findall(text)}
-    tns = {k: _num(v) for k, v in _TNS.findall(text)}
+    worst = {k: parse_float(v) for k, v in _WORST.findall(text)}
+    tns = {k: parse_float(v) for k, v in _TNS.findall(text)}
     path = {}
     if (s := _STARTPOINT.search(text)) and (e := _ENDPOINT.search(text)):
         slack = _SLACK.search(text)
@@ -217,7 +205,7 @@ def parse_sta(text: str) -> dict:
         "setup_wns": worst.get("max"), "setup_tns": tns.get("max"),
         "hold_wns": worst.get("min"), "hold_tns": tns.get("min"),
         "worst_path": path, "time_unit": unit,
-        "clocks": [{"name": n, "period": _num(p), "sources": s.split()} for n, p, s in _CLOCK.findall(text)],
+        "clocks": [{"name": n, "period": parse_float(p), "sources": s.split()} for n, p, s in _CLOCK.findall(text)],
     }
 
 
@@ -231,7 +219,7 @@ def parse_check(text: str) -> dict:
     unit = _TIME_UNIT.search(text)
     return {"unconstrained_endpoints": count, "unconstrained": unconstrained, "other_warnings": warnings,
             "time_unit": re.sub(r"^1(?=[a-z])", "", unit[1]) if unit else "",
-            "clocks": [{"name": n, "period": _num(p), "sources": s.split()} for n, p, s in _CLOCK.findall(text)]}
+            "clocks": [{"name": n, "period": parse_float(p), "sources": s.split()} for n, p, s in _CLOCK.findall(text)]}
 
 
 def parse_stat(stat: dict, top: str) -> dict:
@@ -265,10 +253,9 @@ def _work_dir(project: Project, base: Path, kind: str) -> Path:
 
 def _refuse(tool: str, level: str, project: Project) -> ToolResult | None:
     if project.flow is None:
-        return ToolResult(tool, "error", level, "Nothing was synthesized or timed.",
-                          summary=f"project '{project.name}' has no [flow] section (top, sdc, clock_port, "
-                                  "clock_period, liberty, image): synthesis and timing are not set up for it",
-                          error_class="not_configured")
+        return not_configured(tool, level, "Nothing was synthesized or timed.",
+                              f"project '{project.name}' has no [flow] section (top, sdc, clock_port, "
+                              "clock_period, liberty, image): synthesis and timing are not set up for it")
     return None
 
 

@@ -21,7 +21,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..core.categories import CATEGORIES, FORBIDDEN_KEYS
-from ..core.snapshot import sha256_path
+from ..core.hashing import sha256_file
 
 ROLES = ("rtl", "rtl_manifest", "netlist", "sdc", "constraints", "waivers", "library", "report", "patterns", "spef", "sdf",
          "vcd", "saif", "def", "gds", "other")
@@ -75,7 +75,7 @@ def validate(res, base: Path | None = None) -> list[str]:
                 problems.append(f"{side} role {it.get('role')!r} unknown (known: {', '.join(ROLES)})")
             p = Path(it["path"])
             p = p if p.is_absolute() or base is None else base / p
-            real = sha256_path(p)
+            real = sha256_file(p)
             if it.get("sha256") and real and it["sha256"] != real:
                 problems.append(f"{side} {it['path']}: sha256 given by the plug-in does not match the file")
             if side == "outputs" and real is None:
@@ -91,5 +91,5 @@ def files_with_hashes(res: dict, base: Path) -> dict:
         for it in res.get(side) or []:
             p = Path(it["path"])
             p = p if p.is_absolute() else base / p
-            out[side].append({"path": str(p), "role": it.get("role", "other"), "sha256": sha256_path(p)})
+            out[side].append({"path": str(p), "role": it.get("role", "other"), "sha256": sha256_file(p)})
     return out

@@ -38,6 +38,7 @@ import re
 from dataclasses import asdict, dataclass, field
 
 from ..core.envelope import EVIDENCE_LEVELS
+from ..core.numbers import level_rank
 
 # Level a passing result must reach before the report may use strong claim words.
 STRONG_CLAIM_MIN_LEVEL = "E3"
@@ -174,10 +175,6 @@ class GateDecision:
         return asdict(self)
 
 
-def _rank(level: str) -> int:
-    return EVIDENCE_LEVELS.index(level) if level in EVIDENCE_LEVELS else -1
-
-
 def split_residual(report: str) -> tuple[str, str]:
     """(claims part, residual-risk part); the second is empty when there is no such heading."""
     m = RESIDUAL_HEADING.search(report)
@@ -237,7 +234,7 @@ def check_strength(claims: str, envelopes: list[dict]) -> list[str]:
               and r.get("evidence_level") in FUNCTIONAL_LEVELS]
     subjects = sorted({s for r in strong
                        for s in [r.get("tool", ""), *(r.get("metrics") or {}).get("passed_cases", [])] if s})
-    best = max((r["evidence_level"] for r in envelopes if r.get("status") == "pass"), key=_rank, default="")
+    best = max((r["evidence_level"] for r in envelopes if r.get("status") == "pass"), key=level_rank, default="")
     reasons = []
     for sentence in _SENTENCE.findall(claims):
         if any(_names(sentence, s) for s in subjects):
@@ -591,7 +588,7 @@ def check_report(report: str, results: list[dict]) -> GateDecision:
     """results: the parsed tool results of this run (envelopes, describe_case output, ...)."""
     envelopes = [r for r in results if r.get("evidence_level") in EVIDENCE_LEVELS]
     passing = [r["evidence_level"] for r in envelopes if r.get("status") == "pass"]
-    max_level = max(passing, key=_rank, default="")
+    max_level = max(passing, key=level_rank, default="")
     claims, residual = split_residual(report)
     reasons = (check_citations(claims, envelopes) + check_strength(claims, envelopes)
                + check_timing(claims, envelopes) + check_tests(claims, envelopes) + check_perf(claims, envelopes)

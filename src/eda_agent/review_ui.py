@@ -20,7 +20,6 @@ binaries or a file with an API-key-shaped string (agent/sources.py). Standard li
 from __future__ import annotations
 
 import hmac
-import html
 import json
 import re
 import secrets
@@ -33,7 +32,7 @@ from .agent import human_gate
 from .agent.levels import LEVELS, TITLE, assess, counts
 from .agent.receipt import write_receipt
 from .agent.receipt_tables import with_trace_data
-from .agent.receipt_view import CSS, RUN_CLASS, _badge, _level_badge, render_html
+from .agent.receipt_view import CSS, RUN_CLASS, _badge, _level_badge, e, render_html
 from .agent.sources import Refused, Sources, project_roots, split_ref
 
 RUN_ID = re.compile(r"^[A-Za-z0-9_.-]{1,200}$")
@@ -47,10 +46,6 @@ color:var(--muted);user-select:none}.ln .tx{padding-right:16px}
 """
 MAX_BODY = 64 * 1024
 OPEN = (human_gate.AWAITING, "pending")
-
-
-def e(text) -> str:
-    return html.escape(str(text), quote=True)
 
 
 class ReviewApp:

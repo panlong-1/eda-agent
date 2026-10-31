@@ -16,11 +16,11 @@ import re
 from dataclasses import dataclass, field
 
 from ..core.envelope import EVIDENCE_LEVELS
+from ..core.numbers import SEVERITIES, severity_rank, shorten
 from .human_gate import AWAITING
 from .levels import FINDING_LEVEL, LEVELS, TITLE, Issue, assess, counts, counts_line, reviewer_name, unique_reviews
 from .receipt_tables import Table, data_tables, trace_note
 
-SEVERITIES = ("high", "medium", "low", "info")
 SHORT = 220  # characters of a quote shown in the summary; the full text is in the tables and details
 
 # What each evidence level lets a reader conclude, and what it does not (envelope.py ladder).
@@ -43,11 +43,6 @@ RUN_STATUS = {"awaiting_approval": "awaiting approval", "approved": "approved", 
               "done": "done (no approval requested)", "pending": "pending (gate rejected)"}
 GENERATED = ("Written by plain code from the receipt data (no model). The tables below are the record; "
              "the full receipt is at the end.")
-
-
-def _short(text: str, n: int = SHORT) -> str:
-    text = " ".join(str(text).split())
-    return text if len(text) <= n else text[: n - 1].rstrip() + "…"
 
 
 @dataclass
@@ -78,12 +73,8 @@ def _passing_levels(r: dict) -> list[str]:
     return [lvl for lvl in reversed(EVIDENCE_LEVELS) if lvl in levels]
 
 
-def _sev_rank(sev: str) -> int:
-    return SEVERITIES.index(sev) if sev in SEVERITIES else len(SEVERITIES)
-
-
 def _review_rank(v: dict) -> tuple:
-    worst = min((_sev_rank(f["severity"]) for f in v.get("findings", [])), default=len(SEVERITIES))
+    worst = min((severity_rank(f["severity"]) for f in v.get("findings", [])), default=len(SEVERITIES))
     return (0 if v.get("verdict") == "reject" else 1, worst)
 
 
@@ -208,7 +199,7 @@ def _gate(s: Summary, r: dict) -> None:
 
 def _reviews(s: Summary, r: dict) -> None:
     for v, n in sorted(unique_reviews(r), key=lambda x: _review_rank(x[0])):
-        findings = sorted(v.get("findings", []), key=lambda f: _sev_rank(f["severity"]))
+        findings = sorted(v.get("findings", []), key=lambda f: severity_rank(f["severity"]))
         by_level = {lvl: sum(FINDING_LEVEL.get(f["severity"], "warning") == lvl for f in findings) for lvl in LEVELS}
         s.reviews.append({
             "who": reviewer_name(v) + (f" (×{n}, identical)" if n > 1 else ""),
@@ -224,15 +215,15 @@ MARK = {"fatal": "🟥 **Fatal**", "error": "🟧 **Error**", "warning": "🟨 W
 BADGE_MD = {"pass": "✅", "fail": "❌", "error": "❌", "timeout": "❌"}
 
 
-def _md(text: str) -> str:
-    """One line, safe inside a table cell."""
+def md_cell(text: str) -> str:
+    """One line, safe inside a Markdown table cell ('|' escaped; GFM honours it inside code spans too)."""
     return " ".join(str(text).split()).replace("|", "\\|")
 
 
 def _issue_md(i: Issue) -> str:
     where = " · ".join(x for x in (i.source, f"`{i.location}`" if i.location else "") if x)
-    quote = f": {_md(_short(i.quote))}" if i.quote else ""
-    return f"- {MARK[i.level]}: {_md(i.text)}{quote}" + (f" — *{where}*" if where else "")
+    quote = f": {md_cell(shorten(i.quote, SHORT))}" if i.quote else ""
+    return f"- {MARK[i.level]}: {md_cell(i.text)}{quote}" + (f" — *{where}*" if where else "")
 
 
 def _cell_text(c) -> str:
@@ -243,8 +234,8 @@ def table_md(tb: Table) -> list[str]:
     out = [f"### {tb.title}", ""]
     if tb.note:
         out += [tb.note, ""]
-    out += ["| " + " | ".join(_md(c) for c in tb.cols) + " |", "|" + "---|" * len(tb.cols)]
-    out += ["| " + " | ".join(_md(_cell_text(c)).replace("\n", "<br>") for c in row) + " |" for row in tb.rows]
+    out += ["| " + " | ".join(md_cell(c) for c in tb.cols) + " |", "|" + "---|" * len(tb.cols)]
+    out += ["| " + " | ".join(md_cell(_cell_text(c)).replace("\n", "<br>") for c in row) + " |" for row in tb.rows]
     return out + [""]
 
 
@@ -274,20 +265,20 @@ def render_summary_md(s: Summary) -> str:
     if s.checks:
         out += ["| check | result | evidence | time (s) | tool summary |", "|---|---|---|---|---|"]
         for c in s.checks:
-            name = c["tool"] + (f" `{_md(c['args'])}`" if c["args"] else "")
+            name = c["tool"] + (f" `{md_cell(c['args'])}`" if c["args"] else "")
             out.append(f"| {name} | {BADGE_MD.get(c['status'], '❔')} {c['status_text']} "
-                       f"| {c['level']} {c['level_text']} | {_secs(c.get('duration'))} | {_md(c['summary'])} |")
+                       f"| {c['level']} {c['level_text']} | {_secs(c.get('duration'))} | {md_cell(c['summary'])} |")
     else:
         out.append("- no check ran")
     out += ["", "## What the evidence allows", ""] + [f"- {x}" for x in s.evidence]
     out += ["", "## Not checked", ""] + [f"- {x}" for x in s.not_checked]
-    out += ["", "## Evidence gate", "", f"- {s.gate}"] + [f"  - {_md(x)}" for x in s.gate_reasons]
+    out += ["", "## Evidence gate", "", f"- {s.gate}"] + [f"  - {md_cell(x)}" for x in s.gate_reasons]
     out += ["", "## Reviewers", ""]
     for v in s.reviews:
         counts_text = " · ".join(f"{TITLE[k]} {n}" for k, n in v["counts"].items()) or "no findings"
         line = f"- **{v['who']}**: {v['verdict_text']} ({counts_text})"
         if v["worst"] and v["worst"]["severity"] in ("high", "medium"):
-            line += f"; most serious: [{v['worst']['severity']}] {_md(_short(v['worst']['text'], 160))}"
+            line += f"; most serious: [{v['worst']['severity']}] {md_cell(shorten(v['worst']['text'], 160))}"
         out.append(line)
     if not s.reviews:
         out.append("- no independent review was run")

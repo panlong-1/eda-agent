@@ -36,14 +36,10 @@ Neutral result (a dict; `empty_facts` lists every key with its default). Units: 
 """
 from __future__ import annotations
 
-import hashlib
 import re
 from pathlib import Path
 
-
-def sha256_file(path: Path) -> str | None:
-    p = Path(path)
-    return hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None
+from ...core.hashing import sha256_file  # noqa: F401  (adapters import it from here)
 
 
 def empty_facts(run: Path) -> dict:

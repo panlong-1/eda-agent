@@ -16,6 +16,8 @@ import json
 import re
 from dataclasses import asdict, dataclass, field
 
+from ..core.numbers import shorten
+
 LEVELS = ("fatal", "error", "warning")
 TITLE = {"fatal": "Fatal", "error": "Error", "warning": "Warning"}
 
@@ -138,11 +140,6 @@ def counts_line(c: dict) -> str:
     return " · ".join(f"{TITLE[lvl]} {c[lvl]}" for lvl in LEVELS)
 
 
-def _short(text: str, n: int = 220) -> str:
-    text = " ".join(str(text).split())
-    return text if len(text) <= n else text[: n - 1].rstrip() + "…"
-
-
 def regress_counts(summary: str, metrics: dict | None = None) -> dict:
     """Case and sub-test counts of a regress result: its metrics, else its summary line."""
     out = {}
@@ -188,7 +185,7 @@ def assess(r: dict) -> list[Issue]:
     from .human_gate import content_sha256  # human_gate uses assess() for its policy
     out: list[Issue] = []
     def add(level: str, text: str, quote: str = "", source: str = "") -> None:
-        out.append(Issue(level, text, _short(quote, 400), source))
+        out.append(Issue(level, text, shorten(quote, 400), source))
     a = r.get("approval") or {}
     if r.get("kind") == "testgen":
         _assess_testgen(r, add)

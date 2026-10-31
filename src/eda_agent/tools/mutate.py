@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import csv
 import difflib
-import hashlib
 import json
 import os
 import re
@@ -31,6 +30,7 @@ from pathlib import Path
 from queue import Queue
 
 from ..core.envelope import Diagnostic, ToolResult, artifact
+from ..core.hashing import sha256_bytes
 from ..core.proc import check_allowed, docker_available, docker_command, run
 from ..core.project import MutationConfig, Project, case_specs, project_env, project_versions
 from .lint import run_lint
@@ -234,7 +234,7 @@ def env_leaks(env: dict[str, str], root: Path) -> list[str]:
 
 def _root_state(root: Path, rel: str) -> str:
     """git HEAD + status of the root (when it is a repository) and the target file's sha256."""
-    state = hashlib.sha256((root / rel).read_bytes()).hexdigest()
+    state = sha256_bytes((root / rel).read_bytes())
     if (root / ".git").exists():
         for args in (["rev-parse", "HEAD"], ["status", "--porcelain"]):
             out = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=60)

@@ -34,7 +34,7 @@ from ..core.envelope import Diagnostic, ToolResult, artifact
 from ..core.project import Project
 from . import experience
 from .backends import Backend
-from .backends.base import sha256_file
+from ..core.hashing import sha256_file
 from .flow import _config_diff, _delta, _git, _refuse, _root_path, backend_of, runs_dir
 
 # A comment states an area effect: "-8.4% cell area", "for +3.6% area"

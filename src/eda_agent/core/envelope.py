@@ -7,10 +7,11 @@ the evidence ladder E0-E5.
 """
 from __future__ import annotations
 
-import hashlib
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Literal
+
+from .hashing import sha256_file
 
 Status = Literal["pass", "fail", "error", "timeout"]
 
@@ -54,8 +55,12 @@ class ToolResult:
         return asdict(self)
 
 
+def not_configured(tool: str, level: str, scope: str, summary: str) -> ToolResult:
+    """The refusal of a tool whose section is missing from the project config."""
+    return ToolResult(tool, "error", level, scope, summary=summary, error_class="not_configured")
+
+
 def artifact(path: str | Path) -> dict:
     """Path plus sha256, so a later reader can tell whether the file changed."""
     p = Path(path)
-    digest = hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None
-    return {"path": str(p), "sha256": digest}
+    return {"path": str(p), "sha256": sha256_file(p)}

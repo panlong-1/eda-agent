@@ -17,7 +17,8 @@ from ..core import standards
 from ..core.categories import CATEGORIES, judge, scope
 from ..core.envelope import Diagnostic, ToolResult
 from ..core.project import Project
-from ..core.snapshot import UNKNOWN, make_snapshot, sha256_path
+from ..core.hashing import sha256_file
+from ..core.snapshot import UNKNOWN, make_snapshot
 from ..plugins import choose
 from ..plugins.result import NotMine, files_with_hashes, validate
 
@@ -62,7 +63,7 @@ def _snapshot(project: Project, res: dict, files: dict, src: Path, manifest: Pat
                 snap = make_snapshot(hashes, [project.root], sdc_sha256=sdc, pdk_version=res.get("pdk_version"),
                                      tools=tools, required=("RTL",),
                                      note=f"imported report; RTL from {who} ({mf.name}, {len(hashes)} file(s))")
-                snap["rtl_manifest"] = {"path": str(mf), "sha256": sha256_path(mf), "supplied_by": who}
+                snap["rtl_manifest"] = {"path": str(mf), "sha256": sha256_file(mf), "supplied_by": who}
                 return snap
     rtl = [f["path"] for f in files["inputs"] if f["role"] == "rtl"]
     if not rtl:

@@ -15,21 +15,19 @@ unbroken. Each issue carries a level for the receipt (fatal / error / warning).
 """
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 from pathlib import Path
+
+from .hashing import sha256_file, sha256_json
 
 CURRENT, OLDER, UNKNOWN = "current", "older", "unknown"
 
 
 def _h(obj) -> str:
-    return hashlib.sha256(json.dumps(obj, sort_keys=True, default=str).encode()).hexdigest()
+    return sha256_json(obj, default=str)
 
 
-def sha256_path(path: str | Path) -> str | None:
-    p = Path(path)
-    return hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None
+sha256_path = sha256_file  # the old name, kept for callers outside this package
 
 
 def rel_to(path: str | Path, roots: list[Path]) -> str:
@@ -55,7 +53,7 @@ def make_snapshot(rtl_files: list[str] | dict, roots: list[Path], *, sdc_sha256:
     if isinstance(rtl_files, dict):
         rtl = {rel_to(f, roots): (h if state == CURRENT else None) for f, h in rtl_files.items()}
     else:
-        rtl = {rel_to(f, roots): (sha256_path(f) if state == CURRENT else None) for f in rtl_files}
+        rtl = {rel_to(f, roots): (sha256_file(f) if state == CURRENT else None) for f in rtl_files}
     design = {"rtl": rtl, "sdc_sha256": sdc_sha256, "pdk_version": pdk_version}
     full = {"design": design, "defines": sorted(defines), "include_dirs": sorted(rel_to(d, roots) for d in include_dirs),
             "flow_config_sha256": flow_config_sha256, "tools": tools or {}, "image": image}
@@ -116,7 +114,7 @@ def project_snapshot(project) -> dict:
     incs = [path(d) for d in (*project.lint.include_dirs, *(flow.include_dirs if flow else ()))]
     tools = dict(project_versions(project))
     image = image_digest(flow.image) if flow else None
-    snap = make_snapshot([str(f) for f in files], [root], sdc_sha256=sha256_path(sdc) if sdc else None,
+    snap = make_snapshot([str(f) for f in files], [root], sdc_sha256=sha256_file(sdc) if sdc else None,
                          pdk_version=pdk_version_of(path(flow.pdk_root), flow.pdk) if flow else None,
                          defines=defines, include_dirs=[str(d) for d in incs],
                          flow_config_sha256=_h(repr(flow)) if flow else None, tools=tools, image=image,

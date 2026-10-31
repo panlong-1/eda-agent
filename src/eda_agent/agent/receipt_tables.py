@@ -12,9 +12,9 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .levels import DIAG_LEVEL, FINDING_LEVEL, HOLD_MARGIN_NS, SETUP_MARGIN, TITLE
+from ..core.numbers import fmt_num, severity_rank
+from .levels import DIAG_LEVEL, FINDING_LEVEL, HOLD_MARGIN_NS, SETUP_MARGIN, TITLE, regress_counts
 
-SEVERITIES = ("high", "medium", "low", "info")
 _LOCATION = re.compile(r"[\w./-]+\.(?:sv|svh|v|vh|vhd|sdc|tcl|S|s|c|h|py|yaml|toml)(?::\d+)?(?![\w])")
 
 TT = {
@@ -101,12 +101,6 @@ def fmt_ns(x) -> str:
     return "0" if abs(x) < 0.0005 else f"{x:+.3f}"
 
 
-def _num(x) -> str:
-    if isinstance(x, float):
-        return f"{x:,.1f}" if abs(x) >= 1000 else f"{x:g}"
-    return f"{x:,}" if isinstance(x, int) else ("—" if x is None else str(x))
-
-
 def _slack_cls(x, small: float | None = HOLD_MARGIN_NS) -> str:
     """Colour only what means something, by the same rule as levels.py: negative (red), under
     the small-slack margin (orange); fine values stay plain."""
@@ -188,17 +182,6 @@ def with_trace_data(r: dict, base: Path | None = None) -> dict:
 
 # ---------------------------------------------------------------- tables
 
-def _counts_from_summary(summary: str) -> dict:
-    out = {}
-    m = re.search(r"(\d+) passed, (\d+) failed(?:, (\d+) skipped)?", summary)
-    if m:
-        out |= {"passed": int(m[1]), "failed": int(m[2]), "skipped": int(m[3] or 0)}
-    m = re.search(r"sub-tests: (\d+) passed, (\d+) failed of (\d+)", summary)
-    if m:
-        out |= {"subtests_passed": int(m[1]), "subtests_failed": int(m[2]), "subtests_total": int(m[3])}
-    return out
-
-
 def _mark(c: dict) -> str:
     return " †" if c.get("from_trace") else ""
 
@@ -210,14 +193,14 @@ def regress_tables(r: dict) -> list[Table]:
     t = Table(tt("regress"), [tt(k) for k in ("cases_asked", "run", "passed", "failed", "skipped",
                                                          "subtests", "failed_cases")])
     for c in checks:
-        m = {**_counts_from_summary(c["summary"]), **(c.get("metrics") or {})}
+        m = {**regress_counts(c["summary"]), **(c.get("metrics") or {})}
         asked = ", ".join(c["args"].get("cases", [])) or "—"
         ran = (m.get("passed", 0) + m.get("failed", 0)) if "passed" in m else "—"
         sub = (tt("sub_fmt", p=m["subtests_passed"], f=m["subtests_failed"], t=m["subtests_total"])
                if "subtests_total" in m else "—")
-        t.rows.append([asked + _mark(c), _num(ran), cell(_num(m.get("passed", "—")), "ok" if m.get("passed") else ""),
-                       cell(_num(m.get("failed", "—")), "bad" if m.get("failed") else ""),
-                       cell(_num(m.get("skipped", "—")), "warn" if m.get("skipped") else ""),
+        t.rows.append([asked + _mark(c), fmt_num(ran), cell(fmt_num(m.get("passed", "—")), "ok" if m.get("passed") else ""),
+                       cell(fmt_num(m.get("failed", "—")), "bad" if m.get("failed") else ""),
+                       cell(fmt_num(m.get("skipped", "—")), "warn" if m.get("skipped") else ""),
                        cell(sub, "bad" if m.get("subtests_failed") else ""),
                        ", ".join(m.get("failed_cases", [])) or "—"])
     return [t]
@@ -231,8 +214,8 @@ def lint_tables(r: dict) -> list[Table]:
         total = c.get("diagnostics_total") or len(diags)
         if m.get("by_code"):
             t = Table(tt("lint_by_code") + _mark(c), [tt("code"), tt("count")])
-            t.rows = [[code, _num(n)] for code, n in sorted(m["by_code"].items(), key=lambda x: -x[1])]
-            t.note = f"{_num(m.get('errors', 0))} error(s), {_num(m.get('warnings', 0))} warning(s) in all"
+            t.rows = [[code, fmt_num(n)] for code, n in sorted(m["by_code"].items(), key=lambda x: -x[1])]
+            t.note = f"{fmt_num(m.get('errors', 0))} error(s), {fmt_num(m.get('warnings', 0))} warning(s) in all"
             out.append(t)
         if diags:
             files: dict[str, list[int]] = {}
@@ -241,7 +224,7 @@ def lint_tables(r: dict) -> list[Table]:
                 f[0 if d.get("severity") == "error" else 1] += 1
             t = Table(tt("lint_by_file", n=len(diags), total=total) + _mark(c),
                       [tt("file"), tt("errors"), tt("warnings")])
-            t.rows = [[cell(f, "ref"), cell(_num(e), "bad" if e else ""), _num(w)]
+            t.rows = [[cell(f, "ref"), cell(fmt_num(e), "bad" if e else ""), fmt_num(w)]
                       for f, (e, w) in sorted(files.items(), key=lambda x: (-x[1][0], -x[1][1], x[0]))]
             out.append(t)
             t = Table(tt("lint_list", n=len(diags), total=total) + _mark(c),
@@ -259,11 +242,11 @@ def synth_tables(r: dict) -> list[Table]:
         m = {**(c.get("timing") or {}), **(c.get("metrics") or {})}
         void = (c.get("timing") or {}).get("void")
         t = Table(tt("synth") + _mark(c), [tt("item"), tt("value")])
-        rows = [("cells", _num(m.get("cells"))), ("area", _num(m.get("area"))),
-                ("seq_area", _num(m.get("sequential_area"))),
-                ("latches", cell(_num(m.get("latches")), "bad" if m.get("latches") else "")),
+        rows = [("cells", fmt_num(m.get("cells"))), ("area", fmt_num(m.get("area"))),
+                ("seq_area", fmt_num(m.get("sequential_area"))),
+                ("latches", cell(fmt_num(m.get("latches")), "bad" if m.get("latches") else "")),
                 ("liberty", m.get("liberty") or "—"),
-                ("clock", f"{m.get('clock_port') or ''} {_num(m.get('clock_period'))} ns".strip()),
+                ("clock", f"{m.get('clock_port') or ''} {fmt_num(m.get('clock_period'))} ns".strip()),
                 ("timing_met", cell(tt("yes") if m.get("timing_met") else tt("no"),
                                     "ok" if m.get("timing_met") else "bad")),
                 ("sdc", cell(c.get("sdc") or m.get("sdc") or "—", "ref")),
@@ -299,11 +282,11 @@ def synth_tables(r: dict) -> list[Table]:
                       [tt(k) for k in ("start", "end", "slack", "arrival", "corner")])
             t.rows.append([net(wp.get("startpoint", "")), net(wp.get("endpoint", "")),
                            cell(fmt_ns(wp.get("slack")), _slack_cls(wp.get("slack"), setup_small)),
-                           _num(wp.get("arrival")), wp.get("corner", "")])
+                           fmt_num(wp.get("arrival")), wp.get("corner", "")])
             out.append(t)
         if m.get("top_cell_types"):
             t = Table(tt("cell_types") + _mark(c), [tt("cell"), tt("count")], collapsed=True)
-            t.rows = [[k, _num(v)] for k, v in m["top_cell_types"].items()]
+            t.rows = [[k, fmt_num(v)] for k, v in m["top_cell_types"].items()]
             out.append(t)
     return out
 
@@ -315,12 +298,12 @@ def sdc_tables(r: dict) -> list[Table]:
         if not m:
             continue
         t = Table(tt("check_sdc") + _mark(c), [tt("clock_name"), tt("period"), tt("sources")])
-        t.rows = [[k.get("name", ""), _num(k.get("period")), ", ".join(k.get("sources", []))]
+        t.rows = [[k.get("name", ""), fmt_num(k.get("period")), ", ".join(k.get("sources", []))]
                   for k in m.get("clocks", [])]
         n = m.get("unconstrained_endpoints")
-        t.rows.append([cell(tt("unconstrained"), "k"), cell(_num(n), "bad" if n else "ok"), ""])
+        t.rows.append([cell(tt("unconstrained"), "k"), cell(fmt_num(n), "bad" if n else "ok"), ""])
         others = m.get("other_warnings") or []
-        t.rows.append([cell(tt("other_warn"), "k"), cell(_num(len(others)), "warn" if others else "ok"),
+        t.rows.append([cell(tt("other_warn"), "k"), cell(fmt_num(len(others)), "warn" if others else "ok"),
                        "; ".join(map(str, others[:5]))])
         t.rows.append([cell(tt("sdc"), "k"), cell(m.get("sdc") or "—", "ref"),
                        str(m.get("sdc_sha256") or "")[:16] + "…"])
@@ -336,16 +319,12 @@ def other_tables(r: dict) -> list[Table]:
     out = []
     for c in (c for c in r["checks_run"] if c["tool"] not in KNOWN):
         m = c.get("metrics") or {}
-        rows = [[k, _num(v) if not isinstance(v, list) else ", ".join(map(str, v[:12])) + (" …" if len(v) > 12 else "")]
+        rows = [[k, fmt_num(v) if not isinstance(v, list) else ", ".join(map(str, v[:12])) + (" …" if len(v) > 12 else "")]
                 for k, v in m.items() if isinstance(v, (int, float, str, list)) and not isinstance(v, bool)]
         rows += [[k, tt("yes") if v else tt("no")] for k, v in m.items() if isinstance(v, bool)]
         if rows:
             out.append(Table(tt("other", tool=c["tool"]) + _mark(c), [tt("item"), tt("value")], rows))
     return out
-
-
-def _rank(severity: str) -> int:
-    return SEVERITIES.index(severity) if severity in SEVERITIES else len(SEVERITIES)
 
 
 def _who(v: dict) -> str:
@@ -358,14 +337,14 @@ def findings_table(r: dict) -> list[Table]:
         for f in v.get("findings", []):
             key = " ".join(f["text"].split())
             entry = rows.setdefault(key, [f["severity"], [], f["text"]])
-            if _rank(f["severity"]) < _rank(entry[0]):
+            if severity_rank(f["severity"]) < severity_rank(entry[0]):
                 entry[0] = f["severity"]
             if _who(v) not in entry[1]:
                 entry[1].append(_who(v))
     if not r.get("reviews"):
         return []
     t = Table(tt("findings"), [tt(k) for k in ("level", "severity", "reviewer", "finding", "location")])
-    order = sorted(rows.values(), key=lambda e: _rank(e[0]))
+    order = sorted(rows.values(), key=lambda e: severity_rank(e[0]))
     for sev, who, text in order:
         found = list(dict.fromkeys(_LOCATION.findall(text)))
         locs = [x for x in found if not any(y != x and y.endswith("/" + x) for y in found)]
@@ -398,7 +377,7 @@ def cost_table(r: dict) -> list[Table]:
                 usage.get("cache_read_input_tokens", 0), wall or 0]
         for i, x in enumerate(vals):
             tot[i] += x if isinstance(x, (int, float)) else 0
-        t.rows.append([who, model or "—", *(_num(x) if x != "" else "—" for x in vals[:5]), _num(round(vals[5], 2))])
+        t.rows.append([who, model or "—", *(fmt_num(x) if x != "" else "—" for x in vals[:5]), fmt_num(round(vals[5], 2))])
 
     add(tt("author"), f"{r['provider']} / {r['model']}", r["turns"], r["tool_calls"], r.get("usage"),
         r.get("wall_s"))
@@ -412,8 +391,8 @@ def cost_table(r: dict) -> list[Table]:
     n = r.get("narrative")
     if n:
         add(tt("summary_writer"), n.get("model"), n.get("turns", 1), 0, n.get("usage"), n.get("wall_s"))
-    t.rows.append([cell(tt("total"), "k"), "", _num(tot[0]), _num(tot[1]), _num(tot[2]), _num(tot[3]),
-                   _num(tot[4]), _num(round(tot[5], 2))])
+    t.rows.append([cell(tt("total"), "k"), "", fmt_num(tot[0]), fmt_num(tot[1]), fmt_num(tot[2]), fmt_num(tot[3]),
+                   fmt_num(tot[4]), fmt_num(round(tot[5], 2))])
     return [t]
 
 

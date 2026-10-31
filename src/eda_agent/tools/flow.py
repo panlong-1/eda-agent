@@ -25,7 +25,6 @@ gate-level simulation of the routed netlist, nor power from real switching activ
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -34,13 +33,13 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from ..core.envelope import Diagnostic, ToolResult, artifact
+from ..core.envelope import Diagnostic, ToolResult, artifact, not_configured
 from ..core.proc import image_digest, run
 from ..core.snapshot import CURRENT, OLDER, compare_snapshots, make_snapshot
 from ..core.project import Project, expand_vars, project_env
 from . import experience
 from .backends import Backend, get_backend
-from .backends.base import sha256_file
+from ..core.hashing import sha256_bytes, sha256_file
 
 SIDECAR = "eda_agent_flow.json"   # written by flow_run next to the run: what the flow does not record
 LOCK = ".flow_run.lock"
@@ -207,7 +206,7 @@ def sdc_provenance(f: dict, run_dir: Path) -> dict:
                "changes": commits[:5] + [f"uncommitted: {d}" for d in dirty]}
         if (old := _git_content_before(path, f["started"])) is not None:
             # Information only: the committed SDC at run time (uncommitted edits then cannot be ruled out).
-            out["git_sha256_at_run"] = hashlib.sha256(old).hexdigest()
+            out["git_sha256_at_run"] = sha256_bytes(old)
             out["constraints_same_as_current"] = sdc_body(old) == sdc_body(path.read_bytes())
         return out
     started = datetime.fromisoformat(f["started"]).timestamp()
@@ -464,9 +463,9 @@ def resolve_run(project: Project, run_ref: str) -> Path | str:
 
 def _refuse(tool: str, project: Project) -> ToolResult | None:
     if project.pnr is None:
-        return ToolResult(tool, "error", "E4", "Nothing was read or run.",
-                          summary=f"project '{project.name}' has no [pnr] section (config = the flow's config file): "
-                                  "the RTL-to-GDS flow is not set up for it", error_class="not_configured")
+        return not_configured(tool, "E4", "Nothing was read or run.",
+                              f"project '{project.name}' has no [pnr] section (config = the flow's config file): "
+                              "the RTL-to-GDS flow is not set up for it")
     return None
 
 

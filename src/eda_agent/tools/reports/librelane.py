@@ -14,11 +14,12 @@ Where each fact comes from, most trusted first:
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from datetime import datetime
 from pathlib import Path
+
+from ...core.hashing import sha256_file
 
 _STEP_DIR = re.compile(r"^(\d+)-(.+)$")
 _RUNNING = re.compile(r"^Running '([^']+)' at", re.M)
@@ -43,10 +44,6 @@ STEP_KLAYOUT_DRC = "klayout-drc"
 STEP_LVS = "netgen-lvs"
 STEP_ANTENNA = "openroad-checkantennas"
 STEP_MANUF = "misc-reportmanufacturability"
-
-
-def sha256_file(path: Path) -> str | None:
-    return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
 
 
 def _json(path: Path) -> dict | list | None:
