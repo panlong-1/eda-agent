@@ -30,7 +30,8 @@ async def test_picorv32_lint_describe_regress():
                               "Residual risk: one firmware image; exit status and output pattern only."),
     ]
     model = ScriptedAdapter(script)
-    async with mcp_tools(sys.executable, ["-m", "eda_agent.server.mcp_server", "--project", str(PROJECT)]) as (tools, ex):
+    async with mcp_tools(sys.executable, ["-m", "eda_agent.server.mcp_server", "--project", str(PROJECT)]) as (tools, ex, instructions):
+        assert "claim_scope" in instructions
         report = await run_agent(model, tools, ex, "check picorv32", "sys")
 
     lint, described = (json.loads(r.content) for r in model.received[0])

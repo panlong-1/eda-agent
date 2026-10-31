@@ -8,8 +8,9 @@ lets an overclaim through.
   R1 citations  every (status, evidence level) pair and "N passed/failed" count the
                 report cites must come from a tool result of this run; a level named as
                 a requirement ("would need E3") is not a citation
-  R2 strength   functional-correctness words need E3+ from a passing result; with E2
-                the report may only say which cases passed
+  R2 strength   functional-correctness words need E3+ from a passing result that the
+                same sentence names (its tool or one of its cases); with E2 the report may
+                only say which cases passed
   R3 risk       the report has a residual-risk section with some content
   R4 skipped    a case the agent described but did not run is named in that section
 """
@@ -44,6 +45,7 @@ _LEVEL = re.compile(r"\b(E[0-5])\b")
 _STATUS = re.compile(r"\b(pass|fail|error|timeout)(?:ed|es|ing)?\b", re.I)
 _COUNT = re.compile(r"\b(\d+)\s*(?:/\s*\d+\s*)?(?:cases?\s+|tests?\s+)?(passed|failed)\b", re.I)
 _CLAUSE = re.compile(r"[^.!?;,。！？；，\n]+")
+_SENTENCE = re.compile(r"[^.!?。！？\n]+")
 
 
 @dataclass
@@ -103,17 +105,36 @@ def check_citations(claims: str, results: list[dict]) -> list[str]:
     return reasons
 
 
-def check_strength(claims: str, max_level: str) -> list[str]:
-    if _rank(max_level) >= _rank(STRONG_CLAIM_MIN_LEVEL):
-        return []
+def _names(text: str, subject: str) -> bool:
+    return re.search(rf"(?<![\w]){re.escape(subject)}(?![\w])", text, re.I) is not None
+
+
+def check_strength(claims: str, envelopes: list[dict]) -> list[str]:
+    """A strong word needs a passing E3+ result that its sentence names, by tool or case,
+    so E3 on one check cannot vouch for a claim about something else."""
+    strong = [r for r in envelopes if r.get("status") == "pass"
+              and _rank(r.get("evidence_level", "")) >= _rank(STRONG_CLAIM_MIN_LEVEL)]
+    subjects = sorted({s for r in strong
+                       for s in [r.get("tool", ""), *(r.get("metrics") or {}).get("passed_cases", [])] if s})
+    best = max((r["evidence_level"] for r in envelopes if r.get("status") == "pass"), key=_rank, default="")
     reasons = []
-    for clause in _CLAUSE.findall(claims):
-        m = _STRONG.search(clause)
-        if m and not _NEG.search(clause[:m.start()]):
-            reasons.append(
-                f"'{m.group(0)}' claims functional correctness, which needs {STRONG_CLAIM_MIN_LEVEL}+; "
-                f"the best passing evidence here is {max_level or 'none'}, which supports only "
-                f"'these checks/cases passed': {clause.strip()!r}")
+    for sentence in _SENTENCE.findall(claims):
+        if any(_names(sentence, s) for s in subjects):
+            continue
+        for clause in _CLAUSE.findall(sentence):
+            m = _STRONG.search(clause)
+            if not m or _NEG.search(clause[:m.start()]):
+                continue
+            if subjects:
+                reasons.append(
+                    f"'{m.group(0)}' claims functional correctness, but its sentence does not name the "
+                    f"check that reached {STRONG_CLAIM_MIN_LEVEL}+ ({', '.join(subjects)}); evidence on one "
+                    f"check does not support a claim about another: {clause.strip()!r}")
+            else:
+                reasons.append(
+                    f"'{m.group(0)}' claims functional correctness, which needs {STRONG_CLAIM_MIN_LEVEL}+; "
+                    f"the best passing evidence here is {best or 'none'}, which supports only "
+                    f"'these checks/cases passed': {clause.strip()!r}")
     return reasons
 
 
@@ -153,7 +174,7 @@ def check_report(report: str, results: list[dict]) -> GateDecision:
     passing = [r["evidence_level"] for r in envelopes if r.get("status") == "pass"]
     max_level = max(passing, key=_rank, default="")
     claims, residual = split_residual(report)
-    reasons = (check_citations(claims, envelopes) + check_strength(claims, max_level)
+    reasons = (check_citations(claims, envelopes) + check_strength(claims, envelopes)
                + check_residual(residual))
     if not reasons:  # R4 needs the residual-risk section, so it is checked once R1-R3 pass
         reasons = check_skipped(residual, results)

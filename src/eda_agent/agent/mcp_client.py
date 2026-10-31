@@ -14,11 +14,13 @@ from .models import ToolSpec
 
 @asynccontextmanager
 async def mcp_tools(command: str, args: list[str], cwd: str | None = None
-                    ) -> AsyncIterator[tuple[list[ToolSpec], Executor]]:
+                    ) -> AsyncIterator[tuple[list[ToolSpec], Executor, str]]:
+    """Yields (tool specs, executor, the server's instructions text or "")."""
     params = StdioServerParameters(command=command, args=args, cwd=cwd)
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
-            await session.initialize()
+            init = await session.initialize()
+            instructions = getattr(init, "instructions", None) or ""
             listed = await session.list_tools()
             specs = [ToolSpec(t.name, t.description or "", t.input_schema) for t in listed.tools]
 
@@ -30,4 +32,4 @@ async def mcp_tools(command: str, args: list[str], cwd: str | None = None
                     text = "\n".join(getattr(c, "text", "") for c in getattr(res, "content", []))
                 return text, bool(getattr(res, "is_error", False))
 
-            yield specs, execute
+            yield specs, execute, instructions

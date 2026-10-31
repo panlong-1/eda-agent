@@ -42,11 +42,16 @@ def test_negated_strong_word_is_a_limit_not_a_claim():
     assert check_report(report, RESULTS).passed
 
 
-def test_strong_words_allowed_with_e3_evidence():
-    report = SCOPED.replace("These three directed cases passed", "The forwarding logic is verified")
+def test_strong_words_allowed_with_e3_evidence_the_sentence_names():
+    named = SCOPED.replace("These three directed cases passed", "mutate: pass (E3); the forwarding logic is verified")
     e3 = [*RESULTS, {"tool": "mutate", "status": "pass", "evidence_level": "E3", "metrics": {}}]
-    assert not check_report(report, RESULTS).passed
-    assert check_report(report, e3).passed
+    assert not check_report(named, RESULTS).passed
+    assert check_report(named, e3).passed, check_report(named, e3).reasons
+
+    # E3 on one check does not vouch for a sentence about another.
+    unnamed = SCOPED.replace("These three directed cases passed", "The forwarding logic is verified")
+    d = check_report(unnamed, e3)
+    assert not d.passed and any("does not name the check" in r and "mutate" in r for r in d.reasons)
 
 
 def test_fabricated_citation_is_rejected():

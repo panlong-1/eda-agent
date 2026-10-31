@@ -11,6 +11,7 @@ import json
 import sys
 from dataclasses import asdict
 from datetime import datetime
+from importlib.resources import files
 from pathlib import Path
 
 from .agent.loop import Budget, run_agent
@@ -20,13 +21,15 @@ from .agent.receipt import build_receipt, write_receipt
 from .core.project import load_project, regress_cases
 
 DEFAULT_MODELS = {"anthropic": "claude-opus-5-5", "deepseek": "deepseek-v4-pro"}
-# System prompts live in <repo>/prompts/<name>.md; the name (with its version) goes into the receipt.
-PROMPT_DIR = Path(__file__).resolve().parents[2] / "prompts"
+# System prompts ship in the package (eda_agent/prompts/<name>.md); the name, with its version,
+# goes into the receipt. A path to any .md file works too, for trying a draft prompt.
 DEFAULT_PROMPT = "system.v1"
 
 
 def load_prompt(name: str) -> str:
-    return (PROMPT_DIR / f"{name}.md").read_text(encoding="utf-8").strip()
+    if name.endswith(".md"):
+        return Path(name).read_text(encoding="utf-8").strip()
+    return (files("eda_agent") / "prompts" / f"{name}.md").read_text(encoding="utf-8").strip()
 
 
 async def _run(args: argparse.Namespace) -> int:
@@ -41,7 +44,9 @@ async def _run(args: argparse.Namespace) -> int:
         model = OpenAICompatAdapter(model=model_name, effort=args.effort)
     else:
         model = AnthropicAdapter(model=model_name, effort=args.effort)
-    async with mcp_tools(sys.executable, server_args) as (tools, execute):
+    async with mcp_tools(sys.executable, server_args) as (tools, execute, instructions):
+        if instructions:  # the tool server's own rules travel with the system prompt
+            system = f"{system}\n\n## Tool server instructions\n{instructions}"
         report = await run_agent(
             model,
             tools, execute, args.task, system,
@@ -72,7 +77,7 @@ def main() -> None:
         f"{p}={m}" for p, m in DEFAULT_MODELS.items()))
     run.add_argument("--effort", default="high", choices=["low", "medium", "high", "xhigh", "max"])
     run.add_argument("--prompt", default=DEFAULT_PROMPT,
-                     help=f"system prompt name in prompts/ (default {DEFAULT_PROMPT})")
+                     help=f"prompt name in eda_agent/prompts/, or a path to a .md file (default {DEFAULT_PROMPT})")
     run.add_argument("--max-turns", type=int, default=30)
     run.add_argument("--max-tool-calls", type=int, default=60)
     run.add_argument("--trace")

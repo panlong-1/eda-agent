@@ -66,6 +66,11 @@ def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, p
     }
 
 
+def _cell(text: str) -> str:
+    """A Markdown table cell: '|' escaped (GFM honours it inside code spans too), one line."""
+    return " ".join(str(text).split()).replace("|", "\\|")
+
+
 def render_markdown(r: dict) -> str:
     gate = r["gate"]
     out = [
@@ -86,8 +91,9 @@ def render_markdown(r: dict) -> str:
         "|---|---|---|---|---|",
     ]
     for c in r["checks_run"]:
-        out.append(f"| {c['tool']} | `{json.dumps(c['args'])}` | {c['status']} | {c['evidence_level']} "
-                   f"| {c['summary'].splitlines()[0] if c['summary'] else ''} |")
+        summary = c["summary"].splitlines()[0] if c["summary"] else ""
+        out.append(f"| {_cell(c['tool'])} | `{_cell(json.dumps(c['args']))}` | {_cell(c['status'])} "
+                   f"| {_cell(c['evidence_level'])} | {_cell(summary)} |")
     for c in r["checks_run"]:
         out += ["", f"**{c['tool']} {json.dumps(c['args'])}** claim scope: {c['claim_scope']}"]
         out += [f"- artifact `{a['path']}` sha256 `{a['sha256']}`" for a in c["artifacts"]]

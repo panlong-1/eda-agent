@@ -39,7 +39,8 @@ src/eda_agent/
   cli.py                 eda-agent run ...
 projects/torv.toml       TORV rv32m SoC (format torv)
 projects/picorv32.toml   YosysHQ PicoRV32 (format exitcode + pass/fail regex)
-prompts/system.v1.md     system prompt; the name is recorded in every receipt (--prompt to change)
+src/eda_agent/prompts/system.v1.md  system prompt, shipped with the package; its name is recorded
+                         in every receipt (--prompt picks another, or a path to a draft .md)
 tests/unit/              offline and free, a few seconds
 tests/eda/               marker "eda": needs Verilator and the design checkouts
 tests/fixtures/          recorded tool output and model replies (for later tests)
@@ -114,7 +115,8 @@ results of this run. All rules are in that one file:
   named as a requirement ("that would need E3") is not a citation.
 - **R2 strength.** Words that claim functional correctness (handles, correct, verified,
   works, bug-free, … and Chinese equivalents such as 正确, 已验证) need a passing result at
-  E3 or higher. With E2 the report may only say which cases passed. A negation earlier in
+  E3 or higher, and the same sentence must name that result (its tool or a case it passed),
+  so E3 on one check cannot vouch for another. With E2 the report may only say which cases passed. A negation earlier in
   the same clause ("does not show … correct") makes it a stated limit, not a claim.
 - **R3 residual risk.** The report must have a section headed "Residual risk" with content.
 - **R4 skipped cases.** A case the agent read with `describe_case` but did not run must be
