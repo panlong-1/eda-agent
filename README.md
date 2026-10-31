@@ -40,8 +40,12 @@ src/eda_agent/
                          check_sdc: OpenSTA check_setup on the netlist (facts, E0)
     rtl_rules.py         fixed RTL rules: Verilator BLKSEQ/COMBDLY/WIDTHTRUNC/LATCH/MULTIDRIVEN
                          + a reset-polarity text scan (E0)
+    mutate.py            mutants (avl-core) of one RTL file, each run in a copy of the design
+                         against regression cases: kill matrix, survivors, perf_killed (E0)
+    perf.py              cycle counts and other testbench counters per case, against the
+                         person-approved baseline (E2); recording that baseline (CLI only)
   server/mcp_server.py   MCP server (stdio): lint / list_regress_cases / describe_case / regress /
-                         rtl_rules / synth / check_sdc
+                         rtl_rules / synth / check_sdc / perf / mutate
   agent/                 the agent runtime; reaches the tools only through MCP
     models/              base.py (ModelAdapter protocol), anthropic.py, openai_compat.py (DeepSeek),
                          scripted.py (for tests)
@@ -51,7 +55,8 @@ src/eda_agent/
     reviewer.py          independent review I0-I3 (context assembled by code) + rule-based reviewer
     human_gate.py        awaiting_approval / approve / reject, recorded in the receipt
     mcp_client.py        connects the loop to the MCP server
-  cli.py                 eda-agent init | doctor | check | run | review | approve | reject
+  cli.py                 eda-agent init | doctor | check | mutate | perf | perf-baseline | run |
+                         review | approve | reject
 projects/torv.toml       TORV rv32m SoC (format torv)
 projects/picorv32.toml   YosysHQ PicoRV32 (format exitcode + pass/fail regex)
 src/eda_agent/prompts/  system.v2.md (default; v1 kept), reviewer.v1.md, presets.v1.toml (the fixed
@@ -223,6 +228,66 @@ LibreLane's own pre-PnR STA per corner. A project without `[flow]` (PicoRV32 tod
 clean `not_configured` refusal. Containers come from an allowlist (`ghcr.io/librelane/librelane`
 built in; `allowed_images` adds more) and may only start allowlisted programs.
 
+### Mutation runs: `[mutation]`
+
+`mutate` asks which small bugs the project's own regression would miss. It makes `count`
+mutants of one RTL file, each a single source-level change (an operator swapped, a branch
+forced open or shut, a register update dropped, a signal delayed one cycle, …), applies each
+alone in a copy of the design and runs the chosen regression cases on it. A mutant is
+*killed* when at least one case fails and *survives* when all pass; the result lists, per
+mutant, `file:line`, the line before → after, and which cases killed it (also as
+`kill_matrix.csv` and `report.md` in the run's work directory). Survivors are test gaps, not
+design bugs, so the level is E0: facts for the later `score_tests` step (E3).
+
+```bash
+.venv/bin/pip install -e ".[mutation]"     # avl-core, which generates the mutants
+eda-agent mutate --project projects/torv.toml --file rtl/torv_hazard_unit.sv --count 20 --confirm-full
+```
+
+- **Mutants** come from [avl-core](https://github.com/projectapheleia/avl)'s
+  `avl-mutation-testing` (MIT): sites found in the slang syntax tree, the change spliced into
+  the source, so the diff reads like a code review. avl-core uses pyslang's byte offsets as
+  string offsets, which garbles every mutant of a file with a non-ASCII character (TORV's
+  comments have `→`); `mutate` hands it an ASCII stand-in with the same byte positions and
+  carries each change back to the real file.
+- **Copies.** `[mutation] copy_exclude` lists what is not copied (build and result
+  directories) and is emptied after each mutant; `jobs` copies run in parallel. The run
+  refuses if any environment variable still points into the original checkout, and records
+  whether the checkout's git status and the target file stayed the same (`root_unchanged`).
+- **Golden first.** The unmodified design must pass the same cases in the copy; otherwise
+  nothing is judged. Each mutant is linted first: one that does not compile is `invalid`,
+  not counted as caught.
+- **Equivalent mutants.** Some changes cannot be seen from outside (reversing a port's bit
+  numbering, say). Survivors are checked with a bounded Yosys SAT miter of the mutated module
+  against the original (the same check avl-core uses, run in the `[flow]` image with slang);
+  one with no difference is `likely_equivalent` and left out of the kill rate. Module-level and
+  bounded, so neither verdict is a proof.
+- `--confirm-full` re-runs the survivors on the whole case list, so a survivor is reported as
+  missed by the entire regression, not only by the chosen cases.
+- **Slower but still right.** A self-checking test only looks at results, so a mutant that just
+  adds pipeline stalls passes everything. With a `[perf]` section, a mutant whose cases all
+  pass but whose cycle count moves (against the unmodified design in the same copy) is
+  `perf_killed`, reported apart from functional kills; the kill rate is given both ways.
+
+### Performance: `[perf]`
+
+`perf` runs regression cases and reads the counters the testbench already prints, with the
+regexes in `[perf] patterns` (named groups: `cycles`, `instr`, `ipc`, stall counts, …); `key`
+picks the number that decides slower / same / faster. Each case's output comes from the
+regression format (TORV: the case's `.sim.log`; exitcode: its log), or from `log = "...{case}..."`.
+
+```bash
+eda-agent perf --project projects/torv.toml                  # table per case, kept in runs/perf/
+eda-agent perf-baseline runs/perf/torv_<time>.json --by NAME   # a person makes it the baseline
+```
+
+"Slower" needs a reference, and like the SDC it is a human decision: the baseline
+(`projects/<name>.perf-baseline.json`, case → expected value, tolerance) is written only by
+`eda-agent perf-baseline`; no MCP tool can touch it, and `perf` records its sha256. Tightening
+is recorded as is; anything that loosens it (a case slower, a larger tolerance, a dropped case)
+needs `--allow-loosen --reason`, and the old baseline stays in its `history`. `perf` is E2:
+numbers for these programs in RTL simulation, nothing about clock frequency or other workloads.
+
 ## Evidence gate
 
 When the model ends its turn, `agent/gate.py` checks the report against the tool
@@ -250,6 +315,12 @@ results of this run. All rules are in that one file:
   timing is met, a stated frequency must match its clock period, and every WNS/TNS/slack
   number must be one the result reports (rounding allowed). If the SDC hash changes during a
   run, timing results measured under the earlier SDC are void and cannot be cited.
+
+- **R7 performance.** A performance claim (faster, slower, speed-up, "N cycles", IPC/CPI,
+  throughput, 更快/更慢/周期数 …) must name a `perf` result (or `mutate`, for a mutant) in the
+  same sentence, and its cycle, IPC/CPI and percentage numbers must be ones those results
+  report. "No performance regression" / "not slower" needs a `perf` result compared with the
+  approved baseline and slower on no case. A negation earlier in the clause makes it a limit.
 
 A rejected report goes back to the model with the reasons, at most twice; then the run
 stops with `stop_reason: gate_rejected` and `status: pending` for a human to judge. The
@@ -313,7 +384,8 @@ Ideas only, unless marked as a dependency; no code was copied.
 | [OpenAI Agents SDK](https://github.com/openai/openai-agents-python) guardrails | an output check that can stop a run and say why | our gate is plain code over this run's tool results, and sends the reasons back for a bounded number of rewrites |
 | [VerilogCoder](https://github.com/NVlabs/VerilogCoder), [MAGE](https://github.com/stable-lab/MAGE) | (planned, M3) trace a failing signal back to its drivers; debug with checkpoints | |
 | [wave-mcp](https://github.com/Tencent/wave-mcp), [wavepeek](https://github.com/kleverhq/wavepeek) | (planned, M3, dependency) read waveforms | wrapped as two diagnostic tools that report values, not causes |
-| [MCY](https://github.com/YosysHQ/mcy) | (planned, M2.5, dependency) mutants to score generated tests | |
+| [avl-core](https://github.com/projectapheleia/avl) | (dependency, `[mutation]` extra) source-level SystemVerilog mutants from the slang syntax tree; its Yosys miter for equivalent mutants | only its generator: we run the project's own regression per mutant in a copy (avl grades cocotb only), lint each mutant, and work around its byte/character offset bug |
+| [MCY](https://github.com/YosysHQ/mcy) | considered for M2.5 and kept as an alternative | it mutates the synthesized netlist, so a mutant is not a readable RTL diff and the RTL regression cannot run it as is |
 | [LibreLane](https://github.com/librelane/librelane) | (dependency) its container image with Yosys and OpenSTA; its ABC script, driving cell and corners for IHP SG13G2 | we run only synthesis + pre-PnR STA, and record the SDC hash and image digest in an envelope |
 | [mcp-rtl-review](https://github.com/zesun33/mcp-rtl-review) | deterministic RTL review rules (blocking assignments, reset polarity, width truncation) as a reviewer without an LLM | it walks an AST; our rules come from Verilator's own warnings plus one text scan; findings feed the receipt next to a model reviewer |
 | [Agent-as-a-Judge](https://github.com/metauto-ai/agent-as-a-judge) | a judge that uses tools to check the work instead of reading the author's account | the I2/I3 reviewer gets the task and raw tool results, never the author's conclusions, and re-runs the same MCP tools |
@@ -324,6 +396,8 @@ M1 case descriptions, evidence gate, receipts · M1.1 tool versions, command all
 whole tool results in traces · M2 (done) synth + pre-PnR STA under the SDC, check_sdc, gate
 R5, reviewer I0–I3 + rule-based reviewer, human gate · M1.2 (done) init, doctor, check
 presets, defaults, LibreLane/FuseSoC inputs; tried on a third design, an INT8 linear-layer
-accelerator (FuseSoC, pulp IP) · M2.5 test generation scored by mutants · M3
+accelerator (FuseSoC, pulp IP) · M2.5 test generation scored by mutants (step 1 done:
+`mutate`, plus `perf` with a human baseline and gate R7; next `write_case`, `score_tests`,
+gate R6) · M3
 simulation-failure localisation (logs, waveforms), lessons store · M4 LibreLane flow tool
 (PPA, DRC/LVS).
