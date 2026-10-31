@@ -26,12 +26,42 @@ class LintConfig:
 
 
 @dataclass(frozen=True)
+class CaseSpec:
+    """One regression case: its name, extra command arguments and where it is described."""
+    name: str
+    args: tuple[str, ...] = ()
+    source: str = ""        # test source file, relative to the project root
+    description: str = ""   # used when the source has no leading comment
+    list_entry: str = ""    # the raw case-list line, if the case came from a list file
+
+
+# How the regression reports results (see tools/regress.py):
+#   torv     "Result directory: <dir>" in the output, <dir>/<summary_file> rows name,STATUS,detail
+#   junit    a JUnit XML file written by the run
+#   exitcode the command's exit status per case, optionally confirmed by pass/fail regexes
+REGRESS_FORMATS = ("torv", "junit", "exitcode")
+
+
+@dataclass(frozen=True)
 class RegressConfig:
     cmd: tuple[str, ...]
-    case_list: str
+    case_list: str = ""
+    cases: tuple[CaseSpec, ...] = ()  # inline cases, used when there is no case_list
     case_flag: str = "--case"
+    format: str = "torv"
     summary_file: str = "summary.rpt"
+    junit_file: str = ""
+    pass_regex: str = ""
+    fail_regex: str = ""
     timeout_s: int = 1800
+
+    def __post_init__(self) -> None:
+        if self.format not in REGRESS_FORMATS:
+            raise ValueError(f"unknown regress format {self.format!r}; use one of {REGRESS_FORMATS}")
+        if self.format == "junit" and not self.junit_file:
+            raise ValueError("regress format 'junit' needs junit_file")
+        if not self.case_list and not self.cases:
+            raise ValueError("regress needs case_list or inline [[regress.cases]]")
 
 
 @dataclass(frozen=True)
@@ -64,9 +94,16 @@ def load_project(path: str | Path) -> Project:
         ),
         regress=RegressConfig(
             cmd=tuple(regress["cmd"]),
-            case_list=regress["case_list"],
+            case_list=regress.get("case_list", ""),
+            cases=tuple(CaseSpec(name=c["name"], args=tuple(c.get("args", ())),
+                                 source=c.get("source", ""), description=c.get("description", ""))
+                        for c in regress.get("cases", ())),
             case_flag=regress.get("case_flag", "--case"),
+            format=regress.get("format", "torv"),
             summary_file=regress.get("summary_file", "summary.rpt"),
+            junit_file=regress.get("junit_file", ""),
+            pass_regex=regress.get("pass_regex", ""),
+            fail_regex=regress.get("fail_regex", ""),
             timeout_s=int(regress.get("timeout_s", 1800)),
         ),
     )
@@ -106,11 +143,25 @@ def read_filelist(path: Path, env: dict[str, str], root: Path) -> list[Path]:
     return files
 
 
-def regress_cases(project: Project) -> list[str]:
-    """Case names from the project's case list (first column)."""
-    names = []
-    for raw in (project.root / project.regress.case_list).read_text().splitlines():
+def case_specs(project: Project) -> list[CaseSpec]:
+    """Cases from the inline config, else from the case list file.
+
+    In a list file the first column is the name; the first later column that names
+    an existing file under the project root is taken as the case's source.
+    """
+    cfg = project.regress
+    if not cfg.case_list:
+        return list(cfg.cases)
+    specs = []
+    for raw in (project.root / cfg.case_list).read_text().splitlines():
         line = raw.strip()
-        if line and not line.startswith("#"):
-            names.append(line.split()[0])
-    return names
+        if not line or line.startswith("#"):
+            continue
+        name, *rest = line.split()
+        source = next((f for f in rest if (project.root / f).is_file()), "")
+        specs.append(CaseSpec(name=name, source=source, list_entry=line))
+    return specs
+
+
+def regress_cases(project: Project) -> list[str]:
+    return [c.name for c in case_specs(project)]

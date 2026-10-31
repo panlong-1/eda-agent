@@ -2,7 +2,9 @@
 
 Budgets follow the methodology: the same tool failing twice in a row stops the
 run and reports instead of trying a third time, and every run records tokens,
-tool calls and wall time (Liu2026 reporting item 6).
+tool calls and wall time (Liu2026 reporting item 6). When the model ends, the
+evidence gate (gate.py) checks its report against the tool results of this run;
+a rejected report goes back to the model for at most `max_gate_rewrites` rewrites.
 """
 from __future__ import annotations
 
@@ -12,10 +14,13 @@ from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from .gate import GateDecision, check_report, rejection_message
 from .model import ModelAdapter, ToolOutcome, ToolSpec
 
 # (tool name, arguments) -> (result text, is_error)
 Executor = Callable[[str, dict], Awaitable[tuple[str, bool]]]
+# (final report, parsed tool results of this run) -> decision
+Gate = Callable[[str, list[dict]], GateDecision]
 
 
 @dataclass
@@ -23,11 +28,14 @@ class Budget:
     max_turns: int = 30
     max_tool_calls: int = 60
     max_consecutive_errors: int = 2  # per tool; then stop and report
+    max_gate_rewrites: int = 2
 
 
 @dataclass
 class RunReport:
     stop_reason: str
+    # done: gate passed (or no gate); pending: gate rejected, a human must judge; incomplete: stopped early
+    status: str = "incomplete"
     final_text: str = ""
     turns: int = 0
     tool_calls: int = 0
@@ -36,6 +44,8 @@ class RunReport:
     wall_s: float = 0.0
     model: str = ""
     halted_on: str = ""
+    gate: list[dict] = field(default_factory=list)    # one decision per report the model ended with
+    checks: list[dict] = field(default_factory=list)  # every tool call: tool, args, parsed result
 
 
 def _is_tool_error(text: str, is_error: bool) -> bool:
@@ -48,8 +58,17 @@ def _is_tool_error(text: str, is_error: bool) -> bool:
         return False
 
 
+def _parse(text: str) -> dict | None:
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
 async def run_agent(model: ModelAdapter, tools: list[ToolSpec], execute: Executor, task: str,
-                    system: str, budget: Budget | None = None, trace: Path | None = None) -> RunReport:
+                    system: str, budget: Budget | None = None, trace: Path | None = None,
+                    gate: Gate | None = check_report) -> RunReport:
     budget = budget or Budget()
     report = RunReport(stop_reason="", model=model.name)
     usage: dict[str, int] = {}
@@ -78,8 +97,22 @@ async def run_agent(model: ModelAdapter, tools: list[ToolSpec], execute: Executo
 
             if turn.stop == "pause":
                 continue
+            if turn.stop == "end" and gate:
+                decision = gate(turn.text, [c["result"] for c in report.checks if c["result"]])
+                rewrites = len(report.gate)
+                report.gate.append(decision.to_dict())
+                log("gate", attempt=rewrites + 1, **decision.to_dict())
+                if decision.passed:
+                    report.stop_reason, report.status = "end", "done"
+                    break
+                if rewrites >= budget.max_gate_rewrites:
+                    report.stop_reason, report.status = "gate_rejected", "pending"
+                    break
+                model.add_user_message(rejection_message(decision, rewrites + 1, budget.max_gate_rewrites))
+                continue
             if turn.stop != "tool_use":
                 report.stop_reason = turn.stop
+                report.status = "done" if turn.stop == "end" else "incomplete"
                 break
 
             results = []
@@ -93,6 +126,7 @@ async def run_agent(model: ModelAdapter, tools: list[ToolSpec], execute: Executo
                 report.tool_errors += failed
                 consecutive[call.name] = consecutive.get(call.name, 0) + 1 if failed else 0
                 results.append(ToolOutcome(call.id, text, is_error))
+                report.checks.append({"tool": call.name, "args": call.input, "result": _parse(text)})
                 log("tool", name=call.name, input=call.input, is_error=failed, result=text[:4000])
             model.add_tool_results(results)
 
@@ -107,7 +141,7 @@ async def run_agent(model: ModelAdapter, tools: list[ToolSpec], execute: Executo
     finally:
         report.usage = usage
         report.wall_s = round(time.monotonic() - t0, 2)
-        log("end", **asdict(report))
+        log("end", **{k: v for k, v in asdict(report).items() if k != "checks"})
         if trace_f:
             trace_f.close()
     return report

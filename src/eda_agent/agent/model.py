@@ -53,6 +53,7 @@ class ModelAdapter(Protocol):
     def start(self, system: str, tools: list[ToolSpec], task: str) -> None: ...
     async def step(self) -> Turn: ...
     def add_tool_results(self, results: list[ToolOutcome]) -> None: ...
+    def add_user_message(self, text: str) -> None: ...
 
 
 _STOP_MAP: dict[str, Stop] = {
@@ -115,6 +116,9 @@ class AnthropicAdapter:
             {"type": "tool_result", "tool_use_id": r.call_id, "content": r.content, "is_error": r.is_error}
             for r in results
         ]})
+
+    def add_user_message(self, text: str) -> None:
+        self.messages.append({"role": "user", "content": text})
 
 
 _OPENAI_STOP_MAP: dict[str, Stop] = {
@@ -191,6 +195,9 @@ class OpenAICompatAdapter:
             content = f"[tool error] {r.content}" if r.is_error else r.content
             self.messages.append({"role": "tool", "tool_call_id": r.call_id, "content": content})
 
+    def add_user_message(self, text: str) -> None:
+        self.messages.append({"role": "user", "content": text})
+
 
 class ScriptedAdapter:
     """Deterministic stand-in for a model: replays prepared turns. For tests and dry runs."""
@@ -199,6 +206,7 @@ class ScriptedAdapter:
         self.name = name
         self._turns = list(turns)
         self.received: list[list[ToolOutcome]] = []
+        self.user_messages: list[str] = []
         self.task = ""
 
     def start(self, system: str, tools: list[ToolSpec], task: str) -> None:
@@ -211,3 +219,6 @@ class ScriptedAdapter:
 
     def add_tool_results(self, results: list[ToolOutcome]) -> None:
         self.received.append(results)
+
+    def add_user_message(self, text: str) -> None:
+        self.user_messages.append(text)

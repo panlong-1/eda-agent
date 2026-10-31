@@ -16,22 +16,33 @@ from pathlib import Path
 from .agent.loop import Budget, run_agent
 from .agent.mcp_client import mcp_tools
 from .agent.model import AnthropicAdapter, OpenAICompatAdapter
+from .agent.receipt import build_receipt, write_receipt
+from .projects import load_project, regress_cases
 
 DEFAULT_MODELS = {"anthropic": "claude-opus-5-5", "deepseek": "deepseek-v4-pro"}
 
 SYSTEM = """You are an engineering agent for digital chip design. You act only through the tools.
 
 Rules:
-- A conclusion is valid only if a tool result supports it. Quote the tool's status and
-  evidence_level, and do not claim more than its claim_scope.
-- "Compiles" or "lint clean" (E0) never means "works". Functional claims need regress (E2) or higher.
+- A conclusion is valid only if a tool result of this run supports it. Quote the tool's status
+  and evidence_level exactly as returned, and do not claim more than its claim_scope.
+- Choosing regression cases: call list_regress_cases and read every case's summary, then
+  describe_case on each case whose summary touches the task, and pick by what each test
+  covers, not by its name. A test named for one feature often exercises others.
+- "Compiles" or "lint clean" (E0) never means "works". A regress pass (E2) supports only
+  "these cases passed"; do not write that a feature is handled, correct, verified or works
+  unless a passing result reaches E3 or higher.
 - If a tool errors twice in a row, stop and report instead of trying a third time.
-- End with a short report: what you ran, what each result proves, and the residual risk."""
+- End with a short report: what you ran, what each result proves, and a section headed
+  "Residual risk" that says what the checks did not cover. An evidence gate checks the
+  report against the tool results and sends it back if it overclaims."""
 
 
 async def _run(args: argparse.Namespace) -> int:
-    trace = Path(args.trace or f"runs/{datetime.now():%Y%m%d_%H%M%S}.jsonl")
+    run_id = Path(args.trace).stem if args.trace else f"{datetime.now():%Y%m%d_%H%M%S}"
+    trace = Path(args.trace or f"runs/{run_id}.jsonl")
     trace.parent.mkdir(parents=True, exist_ok=True)
+    project = load_project(args.project)
     server_args = ["-m", "eda_agent.mcp_server", "--project", str(Path(args.project).resolve())]
     model_name = args.model or DEFAULT_MODELS[args.provider]
     if args.provider == "deepseek":
@@ -45,11 +56,16 @@ async def _run(args: argparse.Namespace) -> int:
             Budget(max_turns=args.max_turns, max_tool_calls=args.max_tool_calls),
             trace=trace,
         )
+    receipt = build_receipt(report, run_id=run_id, task=args.task, provider=args.provider,
+                            project=project.name, all_cases=regress_cases(project), trace=str(trace))
+    js, md = write_receipt(receipt, trace.parent)
     print(report.final_text)
     print("\n--- run report ---")
-    print(json.dumps({k: v for k, v in asdict(report).items() if k != "final_text"}, indent=2))
+    print(json.dumps({k: v for k, v in asdict(report).items() if k not in ("final_text", "checks")},
+                     indent=2, ensure_ascii=False))
     print(f"trace: {trace}")
-    return 0 if report.stop_reason == "end" else 1
+    print(f"receipt: {md} (json: {js})")
+    return 0 if report.status == "done" else 1
 
 
 def main() -> None:

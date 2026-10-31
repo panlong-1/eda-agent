@@ -1,0 +1,29 @@
+# PicoRV32 (https://github.com/YosysHQ/picorv32, ISC), driven through its own Makefile.
+# Its Verilator testbench always exits 0, so the pass/fail regexes carry the verdict.
+name = "picorv32"
+root = "~/project/picorv32"
+
+[lint]
+top = "picorv32"
+files = ["picorv32.v"]
+flags = ["-Wall", "-Wno-fatal"]
+
+[regress]
+format = "exitcode"
+cmd = ["make", "test_verilator", "TOOLCHAIN_PREFIX=riscv64-unknown-elf-"]
+case_flag = ""
+pass_regex = "^ALL TESTS PASSED"
+fail_regex = "^ERROR"
+timeout_s = 900
+
+[[regress.cases]]
+name = "firmware"
+source = "firmware/start.S"
+description = """\
+One firmware image on the CPU built with COMPRESSED_ISA (RV32IMC): the per-instruction \
+riscv-tests in tests/*.S (add ... xori, mul/mulh*/div*/rem*, loads/stores, branches, jal/jalr), \
+then hello, sieve (prime sieve with checksum), multest (MUL/DIV results against a software \
+reference) and stats (cycle/instruction counters). The testbench prints ALL TESTS PASSED when \
+the firmware traps with tests_passed set, ERROR otherwise. The testbench also raises IRQ 4 and \
+IRQ 5 periodically from a cycle counter, so the interrupt entry/return path (firmware/irq.c) \
+runs during the tests."""

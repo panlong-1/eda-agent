@@ -8,7 +8,8 @@ import argparse
 
 from mcp.server.mcpserver import MCPServer
 
-from .projects import Project, load_project, regress_cases
+from .projects import Project, load_project
+from .tools.describe import describe_cases, list_cases
 from .tools.lint import run_lint
 from .tools.regress import run_regress
 
@@ -29,14 +30,24 @@ def build_server(project: Project) -> MCPServer:
     def lint(max_diagnostics: int = 20) -> dict:
         return run_lint(project, max_diagnostics=max_diagnostics).to_dict()
 
-    @server.tool(description="List the regression case names that 'regress' accepts.")
+    @server.tool(description=(
+        "List every regression case that 'regress' accepts, each with a one-line summary of what "
+        "it covers. Read all summaries: a test named for one feature often exercises others."
+    ))
     def list_regress_cases() -> dict:
-        return {"cases": regress_cases(project)}
+        return list_cases(project)
+
+    @server.tool(description=(
+        "Describe what the given regression cases cover: source file and the test's leading "
+        "comment. Call it before choosing cases; names alone do not say everything a test exercises."
+    ))
+    def describe_case(cases: list[str]) -> dict:
+        return describe_cases(project, cases)
 
     @server.tool(description=(
         "Run the project's regression on the given case names (all cases if omitted; the "
-        "full list takes several minutes). Returns per-case pass/fail and failing log "
-        "tails. Evidence level E2."
+        "full list may take several minutes). Returns pass/fail (per case where the project's "
+        f"'{project.regress.format}' result format allows) and failing log tails. Evidence level E2."
     ))
     def regress(cases: list[str] | None = None) -> dict:
         return run_regress(project, cases).to_dict()

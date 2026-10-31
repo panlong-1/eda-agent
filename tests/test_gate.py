@@ -1,0 +1,108 @@
+from eda_agent.agent.gate import check_report
+
+LINT = {"tool": "lint", "status": "pass", "evidence_level": "E0", "metrics": {"errors": 0, "warnings": 12}}
+REGRESS = {"tool": "regress", "status": "pass", "evidence_level": "E2",
+           "metrics": {"passed": 3, "failed": 0, "cases": 3}}
+RESULTS = [LINT, REGRESS, {"status": "ok", "cases": []}]  # the last one is describe_case (no evidence level)
+
+SCOPED = """\
+Ran lint: pass (E0), 0 errors. Ran regress on bypass, hazard, muldiv_stall: pass (E2), 3 passed, 0 failed.
+These three directed cases passed under the testbench's own self-check.
+
+Residual risk:
+- no coverage or mutation score, so it is not known whether these tests would catch a hazard bug
+- other hazard combinations (CSR, interrupts) were not exercised
+"""
+
+
+def test_properly_scoped_report_passes():
+    d = check_report(SCOPED, RESULTS)
+    assert d.passed, d.reasons
+    assert d.max_level == "E2"
+
+
+def test_overclaim_is_rejected():
+    report = SCOPED.replace("These three directed cases passed under the testbench's own self-check.",
+                            "So the pipeline handles all forwarding and load-use hazards correctly.")
+    d = check_report(report, RESULTS)
+    assert not d.passed
+    assert any("'handles'" in r and "E3+" in r for r in d.reasons)
+
+
+def test_overclaim_in_chinese_is_rejected():
+    d = check_report(SCOPED + "\n", RESULTS)
+    assert d.passed
+    report = SCOPED.replace("These three", "流水线冒险处理正确。These three")
+    assert not check_report(report, RESULTS).passed
+
+
+def test_negated_strong_word_is_a_limit_not_a_claim():
+    report = SCOPED.replace("These three directed cases passed",
+                            "This does not show that the forwarding logic is correct in general; the cases passed")
+    assert check_report(report, RESULTS).passed
+
+
+def test_strong_words_allowed_with_e3_evidence():
+    report = SCOPED.replace("These three directed cases passed", "The forwarding logic is verified")
+    e3 = [*RESULTS, {"tool": "mutate", "status": "pass", "evidence_level": "E3", "metrics": {}}]
+    assert not check_report(report, RESULTS).passed
+    assert check_report(report, e3).passed
+
+
+def test_fabricated_citation_is_rejected():
+    report = SCOPED.replace("pass (E2), 3 passed", "pass (E3), 3 passed")
+    d = check_report(report, RESULTS)
+    assert not d.passed and any("no tool result of this run has evidence_level E3" in r for r in d.reasons)
+
+    wrong_status = SCOPED.replace("Ran lint: pass (E0)", "Ran lint: fail (E0)")
+    assert any("fail at E0" in r for r in check_report(wrong_status, RESULTS).reasons)
+
+
+def test_fabricated_count_is_rejected():
+    report = SCOPED.replace("3 passed", "33 passed")
+    d = check_report(report, RESULTS)
+    assert not d.passed and any("'33 passed'" in r for r in d.reasons)
+
+
+def test_counts_of_repeated_regress_calls_may_be_summed():
+    # Two calls with the same count: the total (6) must be accepted, not only the distinct values.
+    report = SCOPED.replace("3 passed, 0 failed", "6 passed, 0 failed")
+    assert check_report(report, [*RESULTS, REGRESS]).passed
+
+
+def test_level_named_as_requirement_is_not_a_citation():
+    # From live run 2: this sentence was wrongly rejected before R1 learned about requirements.
+    report = SCOPED.replace("These three directed cases passed under the testbench's own self-check.",
+                            "This is only an E2 pass, so I cannot conclude that hazards are handled in "
+                            "general — that would require stronger evidence (E3 or higher).")
+    d = check_report(report, RESULTS)
+    assert d.passed, d.reasons
+
+
+DESCRIBED = {"tool": "describe_case", "status": "ok",
+             "cases": [{"name": n} for n in ("bypass", "hazard", "muldiv_stall")]}
+RAN = {**REGRESS, "metrics": {**REGRESS["metrics"], "passed": 2, "passed_cases": ["bypass", "hazard"]}}
+
+
+def test_described_but_not_run_must_be_named():
+    report = SCOPED.replace("3 passed", "2 passed").replace("bypass, hazard, muldiv_stall", "bypass, hazard")
+    d = check_report(report, [LINT, RAN, DESCRIBED])
+    assert not d.passed and d.reasons == [
+        "described case 'muldiv_stall' but neither ran it nor named it under residual risk: run it, "
+        "or say there why it was left out"]
+    owned = report + "- muldiv_stall (stall + forwarding) was not run in this session\n"
+    assert check_report(owned, [LINT, RAN, DESCRIBED]).passed
+    ran_all = {**REGRESS, "metrics": {**REGRESS["metrics"], "passed_cases": ["bypass", "hazard", "muldiv_stall"]}}
+    assert check_report(SCOPED, [LINT, ran_all, DESCRIBED]).passed
+
+
+def test_citation_without_any_tool_run_is_rejected():
+    assert not check_report(SCOPED, []).passed
+
+
+def test_missing_residual_risk_is_rejected():
+    report = SCOPED.split("Residual risk")[0]
+    d = check_report(report, RESULTS)
+    assert d.reasons == ["no residual-risk section: add a section headed 'Residual risk' that says what "
+                         "the checks did not cover"]
+    assert check_report(report + "## 剩余风险\n没有覆盖率或变异测试, 不知道测试能否发现错误。", RESULTS).passed

@@ -6,6 +6,7 @@ from eda_agent.agent.loop import run_agent
 from eda_agent.agent.model import OpenAICompatAdapter, ToolSpec
 
 TOOLS = [ToolSpec("lint", "lint the design", {"type": "object", "properties": {}})]
+REPORT = "lint pass (E0)\n\nResidual risk: lint says nothing about function."
 
 
 def completion(message: dict, finish: str) -> ChatCompletion:
@@ -37,6 +38,7 @@ async def test_deepseek_round_trip_keeps_reasoning(tmp_path):
             {"id": "call_1", "type": "function", "function": {"name": "lint", "arguments": "{}"}}]},
             "tool_calls"),
         completion({"content": "lint pass (E0)", "reasoning_content": "done"}, "stop"),
+        completion({"content": REPORT, "reasoning_content": "add the risk"}, "stop"),
     ])
     model = OpenAICompatAdapter(client=client)
 
@@ -45,8 +47,12 @@ async def test_deepseek_round_trip_keeps_reasoning(tmp_path):
 
     report = await run_agent(model, TOOLS, execute, "lint it", "sys", trace=tmp_path / "t.jsonl")
 
-    assert report.stop_reason == "end" and report.final_text == "lint pass (E0)"
-    assert report.usage["cache_read_input_tokens"] == 128
+    assert report.stop_reason == "end" and report.final_text == REPORT
+    assert report.usage["cache_read_input_tokens"] == 192
+    # The gate rejected the first report (no residual risk); the rejection goes back as a user message.
+    third = client.requests[2]["messages"]
+    assert third[-2]["role"] == "assistant" and third[-2]["reasoning_content"] == "done"
+    assert third[-1]["role"] == "user" and "Evidence gate rejected" in third[-1]["content"]
     second = client.requests[1]
     # The second request must carry the first turn's reasoning_content back (DeepSeek returns 400 otherwise).
     assistant = second["messages"][2]
