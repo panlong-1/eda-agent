@@ -8,11 +8,12 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from ..core.proc import check_allowed, tool_version
-from ..core.project import Project, expand_vars, load_project, project_env
+from ..core.project import Project, expand_vars, load_project, project_env, regress_cases
 
 API_KEYS = {"anthropic": "ANTHROPIC_API_KEY", "deepseek": "DEEPSEEK_API_KEY"}
 
@@ -103,6 +104,17 @@ def diagnose(config: Path, provider: str | None = None) -> list[Check]:
             r = subprocess.run(["docker", "image", "inspect", flow.image], capture_output=True)
             checks.append(Check("ok" if r.returncode == 0 else "fail", "flow image", flow.image if r.returncode == 0
                                 else f"{flow.image} not present: docker pull {flow.image}"))
+
+    mut = project.mutation
+    if mut is not None:
+        checks += _paths(project, env, "mutation files", list(mut.files))
+        known = set(regress_cases(project))
+        unknown = [c for c in mut.cases if c not in known]
+        checks.append(Check("fail" if unknown else "ok", "mutation cases",
+                            f"not in the case list: {unknown}" if unknown else f"{len(mut.cases) or len(known)} cases"))
+        avl = (Path(sys.executable).parent / "avl-mutation-testing").is_file() or shutil.which("avl-mutation-testing")
+        checks.append(Check("ok" if avl else "fail", "avl-core", "avl-mutation-testing found" if avl else
+                            "not installed: pip install -e '.[mutation]' (mutate generates mutants with it)"))
 
     for prov, var in API_KEYS.items():
         if provider and prov != provider:

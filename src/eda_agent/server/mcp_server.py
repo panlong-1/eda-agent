@@ -11,6 +11,7 @@ from mcp.server.mcpserver import MCPServer
 from ..core.project import Project, load_project
 from ..tools.describe import describe_cases, list_cases
 from ..tools.lint import run_lint
+from ..tools.mutate import run_mutate
 from ..tools.regress import run_regress
 from ..tools.rtl_rules import run_rtl_rules
 from ..tools.synth import run_check_sdc, run_synth
@@ -81,6 +82,24 @@ def build_server(project: Project) -> MCPServer:
     ))
     def check_sdc(max_listed: int = 20) -> dict:
         return run_check_sdc(project, max_listed=max_listed).to_dict()
+
+    mut = project.mutation
+    mut_files = (f"one of {list(mut.files)}" if mut.files else "a .sv/.v file under the project root") \
+        if mut else "not configured for this project: the tool will refuse"
+    mut_cases = ", ".join(mut.cases) if mut and mut.cases else "the whole case list"
+
+    @server.tool(description=(
+        f"Mutation run: make `count` small source-level changes to one RTL file ({mut_files}), each in a "
+        f"copy of the design, and run regression cases on each (default: {mut_cases}). Returns which "
+        "mutants were killed by which case and which survived, with file:line and before -> after for "
+        "each. Survivors are changes the tests do not detect (test gaps), not design bugs. "
+        "confirm_full re-runs survivors on the whole case list. Evidence level E0 (facts only). "
+        "Takes minutes: about one regression run per mutant."
+    ))
+    def mutate(file: str, count: int = 20, types: list[str] | None = None, cases: list[str] | None = None,
+               seed: int = 1, confirm_full: bool = False) -> dict:
+        return run_mutate(project, file, count=count, types=types, cases=cases, seed=seed,
+                          confirm_full=confirm_full).to_dict()
 
     return server
 

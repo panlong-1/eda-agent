@@ -128,6 +128,25 @@ class FlowConfig:
 
 
 @dataclass(frozen=True)
+class MutationConfig:
+    """Mutation runs ([mutation]): which files may be mutated and which cases judge the mutants.
+    Each mutant is applied in a copy of the root, never in the root itself."""
+    files: tuple[str, ...] = ()         # relative to the root; empty = any .sv/.v file under it
+    cases: tuple[str, ...] = ()         # default cases per mutant; empty = the whole case list
+    types: tuple[str, ...] = ()         # avl-core mutation classes; empty = all
+    # Paths (relative to the root) left out of the copy, e.g. build and result directories. They are
+    # also emptied in the copy after each mutant, so results do not pile up.
+    copy_exclude: tuple[str, ...] = (".git",)
+    jobs: int = 2                       # copies run in parallel
+    timeout_s: int = 900                # per mutant, all its cases together
+    equiv_cycles: int = 8               # bound of the equivalence check on survivors
+
+    def __post_init__(self) -> None:
+        if self.jobs < 1 or self.timeout_s < 1 or self.equiv_cycles < 1:
+            raise ValueError("mutation jobs, timeout_s and equiv_cycles must be positive")
+
+
+@dataclass(frozen=True)
 class Project:
     name: str
     root: Path
@@ -140,6 +159,17 @@ class Project:
     allowed_commands: tuple[str, ...] = ()
     allowed_images: tuple[str, ...] = ()
     flow: FlowConfig | None = None   # None: synth and check_sdc refuse (no [flow] section)
+    mutation: MutationConfig | None = None  # None: mutate refuses (no [mutation] section)
+
+
+def _mutation(data: dict | None) -> MutationConfig | None:
+    if data is None:
+        return None
+    unknown = set(data) - set(MutationConfig.__dataclass_fields__)
+    if unknown:
+        raise ValueError(f"unknown [mutation] key(s) {sorted(unknown)}")
+    tuples = ("files", "cases", "types", "copy_exclude")
+    return MutationConfig(**{k: tuple(v) if k in tuples else v for k, v in data.items()})
 
 
 def _flow(data: dict | None, root: Path) -> FlowConfig | None:
@@ -171,6 +201,7 @@ def load_project(path: str | Path) -> Project:
         allowed_commands=tuple(data.get("allowed_commands", ())),
         allowed_images=tuple(data.get("allowed_images", ())),
         flow=_flow(data.get("flow"), root),
+        mutation=_mutation(data.get("mutation")),
         lint=LintConfig(
             top=lint["top"],
             filelists=tuple(lint.get("filelists", ())),

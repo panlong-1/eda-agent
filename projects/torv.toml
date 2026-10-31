@@ -27,6 +27,15 @@ case_flag = "--case"
 summary_file = "summary.rpt"
 timeout_s = 1800
 
+# Mutation runs (mutate): mutants of these files, judged by these cases, each in a copy of the
+# checkout under runs/work/. Build and result directories are not copied and are emptied per mutant.
+[mutation]
+files = ["rtl/torv_forwarding_unit.sv", "rtl/torv_hazard_unit.sv", "rtl/torv_muldiv_unit.sv"]
+cases = ["bypass", "hazard", "flush", "muldiv", "muldiv_stall", "hazard_branch_mem_stall"]
+copy_exclude = [".git", "build", "librelane/runs", "regress/results", ".torv_last_case_build_dir"]
+jobs = 4
+timeout_s = 1500   # per mutant; the whole case list (survivor re-check) takes about 7 min
+
 # Synthesis + pre-PnR timing estimate (synth, check_sdc). Mirrors librelane/config.yaml:
 # DESIGN_NAME, VERILOG_FILES, USE_SLANG, SYNTH_MUL_BOOTH, CLOCK_PORT, CLOCK_PERIOD and the SDC.
 # The SDC is the design team's; the agent only reads it.

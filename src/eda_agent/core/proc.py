@@ -17,6 +17,7 @@ from pathlib import Path
 # allowed_commands; an executable script inside the project root is always allowed.
 ALLOWED_COMMANDS = frozenset({
     "verilator", "make", "yosys", "sta", "iverilog", "vvp", "sby", "eqy", "mcy", "wavepeek",
+    "avl-mutation-testing",
 })
 # Container images a tool may start (repository, any tag). A project adds its own with
 # allowed_images. Inside the container the program must still be in ALLOWED_COMMANDS.

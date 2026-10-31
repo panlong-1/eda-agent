@@ -3,6 +3,7 @@
     eda-agent init ~/project/mydesign --out projects/mydesign.toml       (draft a project config)
     eda-agent doctor --project projects/mydesign.toml                   (is everything there?)
     eda-agent check  --project projects/torv.toml [--full]              (fixed lint/regress[/synth] task)
+    eda-agent mutate --project projects/torv.toml --file rtl/x.sv       (mutation run, no model)
     eda-agent run --project projects/torv.toml "Lint the design and run the smoke case"
     eda-agent run --provider deepseek --review I2 --project projects/torv.toml "..."
     eda-agent review <run_id> --review I3 --project projects/torv.toml   (review a finished run)
@@ -244,6 +245,23 @@ def _doctor(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def _mutate(args: argparse.Namespace) -> int:
+    """No model: run the mutate tool directly and print where its report is."""
+    from .tools.mutate import run_mutate
+    project = load_project(resolve_project(args.project))
+    res = run_mutate(project, args.file, count=args.count, types=args.types, cases=args.cases, seed=args.seed,
+                     confirm_full=args.confirm_full, equivalence=not args.no_equiv, jobs=args.jobs)
+    print(f"mutate {args.file}: {res.status} — {res.summary}")
+    for d in res.diagnostics:
+        print(f"  survived {d.file}:{d.line}  {d.msg}")
+    for r in res.residual_risk:
+        print(f"  risk: {r}")
+    if work := res.metrics.get("work_dir"):
+        print(f"report: {work}/report.md  matrix: {work}/kill_matrix.csv")
+        Path(work, "envelope.json").write_text(json.dumps(res.to_dict(), indent=2) + "\n")
+    return {"pass": 0, "fail": 1}.get(res.status, 2)
+
+
 def _add_run_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--project", help=f"project config (default: {PROJECT_FILE} here or in a parent directory)")
     p.add_argument("--provider", default="anthropic", choices=sorted(DEFAULT_MODELS))
@@ -295,6 +313,18 @@ def main() -> None:
     doc.add_argument("--project", help=f"project config (default: {PROJECT_FILE} here or in a parent)")
     doc.add_argument("--provider", choices=sorted(DEFAULT_MODELS), help="also require this provider's API key")
 
+    mut = sub.add_parser("mutate", help="mutation run on one RTL file, no model: which mutants the "
+                                        "regression cases miss")
+    mut.add_argument("--project", help=f"project config (default: {PROJECT_FILE} here or in a parent)")
+    mut.add_argument("--file", required=True, help="RTL file relative to the project root")
+    mut.add_argument("--count", type=int, default=20)
+    mut.add_argument("--types", nargs="*", help="avl-core mutation classes (default: [mutation] types, else all)")
+    mut.add_argument("--cases", nargs="*", help="regression cases (default: [mutation] cases)")
+    mut.add_argument("--seed", type=int, default=1)
+    mut.add_argument("--jobs", type=int, help="copies run in parallel (default: [mutation] jobs)")
+    mut.add_argument("--confirm-full", action="store_true", help="re-run survivors on the whole case list")
+    mut.add_argument("--no-equiv", action="store_true", help="skip the equivalence check of survivors")
+
     rev = sub.add_parser("review", help="review a finished run (writes into its receipt)")
     rev.add_argument("run_id")
     rev.add_argument("--project", help=f"project config (default: {PROJECT_FILE} here or in a parent)")
@@ -326,6 +356,8 @@ def main() -> None:
         sys.exit(_init(args))
     if args.cmd == "doctor":
         sys.exit(_doctor(args))
+    if args.cmd == "mutate":
+        sys.exit(_mutate(args))
     if args.cmd == "check":
         args.preset = "full" if args.full else "check"
         args.task = load_preset(args.preset)
