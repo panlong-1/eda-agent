@@ -1,0 +1,22 @@
+# TORV rv32m SoC (https://github.com/semitov/torv), driven through its own scripts.
+name = "torv"
+root = "~/project/rv32m"
+env_script = "scripts/env.sh"
+
+[env_defaults]
+PDK_ROOT = "~/.ciel"
+
+[lint]
+top = "torv_soc"
+filelists = ["rtl/filelist.f", "ip/filelist.f"]
+include_dirs = ["rtl", "ip/third_party/socbus/include"]
+defines = ["FUNCTIONAL"]
+# Same suppressions as scripts/verilator_build.sh, plus -Wall for lint.
+flags = ["-Wall", "-Wno-fatal", "--timing", "-Wno-TIMESCALEMOD", "-Wno-ASSIGNIN"]
+
+[regress]
+cmd = ["scripts/regress.sh"]
+case_list = "regress/cases/soc.list"
+case_flag = "--case"
+summary_file = "summary.rpt"
+timeout_s = 1800
