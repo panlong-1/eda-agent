@@ -147,6 +147,14 @@ _TEST_CLAIM = re.compile("|".join(f"(?:{p})" for p in TEST_CLAIMS), re.I)
 _RISE = re.compile("|".join(f"(?:{p})" for p in RISE_CLAIMS), re.I)
 _SCORE_CITE = re.compile(r"(?<![\w-])score_tests(?![\w-])", re.I)
 _PCT = re.compile(r"(\d+(?:\.\d+)?)\s*%")
+# A mutant caught only by its cycle count is a slower-but-correct change: never a functional bug.
+_FUNC_WORD = re.compile(r"(?<![\w-])(?:bugs?|functional(?:ly)?|wrong|incorrect|errors?)(?![\w-])|功能错误|错误", re.I)
+_TIMING_WORD = re.compile(r"cycle|timing|perf|slower|stall|周期|性能|时序", re.I)
+# R7: an accepted slowdown names the perf result and the approved baseline change behind it.
+_ACCEPTED_SLOW = re.compile(
+    r"(?:accept(?:ed|s)?|intentional(?:ly)?|deliberate(?:ly)?|approved)\s+(?:\w+\s+){0,3}?"
+    r"(?:slow-?downs?|slower|performance\s+(?:regressions?|costs?|loss)|cycle\s+(?:costs?|increases?))"
+    r"|(?:接受|有意|批准)[^。，,.]{0,8}(?:变慢|性能(?:下降|退化|损失))", re.I)
 _MUTANT_ID = re.compile(r"(?:mutants?|#)\s*((?:\d+)(?:\s*(?:,|and|、)\s*\d+)*)", re.I)
 
 
@@ -468,6 +476,16 @@ def check_perf(claims: str, results: list[dict]) -> list[str]:
         if not same and not other:
             continue
         first = (same or other)[0]
+        if accepted := _ACCEPTED_SLOW.search(sentence):
+            loosened = [r for r in perf if (r.get("metrics") or {}).get("baseline_loosened")]
+            if not loosened:
+                reasons.append(f"'{accepted.group(0)}': an accepted slowdown needs a perf result compared with a "
+                               "baseline that a person loosened for it (eda-agent perf-baseline --allow-loosen "
+                               f"--reason); this run has none: {text!r}")
+            elif not re.search(r"baseline|基线", sentence, re.I):
+                reasons.append(f"'{accepted.group(0)}' must name the approved baseline change in the same sentence "
+                               f"(loosened on {loosened[-1]['metrics'].get('baseline_recorded_at')} by "
+                               f"{loosened[-1]['metrics'].get('baseline_by')}): {text!r}")
         if not sources:
             reasons.append(f"performance statement '{first}' but no perf result of this run backs it; run perf: {text!r}")
             continue
@@ -517,6 +535,10 @@ def check_tests(claims: str, results: list[dict]) -> list[str]:
     mutates = [r for r in results if r.get("tool") == "mutate" and r.get("status") in ("pass", "fail")]
     by_score, by_mutate = _killed_ids(results)
     rates = _rates(results)
+    perf_only = {int(i) for r in scores if (r.get("metrics") or {}).get("kind") == "perf"
+                 for i in (r.get("metrics") or {}).get("perf_killed", [])} | \
+                {int(x["id"]) for r in mutates for x in (r.get("metrics") or {}).get("mutant_list", [])
+                 if x.get("status") == "perf_killed"}
     reasons = []
     for sentence in _T_SENTENCE.findall(claims):
         text = sentence.strip()
@@ -546,6 +568,9 @@ def check_tests(claims: str, results: list[dict]) -> list[str]:
             for n in re.findall(r"\d+", m.group(1)):
                 if int(n) not in killed and not _perf_limit(sentence, m.start()):
                     reasons.append(f"names mutant {n}, but no cited result of this run reports it killed: {text!r}")
+                elif int(n) in perf_only and _FUNC_WORD.search(sentence) and not _TIMING_WORD.search(sentence):
+                    reasons.append(f"mutant {n} was caught only by its cycle count (slower, results right): do not "
+                                   f"call it a functional bug; say it is a timing change: {text!r}")
         for p in _PCT.findall(sentence):
             decimals = len(p.split(".")[1]) if "." in p else 0
             # a percentage is a rounded ratio: 15/16 may be written 94% (unlike WNS, where 0 decimals

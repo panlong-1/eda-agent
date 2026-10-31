@@ -32,7 +32,7 @@ from ..core.proc import check_allowed, run
 from ..core.project import Project, case_specs, project_env
 from .formats.exitcode import judge_exitcode
 from .mutate import WORK_DIR, _clean, _copy_design, env_leaks
-from .perf import parse_perf
+from .perf import parse_perf, timing_list
 
 GEN_DIR = Path("generated")
 ATTEMPT_RUNS = 2          # the original and each target are run this many times (stability)
@@ -242,19 +242,30 @@ def _rate(n: int, d: int) -> float | None:
     return round(n / d, 4) if d else None
 
 
-def make_patch(project: Project, test: Path, name: str, examples: list[str]) -> tuple[str, str]:
-    """(patch text, path of the new test in the design): the test file plus the register line."""
+TIMING_LIST_HEADER = ("# eda-agent: implementation-specific timing tests (kind=perf). Each passes on its own and\n"
+                      "# checks no cycle number itself; `eda-agent perf` compares its cycle count with the approved\n"
+                      "# baseline. Keep them out of the functional regression: an accepted slowdown is recorded\n"
+                      "# by loosening the baseline (perf-baseline --allow-loosen --reason), not by editing these.\n")
+
+
+def make_patch(project: Project, test: Path, name: str, examples: list[str], kind: str = "functional"
+               ) -> tuple[str, str]:
+    """(patch text, path of the new test in the design): the test file plus the register line, in
+    the case list for a functional test, in the separate timing list (perf.timing_list) for kind=perf."""
     specs = {s.name: s for s in case_specs(project)}
     src = next((specs[c].source for c in examples if c in specs and specs[c].source), "")
     dest = str(Path(src).parent / f"{name}{test.suffix}") if src else f"{name}{test.suffix}"
     body = test.read_text()
     parts = ["".join(difflib.unified_diff([], body.splitlines(keepends=True), "/dev/null", f"b/{dest}"))]
     t, cl = project.tests, project.regress.case_list
-    if t and t.register and cl and (project.root / cl).is_file():
-        old = (project.root / cl).read_text()
-        new = old + ("" if old.endswith("\n") else "\n") + t.register.format(name=name, path=dest) + "\n"
+    target = timing_list(project) if kind == "perf" else cl
+    if t and t.register and target:
+        exists = (project.root / target).is_file()
+        old = (project.root / target).read_text() if exists else ""
+        head = "" if exists or kind != "perf" else TIMING_LIST_HEADER
+        new = head + old + ("" if not old or old.endswith("\n") else "\n") + t.register.format(name=name, path=dest) + "\n"
         parts.append("".join(difflib.unified_diff(old.splitlines(keepends=True), new.splitlines(keepends=True),
-                                                  f"a/{cl}", f"b/{cl}")))
+                                                  f"a/{target}" if exists else "/dev/null", f"b/{target}")))
     return "".join(parts), dest
 
 
@@ -339,7 +350,7 @@ def run_score_tests(project: Project, run_id: str, file: str, mutate_run: str, t
     }
     arts = [artifact(test)]
     if success:
-        patch, dest = make_patch(project, test, name, example_cases(project, run))
+        patch, dest = make_patch(project, test, name, example_cases(project, run), kind)
         pfile = test.with_suffix(".patch")
         pfile.write_text(patch)
         metrics |= {"patch": str(pfile), "patch_dest": dest}

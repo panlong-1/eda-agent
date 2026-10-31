@@ -108,7 +108,8 @@ def _perf(result: dict) -> dict:
         return {}
     m = result.get("metrics") or {}
     return {"perf": {k: m.get(k) for k in ("key", "cases", "comparison", "slower", "faster",
-                                           "baseline_sha256", "baseline_by")}}
+                                           "baseline_sha256", "baseline_by", "baseline_recorded_at",
+                                           "baseline_reason", "baseline_loosened")}}
 
 
 def _cell(text: str) -> str:

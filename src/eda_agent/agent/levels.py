@@ -217,9 +217,27 @@ def assess(r: dict) -> list[Issue]:
     for c in r["checks_run"]:
         tool = c["tool"]
         m = c.get("metrics") or {}
-        if c["status"] != "pass":
+        # A perf result that only reports slower cases is not a broken result: a slowdown may be the
+        # price of a functional fix. It is an Error (approve with a reason), never Fatal.
+        slow_only = tool == "perf" and c["status"] == "fail" and not m.get("failed_cases") and m.get("slower")
+        if c["status"] != "pass" and not slow_only:
             add("fatal", f"{tool} ended with status {c['status']}",
                 quote=c["summary"].splitlines()[0] if c["summary"] else "", source=tool)
+        if tool == "perf":
+            comp = m.get("comparison") or {}
+            for case in m.get("slower") or []:
+                row = comp.get(case, {})
+                add("error", f"perf: {case} is slower than the approved baseline ({row.get('delta'):+g} "
+                             f"{m.get('key')}, {row.get('delta_pct'):+g}%)",
+                    quote="if this is intentional (e.g. the price of a functional fix), approve with --reason and "
+                          "record the new baseline: eda-agent perf-baseline <result> --allow-loosen --reason ...",
+                    source=tool)
+            if m.get("baseline_loosened"):
+                add("warning", f"perf: the baseline was loosened on {m.get('baseline_recorded_at')} by "
+                               f"{m.get('baseline_by')}: {m.get('baseline_reason')}",
+                    quote="; ".join(m["baseline_loosened"]), source=tool)
+            if m.get("comparison") is None:
+                add("warning", "perf: no approved baseline, nothing was compared", source=tool)
         if tool == "lint":
             errors = m.get("errors")
             if errors is None:

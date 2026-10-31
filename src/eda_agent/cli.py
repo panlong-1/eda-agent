@@ -360,7 +360,7 @@ def _perf_baseline(args: argparse.Namespace) -> int:
     try:
         new, loosened = record_baseline(project, Path(args.result), by=args.by or human_gate.default_approver(),
                                         reason=args.reason or "", tolerance_pct=args.tolerance_pct,
-                                        allow_loosen=args.allow_loosen)
+                                        allow_loosen=args.allow_loosen, justified_by=args.justified_by)
     except (ValueError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
@@ -492,6 +492,8 @@ def main() -> None:
     pb.add_argument("--tolerance-pct", type=float, help="allowed difference in percent (default: [perf] tolerance_pct)")
     pb.add_argument("--allow-loosen", action="store_true",
                     help="accept a baseline that is slower, has a larger tolerance or drops cases (needs --reason)")
+    pb.add_argument("--justified-by", default="",
+                    help="the run or receipt that justifies the change, e.g. the functional fix that costs cycles")
 
     wt = sub.add_parser("write-tests", help="write new tests that kill surviving mutants of a mutate run "
                                            "(model writes, tools judge, a person approves the patch)")
