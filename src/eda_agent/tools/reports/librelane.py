@@ -147,7 +147,9 @@ def parse_clock_paths(text: str) -> dict:
     clock network, and launch/capture clock source latencies that are not zero (a source latency
     applied to one side only shifts every slack)."""
     kinds = _CLK_NET.findall(text)
-    nonzero = sorted({float(b) for a, b in _SRC_LAT.findall(text) if float(b) != 0.0})
+    # Columns: the step's own delay, then the running time (which includes the clock edge, e.g. 10.0
+    # on the capture side): only the first is the latency.
+    nonzero = sorted({float(a) for a, b in _SRC_LAT.findall(text) if float(a) != 0.0})
     return {"propagated": kinds.count("propagated"), "ideal": kinds.count("ideal"),
             "nonzero_source_latency": nonzero[:5]}
 
@@ -182,7 +184,13 @@ def _mtime(path: Path) -> str | None:
 
 
 def pdk_version(resolved: dict) -> str | None:
-    m = _PDK_VERSION.search(str(resolved.get("PDK_ROOT") or ""))
+    """The ciel version hash: in PDK_ROOT itself, or behind the <PDK_ROOT>/<PDK> symlink ciel makes
+    (a run with --manual-pdk --pdk-root ~/.ciel records only the symlink's directory)."""
+    root = str(resolved.get("PDK_ROOT") or "")
+    m = _PDK_VERSION.search(root)
+    if not m and root and resolved.get("PDK"):
+        link = Path(root) / str(resolved["PDK"])
+        m = _PDK_VERSION.search(str(link.resolve())) if link.exists() else None
     return m[1] if m else None
 
 

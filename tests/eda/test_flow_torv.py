@@ -59,3 +59,26 @@ def test_flow_report_compares_with_baseline():
     b = r.metrics["comparison"]["baseline"]
     assert b["baseline"] == "full_p10" and b["metrics"]["die_area_um2"]["delta"] < 0
     assert b["corners"]["nom_slow_1p08V_125C"]["setup_wns"]["delta"] > 0
+
+
+E5_1 = Path(__file__).parents[2] / "runs" / "pnr" / "torv_m4_e5_1" / "src" / "librelane" / "runs" / "m4_e5_1"
+
+
+@pytest.mark.skipif(not (E5_1 / "final" / "metrics.json").is_file(), reason="m4_e5_1 not run here")
+def test_fresh_run_m4_e5_1_lineage_snapshot_and_experience():
+    p = load_project(PROJECTS / "torv.toml")
+    r = run_flow_report(p, str(E5_1), baseline="full_p10_fwd")
+    m = r.metrics
+    assert m["experience_table"] == "eda_agent" and m["signoff_level"] == "E5-partial"
+    assert m["sdc_basis"] == "recorded" and len(m["sdc_sha256"]) == 64 and m["pdk_version"]
+    lin = m["lineage"]
+    assert lin["complete"] and not lin["breaks"] and len(lin["stages"]) == 8
+    assert all(f["matches"] for f in lin["final"])
+    assert r.snapshot["state"] == "current" and r.snapshot["id"]
+    assert not any(d.code == "CLOCK_SOURCE_LATENCY" for d in r.diagnostics)
+    # the current TORV reproduces full_p10_fwd exactly (same knobs, same netlist)
+    b = m["comparison"]["baseline"]
+    assert all(row.get("delta", 0) == 0 for k, row in b["metrics"].items() if k != "runtime_s")
+    from eda_agent.core.snapshot import project_snapshot
+    from eda_agent.core.snapshot import compare_snapshots
+    assert compare_snapshots(project_snapshot(p), r.snapshot)["same_design"] is True

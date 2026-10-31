@@ -348,9 +348,23 @@ def _better_worse(cmp: dict) -> tuple[list[str], list[str]]:
 
 
 def _config_diff(a: dict, b: dict, run_a: str, run_b: str, limit: int = 20, skip: re.Pattern | None = None) -> list[dict]:
-    """Config keys (the flow's own names) whose values differ, ignoring paths into each run's own directory."""
+    """Config keys (the flow's own names) whose values differ, ignoring paths into each run's own
+    directory and the spelling of a path (a symlink and its target are the same file)."""
+    real: dict[str, str] = {}
+
+    def canon(x):
+        if isinstance(x, str) and x.startswith("/"):
+            if x not in real:
+                real[x] = os.path.realpath(x) if Path(x).exists() else x
+            return real[x]
+        if isinstance(x, list):
+            return [canon(v) for v in x]
+        if isinstance(x, dict):
+            return {k: canon(v) for k, v in x.items()}
+        return x
+
     def norm(v):
-        s = json.dumps(v, sort_keys=True)
+        s = json.dumps(canon(v), sort_keys=True)
         return s.replace(run_a, "<run>").replace(run_b, "<run>")
     keys = sorted(k for k in set(a) | set(b) if not (skip and skip.match(k)) and norm(a.get(k)) != norm(b.get(k)))
     return [{"key": k, "baseline": a.get(k), "run": b.get(k)} for k in keys[:limit]]

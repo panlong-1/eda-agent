@@ -168,7 +168,8 @@ def test_incomplete_run_is_an_error_not_a_pass(tmp_path):
 
 def test_parse_clock_paths():
     text = ("   0.000000    0.000000   clock source latency\n   0.000000   10.000000   clock network delay (propagated)\n"
-            "   0.000000    0.950000   clock source latency\n   0.000000    0.000000   clock network delay (ideal)\n")
+            "   0.000000   10.000000   clock source latency\n"  # capture side: running time 10, latency 0
+            "   0.950000    0.950000   clock source latency\n   0.000000    0.000000   clock network delay (ideal)\n")
     assert ll.parse_clock_paths(text) == {"propagated": 1, "ideal": 1, "nonzero_source_latency": [0.95]}
 
 
@@ -178,7 +179,7 @@ def test_ideal_clock_in_post_route_sta_fails_signoff(tmp_path):
     _close_timing(run)
     rpt = run / "55-openroad-stapostpnr" / TYP / "max.rpt"
     rpt.write_text(rpt.read_text().replace("(propagated)", "(ideal)")
-                   + "   0.000000   -0.900000   clock source latency\n")
+                   + "  -0.900000   -0.900000   clock source latency\n")
     r = run_flow_report(load_project(cfg), "full_p10")
     assert r.status == "fail" and r.metrics["signoff"]["clock_propagated"]["outcome"] == "fail"
     assert r.metrics["signoff_level"] == "E4" and not r.metrics["e5_parts"]["propagated_clock"]
