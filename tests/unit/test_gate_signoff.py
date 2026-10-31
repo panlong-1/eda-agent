@@ -12,7 +12,10 @@ def flow(status="fail", drc=(0, 0), lvs=0, ant=0, timing_met=False, level="E5-pa
          "corners": {"nom_slow_1p08V_125C": {"setup_wns": wns, "hold_wns": 0.251}}}
     if sha:
         m["sdc_sha256"] = sha
-    return {"tool": "flow_report", "status": status, "evidence_level": "E4", "metrics": m}
+    m["lineage"] = {"run": "full_p10", "available": True, "stages": [], "breaks": [], "complete": True}
+    snap = {"id": "s1", "design_id": "d1", "state": "current",
+            "parts": {"design": {"rtl": {"rtl/a.sv": "aa"}, "sdc_sha256": "c" * 64, "pdk_version": "p"}}}
+    return {"tool": "flow_report", "status": status, "evidence_level": "E4", "metrics": m, "snapshot": snap}
 
 
 def test_drc_and_lvs_clean_cited_from_flow_report_pass():

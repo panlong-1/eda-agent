@@ -60,6 +60,18 @@ def print_result(res: dict) -> None:
     print(f"SDC {m.get('sdc')} ({m.get('sdc_basis')}), sha256 {m.get('sdc_sha256', 'not known for the run')}")
     print(f"versions: {res.get('tool_versions')}")
     print(f"experience table: {m.get('experience_table')} ({m.get('provenance')})")
+    snap, lin = res.get("snapshot") or {}, m.get("lineage") or {}
+    print(f"design snapshot: {snap.get('id') or '-'} (design {snap.get('design_id') or '-'}, {snap.get('state')}: "
+          f"{snap.get('note')})")
+    if lin.get("available"):
+        print(f"lineage: {len(lin['stages'])} stages, {'complete' if lin['complete'] else 'INCOMPLETE'}; "
+              f"final copies matching {sum(f['matches'] for f in lin['final'])}/{len(lin['final'])}; "
+              f"breaks {len(lin['breaks'])}; not in this flow: {', '.join(lin['not_present'])}")
+        for s in lin["stages"]:
+            print(f"  {s['stage']:16} " + ", ".join(f"{k}<-{e.get('from')}" for k, e in s["inputs"].items())
+                  + " => " + ", ".join(f"{k} {(e['sha256'] or 'MISSING')[:8]}" for k, e in s["outputs"].items()))
+        for b in lin["breaks"]:
+            print(f"  BREAK [{b.get('level')}] {b['what']}")
     cmp = m.get("comparison") or {}
     if b := cmp.get("baseline"):
         print(f"\nagainst baseline {b['baseline']} (run - baseline):")
@@ -86,7 +98,8 @@ def print_result(res: dict) -> None:
             s = rows["setup_wns"]
             print(f"  {c:22} {_fmt(s['baseline']):>9} -> {_fmt(s['run']):>9}  ({s.get('delta', 0):+g})")
     if sy := cmp.get("synth"):
-        print(f"\nsynth estimate -> post-route (same SDC: {sy['same_sdc']}):")
+        print(f"\nsynth estimate -> post-route [{sy.get('label')}; same design: {sy.get('same_design')}; "
+              f"same SDC: {sy['same_sdc']}]:")
         for c, rows in sy["corners"].items():
             s = rows["setup_wns"]
             print(f"  {c:22} {_fmt(s['baseline']):>9} -> {_fmt(s['run']):>9}  ({s.get('delta', 0):+g})")
@@ -164,7 +177,8 @@ def dispatch(args: argparse.Namespace, resolve_project) -> int | None:
         synth = None
         if args.with_synth and project.flow:
             from .tools.synth import run_synth
-            synth = run_synth(project).to_dict()
+            from .core.snapshot import attach
+            synth = attach(run_synth(project), project).to_dict()
         res = run_flow_report(project, args.run, baseline=args.baseline, synth_result=synth).to_dict()
     elif args.dry_run:
         if project.pnr is None:

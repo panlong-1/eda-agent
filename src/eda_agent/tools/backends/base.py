@@ -54,7 +54,7 @@ def empty_facts(run: Path) -> dict:
         "metrics_source": None, "post_route_sta_step": None, "runtime_s": None, "started": None, "finished": None,
         "design": None, "pdk": None, "std_cell_library": None, "pdk_root": None, "pdk_version": None,
         "clock_port": None, "clock_period": None, "sta_corners": [], "default_corner": None, "config_sha256": None,
-        "sdc_file": None, "rtl_files": [], "decks": {},
+        "sdc_file": None, "rtl_files": [], "defines": [], "include_dirs": [], "decks": {},
         "area": dict.fromkeys(("die_area_um2", "core_area_um2", "die_bbox", "utilization", "stdcell_area_um2",
                                "stdcell_count", "sequential_count", "fill_count", "instance_count",
                                "timing_repair_buffers", "io")),
@@ -101,6 +101,12 @@ class Backend:
 
     def setup_issues(self, config: dict, log_text: str, rules: dict | None = None) -> list[dict]:
         return []
+
+    def lineage(self, path: Path) -> dict:
+        """The run's chain of stages: [{stage, inputs, outputs (view -> {path, sha256}), ok}], breaks,
+        final copies and stages not present. Default: the adapter cannot tell."""
+        return {"run": Path(path).name, "backend": self.name, "available": False, "stages": [], "final": [],
+                "breaks": [], "not_present": [], "complete": False}
 
     def lessons(self, config_file: Path) -> dict[str, dict]:
         """Lessons people wrote into the flow's config (key -> {comment, value}); none by default."""

@@ -36,6 +36,7 @@ from pathlib import Path
 
 from ..core.envelope import Diagnostic, ToolResult, artifact
 from ..core.proc import image_digest, run
+from ..core.snapshot import CURRENT, OLDER, compare_snapshots, make_snapshot
 from ..core.project import Project, expand_vars, project_env
 from . import experience
 from .backends import Backend, get_backend
@@ -373,10 +374,16 @@ def compare_pre_post(f: dict) -> dict:
     return out
 
 
-def compare_synth(f: dict, synth: dict, sdc_sha: str | None) -> dict:
-    """The M2 synth estimate (an envelope dict) against this run's post-route numbers."""
+def compare_synth(f: dict, synth: dict, sdc_sha: str | None, run_snap: dict | None = None) -> dict:
+    """The M2 synth estimate (an envelope dict) against this run's post-route numbers. Always a
+    comparison of two different netlists: synth maps the RTL with our own Yosys script, the flow
+    re-synthesizes it with its own; the numbers are a reference, not a before/after of one design."""
     m = synth.get("metrics") or {}
-    out = {"synth_status": synth.get("status"), "synth_top": m.get("top") or None, "run_top": f.get("design"),
+    same = compare_snapshots(synth.get("snapshot") or {}, run_snap or {})
+    out = {"label": "different netlist",
+           "netlist_note": "synth's Yosys netlist and the flow's own synthesis are different netlists",
+           "same_design": same["same_design"], "design_differences": same["differences"],
+           "synth_status": synth.get("status"), "synth_top": m.get("top") or None, "run_top": f.get("design"),
            "same_sdc": bool(sdc_sha) and m.get("sdc_sha256") == sdc_sha,
            "synth_sdc_sha256": m.get("sdc_sha256"), "corners": {},
            "cells": _delta(m.get("cells"), f["area"]["stdcell_count"]),
@@ -387,7 +394,12 @@ def compare_synth(f: dict, synth: dict, sdc_sha: str | None) -> dict:
             out["corners"][c] = {"synth_corner": sc,
                                  "setup_wns": _delta(vals.get("setup_wns"), f["timing"][c].get("setup_wns")),
                                  "hold_wns": _delta(vals.get("hold_wns"), f["timing"][c].get("hold_wns"))}
-    notes = ["post-route cell counts include CTS, timing-repair, tap and antenna cells that synthesis does not have"]
+    notes = ["different netlist: synth's own Yosys netlist vs the flow's re-synthesized one; a reference only",
+             "post-route cell counts include CTS, timing-repair, tap and antenna cells that synthesis does not have"]
+    if same["same_design"] is False:
+        notes.append("not the same design: " + "; ".join(same["differences"]))
+    elif same["same_design"] is None:
+        notes.append("whether both read the same RTL is not known: " + "; ".join(same["differences"]))
     if not out["same_sdc"]:
         notes.append("synth and this run were timed under different (or unknown) SDCs")
     out["notes"] = notes
@@ -495,6 +507,25 @@ def _risks(f: dict, sdc: dict, corners: list[str], changed: dict | None, level: 
     return risks
 
 
+def run_snapshot(project: Project, f: dict, path: Path, sdc: dict, changed: dict | None) -> dict:
+    """The snapshot of the design this run was made from. A run whose RTL or SDC changed after it
+    ran belongs to an older snapshot: its run-time file contents are not known."""
+    work = Path(project.pnr.work_dir).resolve()
+    src = next((q for q in path.resolve().parents if q.name == "src" and q.is_relative_to(work)), None)
+    side = _sidecar(path)
+    stale = _stale(changed)
+    older = bool(stale) or sdc["basis"] == "changed_since_run"
+    note = ("RTL changed after the run: " + stale if stale else
+            "SDC changed after the run" if sdc["basis"] == "changed_since_run" else
+            "files of eda-agent's copy of the design" if src else "the design's files, unchanged since the run")
+    return make_snapshot(f["rtl_files"], [r for r in (src, project.root) if r], sdc_sha256=sdc["sha256"],
+                         pdk_version=f["pdk_version"], defines=f.get("defines") or [],
+                         include_dirs=f.get("include_dirs") or [],
+                         flow_config_sha256=side.get("config_sha256") or f["config_sha256"],
+                         tools={str(f["backend"]): f["backend_version"]}, image=side.get("image"),
+                         state=OLDER if older else CURRENT, note=note)
+
+
 def run_flow_report(project: Project, run_ref: str, baseline: str | None = None,
                     synth_result: dict | None = None, max_violators: int = 5) -> ToolResult:
     tool = "flow_report"
@@ -518,6 +549,8 @@ def run_flow_report(project: Project, run_ref: str, baseline: str | None = None,
     changed = inputs_changed(f["rtl_files"], f["started"])
     issues = be.setup_issues(config, be.log_text(path), rules)
     table = experience.table_of(project, path, runs_dir(project))
+    snap = run_snapshot(project, f, path, sdc, changed)
+    lin = be.lineage(path)
 
     diags = [Diagnostic("error", f"SIGNOFF_{r.upper()}", d["detail"]) for r, d in rules.items() if d["outcome"] == "fail"]
     diags += [Diagnostic("warning", f"MISSING_{r.upper()}", d["detail"]) for r, d in rules.items()
@@ -549,6 +582,9 @@ def run_flow_report(project: Project, run_ref: str, baseline: str | None = None,
                                                           f"{'; '.join(sdc.get('changes', [])) or sdc['path']}{same}"))
     if _stale(changed):
         diags.append(Diagnostic("warning", "INPUTS_CHANGED", f"RTL changed since the run: {_stale(changed)}"))
+    diags += [Diagnostic("error", "LINEAGE_BREAK", b["what"]) for b in lin.get("breaks", [])]
+    if lin.get("available") and lin.get("stages_absent") and f["stage"] == "full":
+        diags.append(Diagnostic("warning", "LINEAGE_STAGES_ABSENT", "stages not found: " + ", ".join(lin["stages_absent"])))
     diags += [Diagnostic("warning", "SETUP", f"{i['category']}: {i['missing']} ({i['evidence']})") for i in issues]
 
     timed = {c: f["timing"][c] for c in corners if isinstance((f["timing"].get(c) or {}).get("setup_wns"), (int, float))}
@@ -569,8 +605,14 @@ def run_flow_report(project: Project, run_ref: str, baseline: str | None = None,
             bf["sdc"] = sdc_provenance(bf, bpath)
             comparison["baseline"] = compare_runs(f, bf, config, be.config(bpath), be)
             comparison["baseline"]["baseline_table"] = experience.table_of(project, bpath, runs_dir(project))["table"]
+            bsnap = run_snapshot(project, bf, bpath, bf["sdc"], inputs_changed(bf["rtl_files"], bf["started"]))
+            comparison["baseline"]["design"] = compare_snapshots(snap, bsnap)
+            if comparison["baseline"]["design"]["same_design"] is not True:
+                comparison["baseline"]["not_comparable"].append(
+                    "not shown to be the same design (snapshot " + (bsnap.get("state") or "?") + " vs "
+                    + (snap.get("state") or "?") + "): deltas mix design and flow changes")
     if synth_result:
-        comparison["synth"] = compare_synth(f, synth_result, sdc["sha256"])
+        comparison["synth"] = compare_synth(f, synth_result, sdc["sha256"], snap)
 
     metrics = {
         "run": str(path), "tag": f["tag"], "design": f["design"], "complete": f["complete"],
@@ -595,7 +637,7 @@ def run_flow_report(project: Project, run_ref: str, baseline: str | None = None,
         "backend": f["backend"], "backend_version": f["backend_version"], "inputs_changed": changed,
         "setup_issues": issues, "experience_table": table["table"], "provenance": table["provenance"],
         "comparison": comparison,
-        "clock": f["clock"], "clock_skew": f["clock_skew"],
+        "clock": f["clock"], "clock_skew": f["clock_skew"], "lineage": lin,
         # where each number comes from (their sha256 are in artifacts)
         "sources": {"metrics": f["metrics_source"], "post_route_sta": f["post_route_sta_step"], **f["reports"]},
     }
@@ -616,6 +658,7 @@ def run_flow_report(project: Project, run_ref: str, baseline: str | None = None,
     if sdc["path"] and Path(sdc["path"]).is_file():
         arts.append(artifact(sdc["path"]))
     return ToolResult(
+        snapshot=snap,
         tool=tool, status=status, evidence_level=level, claim_scope=_scope(f, sdc, corners, level_name),
         summary=summary, metrics=metrics, diagnostics=diags[:30], diagnostics_total=len(diags), artifacts=arts,
         tool_versions=versions, error_class="incomplete" if status == "error" else None,

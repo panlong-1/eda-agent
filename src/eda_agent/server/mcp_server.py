@@ -9,6 +9,7 @@ import argparse
 from mcp.server.mcpserver import MCPServer
 
 from ..core.project import Project, load_project
+from ..core.snapshot import attach
 from ..tools.describe import describe_cases, list_cases
 from ..tools.flow import run_flow, run_flow_report
 from ..tools.flow_history import run_flow_history
@@ -34,7 +35,7 @@ def build_server(project: Project) -> MCPServer:
         "Returns errors/warnings with file:line. Evidence level E0."
     ))
     def lint(max_diagnostics: int = 20) -> dict:
-        return run_lint(project, max_diagnostics=max_diagnostics).to_dict()
+        return attach(run_lint(project, max_diagnostics=max_diagnostics), project).to_dict()
 
     @server.tool(description=(
         "List every regression case that 'regress' accepts, each with a one-line summary of what "
@@ -56,7 +57,7 @@ def build_server(project: Project) -> MCPServer:
         f"'{project.regress.format}' result format allows) and failing log tails. Evidence level E2."
     ))
     def regress(cases: list[str] | None = None) -> dict:
-        return run_regress(project, cases).to_dict()
+        return attach(run_regress(project, cases), project).to_dict()
 
     @server.tool(description=(
         "Fixed RTL rule checks, no model: blocking assignments in clocked blocks, non-blocking in "
@@ -64,7 +65,7 @@ def build_server(project: Project) -> MCPServer:
         "polarity (text scan). Findings with file:line. Evidence level E0."
     ))
     def rtl_rules(max_diagnostics: int = 30) -> dict:
-        return run_rtl_rules(project, max_diagnostics=max_diagnostics).to_dict()
+        return attach(run_rtl_rules(project, max_diagnostics=max_diagnostics), project).to_dict()
 
     flow = project.flow
     target = (f"top '{flow.top}', clock {flow.clock_port} at {flow.clock_period:g} ns, SDC {flow.sdc}"
@@ -77,14 +78,14 @@ def build_server(project: Project) -> MCPServer:
         "E4. Any timing statement in the report must cite this result. Takes about a minute."
     ))
     def synth() -> dict:
-        return run_synth(project).to_dict()
+        return attach(run_synth(project), project).to_dict()
 
     @server.tool(description=(
         "Check that the project's SDC constrains the synthesized design: OpenSTA check_setup "
         "(clocks, unconstrained endpoints, loops). Facts only; does not raise the evidence level."
     ))
     def check_sdc(max_listed: int = 20) -> dict:
-        return run_check_sdc(project, max_listed=max_listed).to_dict()
+        return attach(run_check_sdc(project, max_listed=max_listed), project).to_dict()
 
     pcfg = project.perf
     perf_what = (f"'{pcfg.key}' and the other counters the testbench prints, on cases "
@@ -98,7 +99,7 @@ def build_server(project: Project) -> MCPServer:
         "cycles, IPC/CPI or 'no performance regression' must cite this result."
     ))
     def perf(cases: list[str] | None = None) -> dict:
-        return run_perf(project, cases).to_dict()
+        return attach(run_perf(project, cases), project).to_dict()
 
     mut = project.mutation
     mut_files = (f"one of {list(mut.files)}" if mut.files else "a .sv/.v file under the project root") \
@@ -116,8 +117,8 @@ def build_server(project: Project) -> MCPServer:
     ))
     def mutate(file: str, count: int = 20, types: list[str] | None = None, cases: list[str] | None = None,
                seed: int = 1, confirm_full: bool = False) -> dict:
-        return run_mutate(project, file, count=count, types=types, cases=cases, seed=seed,
-                          confirm_full=confirm_full).to_dict()
+        return attach(run_mutate(project, file, count=count, types=types, cases=cases, seed=seed,
+                                 confirm_full=confirm_full), project).to_dict()
 
     pnr = project.pnr
     pnr_what = (f"LibreLane config {pnr.config}, default baseline run '{pnr.baseline or 'none'}'" if pnr else
@@ -133,8 +134,8 @@ def build_server(project: Project) -> MCPServer:
         "Any 'DRC/LVS clean', 'post-route timing met', 'signoff' or 'tapeout-ready' statement must cite this result."
     ))
     def flow_report(run: str, baseline: str | None = None, with_synth: bool = False) -> dict:
-        synth_res = run_synth(project).to_dict() if with_synth and project.flow else None
-        return run_flow_report(project, run, baseline=baseline, synth_result=synth_res).to_dict()
+        synth_res = attach(run_synth(project), project).to_dict() if with_synth and project.flow else None
+        return attach(run_flow_report(project, run, baseline=baseline, synth_result=synth_res), project).to_dict()
 
     @server.tool(description=(
         "The design's flow runs in two experience tables: 'imported' (runs found in the design's runs directory, "
@@ -147,7 +148,7 @@ def build_server(project: Project) -> MCPServer:
         "Evidence level E0 (facts)."
     ))
     def flow_history(baseline: str | None = None) -> dict:
-        return run_flow_history(project, baseline=baseline).to_dict()
+        return attach(run_flow_history(project, baseline=baseline), project).to_dict()
 
     @server.tool(description=(
         "Run the LibreLane RTL-to-GDS flow on a copy of the design (never in the checkout), then report it "
@@ -160,7 +161,7 @@ def build_server(project: Project) -> MCPServer:
                     "claim_scope": "Nothing was run.",
                     "summary": "flow_run is not enabled for the agent ([pnr] agent_may_run = false); use flow_report "
                                "on an existing run, or ask the person to run `eda-agent flow-run`"}
-        return run_flow(project, tag=tag).to_dict()
+        return attach(run_flow(project, tag=tag), project).to_dict()
 
     return server
 

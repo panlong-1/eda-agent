@@ -44,6 +44,7 @@ class ToolResult:
     tool_versions: dict = field(default_factory=dict)  # tool name -> first line of its --version
     error_class: str | None = None
     residual_risk: list[str] = field(default_factory=list)
+    snapshot: dict = field(default_factory=dict)  # core/snapshot.py: which design this result describes
 
     def __post_init__(self) -> None:
         if self.evidence_level not in EVIDENCE_LEVELS:

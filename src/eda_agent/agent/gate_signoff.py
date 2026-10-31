@@ -10,6 +10,13 @@
               power too), which a LibreLane run alone does not. Counts it gives ("0 DRC errors")
               must be counts a flow result reports. A negation just before a claim makes it a
               limit ("not yet DRC clean", "not ready for tapeout").
+              A conclusion that joins several stages ("signoff passed", "ready for tapeout",
+              "timing and power both met") must also rest on results of ONE design snapshot with an
+              unbroken lineage (core/snapshot.py consistency): every result of this run that carries
+              a snapshot is the same design (same RTL hashes where they overlap, same SDC and PDK),
+              none is from an older snapshot, and the flow run's lineage has no break. Such reasons
+              start with "[fatal]" (mixing snapshots, broken lineage) or "[error]"; a rejected report
+              is Fatal in the receipt levels either way.
 
 R8 because R6 is reserved for test-score claims (plan §0.6) and R7 is the perf rule.
 """
@@ -17,6 +24,7 @@ from __future__ import annotations
 
 import re
 
+from ..core.snapshot import consistency
 from .gate import _T_CLAUSE, _T_SENTENCE, _negated
 
 FLOW_TOOLS = ("flow_report", "flow_run")
@@ -33,6 +41,8 @@ SIGNOFF_CLAIMS = {
     "lvs": [r"LVS[- ](?:clean|passe[sd]|match(?:es|ed)?)", r"no\s+LVS\s+(?:errors?|mismatch(?:es)?)",
             r"LVS\s+(?:is\s+|was\s+)?(?:clean|passed)", r"LVS\s*(?:干净|通过|一致)"],
     "antenna": [r"antenna[- ]clean", r"no\s+antenna\s+(?:violations?|errors?)", r"天线(?:检查)?\s*(?:通过|无违例)"],
+    "combined": [r"timing\s+and\s+power\s+(?:are\s+|were\s+)?(?:both\s+)?(?:met|fine|ok|within\s+\w+|closed)",
+                 r"(?:meets?|met)\s+(?:both\s+)?timing\s+and\s+power", "时序和功耗都(?:满足|达标|没问题)"],
     "timing_post_route": [
         r"(?:post-?route|post-?layout|routed|signoff)\s+timing\s+(?:is\s+|was\s+|has\s+been\s+)?(?:met|closed|clean)",
         r"timing\s+(?:is\s+|was\s+|has\s+been\s+)?(?:met|closed|clean)\s+(?:post-?route|after\s+(?:routing|PnR)|"
@@ -54,6 +64,7 @@ REQUIRES = {
     "lvs": "0 LVS errors and a matching LVS report",
     "antenna": "0 antenna-violating nets and pins",
     "timing_post_route": "post-route setup and hold met on every signoff corner",
+    "combined": "post-route timing met and a power result judged against a power target (no tool sets one yet)",
 }
 
 
@@ -70,6 +81,8 @@ def _shows(r: dict, kind: str) -> bool:
         return m.get("lvs_errors") == 0 and m.get("lvs_match") is not False
     if kind == "antenna":
         return m.get("antenna_nets") == 0 and (m.get("antenna_pins") or 0) == 0
+    if kind == "combined":
+        return bool(m.get("timing_met")) and m.get("power_met") is True
     return bool(m.get("timing_met"))
 
 
@@ -123,7 +136,26 @@ def check_signoff(claims: str, results: list[dict]) -> list[str]:
             tool = m.group(2) if kind == "drc" else None
             if int(m.group(1)) not in _known_counts(flows, kind, tool):
                 reasons.append(f"cites '{m.group(0)}' but no flow result of this run reports that count: {text!r}")
+        if any(kind in MULTI_STAGE for kind, _ in found):
+            reasons += _one_design(results, flows, text)
     return reasons
+
+
+# Conclusions that join several stages (RTL, netlist, layout, signoff checks, power) into one.
+MULTI_STAGE = ("signoff", "tapeout", "combined")
+
+
+def _one_design(results: list[dict], flows: list[dict], text: str) -> list[str]:
+    """The results behind a multi-stage conclusion describe one design with an unbroken lineage."""
+    used = [r for r in results if r.get("snapshot")] or flows
+    out = [f"[{i['level']}] a multi-stage conclusion needs results of one design snapshot: {i['what']}: {text!r}"
+           for i in consistency(used)["issues"] if i["level"] in ("fatal", "error")]
+    for r in flows:
+        lin = (r.get("metrics") or {}).get("lineage") or {}
+        if not lin.get("available"):
+            out.append(f"[error] {r.get('tool')} {(r.get('metrics') or {}).get('tag')}: its lineage (netlist -> layout "
+                       f"-> signoff) is not known, so its checks cannot be tied to one design: {text!r}")
+    return out
 
 
 def _state(r: dict) -> str:

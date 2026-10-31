@@ -12,6 +12,7 @@ from pathlib import Path
 from ..core.envelope import EVIDENCE_LEVELS
 from .gate import described_cases, executed_cases, split_residual, timing_results
 from .loop import RunReport
+from . import receipt_lineage
 
 
 def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, project: str,
@@ -53,7 +54,9 @@ def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, p
             **_timing(c["result"], void),
             **_perf(c["result"]),
             **_flow(c["result"]),
+            **receipt_lineage.snapshot_of(c["result"]), **receipt_lineage.lineage_of(c["result"]),
         } for c in envelopes],
+        "consistency": receipt_lineage.receipt_consistency([c["result"] for c in envelopes]),
         "other_tool_calls": [{"tool": c["tool"], "args": c["args"],
                               "status": (c["result"] or {}).get("status", "")} for c in others],
         "not_run": {
@@ -164,6 +167,7 @@ def render_markdown(r: dict) -> str:
             out.append(f"| {c['tool']} | {t['clock_period']} ns | {t['wns']} | {t['tns']} | {t['hold_wns']} "
                        f"| {t['worst_corner']} | {'yes' if t['timing_met'] else 'no'} | `{c['sdc_sha256'][:16]}…` "
                        f"| {'VOID (SDC changed later in the run)' if t['void'] else 'no'} |")
+    out += receipt_lineage.render(r)
     nr = r["not_run"]
     out += ["", "## Not run", "",
             f"- lint run: {'yes' if nr['lint_run'] else 'no'}",

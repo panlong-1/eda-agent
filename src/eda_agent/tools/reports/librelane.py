@@ -333,6 +333,8 @@ def read_run(run: Path, violators: int = 10) -> dict:
     eqy = [n for n in log["skipped"] + log["steps_run"] if "eqy" in n.lower() or "equivalence" in n.lower()]
     facts["equivalence_checked"] = (False if any(n in log["skipped"] for n in eqy) else True) if eqy else None
     facts["rtl_files"] = [p for p in resolved.get("VERILOG_FILES") or [] if isinstance(p, str)]
+    facts["defines"] = [d for d in resolved.get("VERILOG_DEFINES") or [] if isinstance(d, str)]
+    facts["include_dirs"] = [d for d in resolved.get("VERILOG_INCLUDE_DIRS") or [] if isinstance(d, str)]
     facts["signoff_tools"] = {"drc": {"Magic": resolved.get("MAGIC_TECH"), "KLayout": resolved.get("KLAYOUT_DRC_RUNSET")},
                               "lvs": {"Netgen": resolved.get("NETGEN_SETUP")}, "antenna": "OpenROAD"}
     if post_step and post:

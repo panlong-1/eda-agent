@@ -6,6 +6,7 @@ names). Runs locally in the LibreLane container image without network.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -116,6 +117,118 @@ def config_lessons(text: str) -> dict[str, dict]:
     return out
 
 
+# Lineage: LibreLane hands a "state" (view -> file) from step to step; each step's state_in.json must
+# equal the previous step's state_out.json. Steps are grouped into stages; for each stage the views it
+# reads and the views it produced are recorded with sha256. Checker/report steps change no view.
+_STAGE_OF = [  # (step-name regex, stage)
+    (r"yosys-synthesis$", "synthesis"), (r"openroad-rcx$", "rc_extraction"),
+    (r"openroad-stapostpnr$", "post_route_sta"), (r"(?:magic|klayout)-streamout$", "gds_streamout"),
+    (r"(?:magic|klayout)-drc$", "drc"), (r"magic-spiceextraction$", "lvs_extraction"),
+    (r"netgen-lvs$", "lvs"),
+    (r"^(?:openroad|odb)-(?!sta|check|report|irdrop|rcx|cellfrequency)", "place_and_route"),
+]
+_READS = {"synthesis": [], "place_and_route": ["nl"], "rc_extraction": ["odb", "def"],
+          "post_route_sta": ["pnl", "odb", "spef", "sdc"], "gds_streamout": ["def", "odb"],
+          "drc": ["gds", "klayout_gds"], "lvs_extraction": ["gds"], "lvs": ["spice", "pnl"]}
+_EXPECTED = ("synthesis", "place_and_route", "rc_extraction", "post_route_sta", "gds_streamout", "drc",
+             "lvs_extraction", "lvs")
+# What a full E5 chain would add after these; LibreLane makes none of them.
+_NOT_PRESENT = ["gate_level_sim (routed netlist + post-route SDF)", "switching activity (VCD/SAIF) from that simulation",
+                "power from that activity"]
+
+
+def _views(state: dict) -> dict[str, str]:
+    """view -> path, per-corner views flattened as view:corner."""
+    out = {}
+    for k, v in state.items():
+        if k == "metrics" or v is None:
+            continue
+        if isinstance(v, dict):
+            out.update({f"{k}:{c}": p for c, p in v.items() if isinstance(p, str)})
+        elif isinstance(v, str):
+            out[k] = v
+    return out
+
+
+def _stage(step_name: str) -> str | None:
+    return next((st for rx, st in _STAGE_OF if re.search(rx, step_name)), None)
+
+
+def lineage(run: Path) -> dict:
+    from ..reports.librelane import steps as _steps
+    run = Path(run)
+    cache: dict[str, str | None] = {}
+
+    def entry(path: str) -> dict:
+        if path not in cache:
+            p = Path(path)
+            cache[path] = hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None
+        try:
+            shown = str(Path(path).relative_to(run))
+        except ValueError:
+            shown = path
+        return {"path": shown, "sha256": cache[path]}
+
+    stages: list[dict] = []
+    breaks: list[dict] = []
+    prev_out: dict | None = None
+    for _, name, d in _steps(run):
+        try:
+            sin = _views(json.loads((d / "state_in.json").read_text()))
+            sout = _views(json.loads((d / "state_out.json").read_text()))
+        except (OSError, ValueError):
+            continue  # a step that did not finish has no state_out; the run stopped there
+        if prev_out is not None and sin != prev_out:
+            changed = sorted(k for k in set(sin) | set(prev_out) if sin.get(k) != prev_out.get(k))
+            breaks.append({"what": f"step {d.name} did not start from the previous step's output ({', '.join(changed[:5])})",
+                           "level": "fatal"})
+        prev_out = sout
+        st = _stage(name)
+        if not st:
+            continue
+        produced = {k: v for k, v in sout.items() if sin.get(k) != v}
+        if stages and stages[-1]["stage"] == st:
+            stages[-1]["steps"][1] = d.name
+            stages[-1]["_out"].update(produced)
+            continue
+        reads = {k: v for k, v in sin.items() if k.split(":")[0] in _READS.get(st, [])}
+        stages.append({"stage": st, "steps": [d.name, d.name], "_in": reads, "_out": dict(produced)})
+    producer: dict[str, str] = {}
+    for s in stages:
+        s["inputs"] = {k: {**entry(p), "from": producer.get(k, "outside the run" if s["stage"] == "synthesis" else "?")}
+                       for k, p in s.pop("_in").items()}
+        s["outputs"] = {k: entry(p) for k, p in s.pop("_out").items()}
+        for k, e in s["inputs"].items():
+            if e["sha256"] is None:
+                breaks.append({"what": f"{s['stage']}: input {k} ({e['path']}) is missing", "level": "fatal"})
+        for k, e in s["outputs"].items():
+            if e["sha256"] is None:
+                breaks.append({"what": f"{s['stage']}: output {k} ({e['path']}) is missing", "level": "fatal"})
+            producer[k] = s["stage"]
+        s["ok"] = all(e["sha256"] for e in [*s["inputs"].values(), *s["outputs"].values()])
+    final = []
+    if prev_out is not None and (run / "final").is_dir():
+        for view, path in sorted(prev_out.items()):
+            name, _, corner = view.partition(":")
+            base = run / "final" / name
+            cands = [p for p in (base / corner).glob("*") if p.is_file()] if corner else \
+                [p for p in base.glob("*") if p.is_file()] if base.is_dir() else []
+            src = entry(path)
+            match = [p for p in cands if p.name == Path(path).name or len(cands) == 1]
+            if match:
+                fe = entry(str(match[0]))
+                ok = fe["sha256"] == src["sha256"]
+                final.append({"view": view, "final": fe["path"], "from": src["path"], "sha256": fe["sha256"], "matches": ok})
+                if not ok:
+                    breaks.append({"what": f"final/{name} differs from the step output it should copy ({src['path']})",
+                                   "level": "fatal"})
+    got = [s["stage"] for s in stages]
+    absent = [st for st in _EXPECTED if st not in got]
+    return {"run": run.name, "backend": "librelane", "available": True, "stages": stages, "final": final,
+            "breaks": breaks, "stages_absent": absent, "not_present": list(_NOT_PRESENT),
+            "complete": not breaks and not absent}
+
+
 class LibreLane(Backend):
     name = "librelane"
     run_mode = "local_container"
@@ -142,6 +255,9 @@ class LibreLane(Backend):
 
     def setup_issues(self, config: dict, log_text: str, rules: dict | None = None) -> list[dict]:
         return setup_issues(config, log_text, rules)
+
+    def lineage(self, path: Path) -> dict:
+        return lineage(Path(path))
 
     def lessons(self, config_file: Path) -> dict[str, dict]:
         if not config_file.is_file() or config_file.suffix not in (".yaml", ".yml"):
