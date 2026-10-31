@@ -226,7 +226,11 @@ def _decide(args: argparse.Namespace, decision: str) -> int:
         print(f"run {args.run_id}: still open; note {len(a['notes'])} recorded by {by}")
     else:
         print(f"run {args.run_id}: {a['status']} by {a['by']} at {a['at']} ({_levels(receipt)})")
-    print(f"receipt: {md.with_suffix('.html')} (also {md.name}, json: {js.name})")
+    page = md.with_suffix(".html")
+    if page.is_file():
+        print(f"receipt: {page} (also {md.name}, json: {js.name})")
+    else:  # write-tests receipts have no HTML page yet
+        print(f"receipt: {md} (json: {js.name})")
     return 0
 
 
