@@ -13,6 +13,10 @@ lets an overclaim through.
                 only say which cases passed
   R3 risk       the report has a residual-risk section with some content
   R4 skipped    a case the agent described but did not run is named in that section
+  R5 timing     a timing claim ("meets 100 MHz", "positive slack", "timing met") names a result
+                of this run that carries an SDC sha256 and agrees with it (met/not met, the
+                clock, every WNS/TNS/slack number); when the SDC hash changes during a run,
+                timing results measured under the earlier SDC are void
 """
 from __future__ import annotations
 
@@ -32,7 +36,7 @@ STRONG_CLAIM_WORDS = [
 ]
 # One of these earlier in the same clause makes it a limit, not a claim ("does not show ... correct").
 NEGATIONS = [
-    r"not", r"no", r"n't", r"never", r"cannot", r"without", r"unproven", r"unverified",
+    r"not", r"no", r"nothing", r"n't", r"never", r"cannot", r"without", r"unproven", r"unverified",
     r"would", r"need(?:s|ed)?", r"requires?", r"until", r"beyond", r"only if",
     "不", "未", "没有", "无法", "需要",
 ]
@@ -49,6 +53,27 @@ _SENTENCE = re.compile(r"[^.!?。！？\n]+")
 # What may stand before the strong word in a later item of a list: "correct", "or bug-free",
 # "fully correct", "或无 bug". Anything more ("but the design is correct") starts a new claim.
 _LIST_ITEM = re.compile(r"\s*(?:(?:or|and|nor)\s+|或者?|和|以及|及)?\s*(?:[A-Za-z]+ly\s+)?", re.I)
+
+
+# Positive timing claims. A negation earlier in the clause makes one a limit ("not timed
+# against 100 MHz"); "no setup violations" is a claim, its "no" is part of the pattern.
+TIMING_CLAIMS = [
+    r"meets?\s+(?:the\s+|its\s+)?(?:\d+(?:\.\d+)?\s*MHz|timing|(?:target\s+)?clock|\d+(?:\.\d+)?\s*ns)",
+    r"meeting\s+(?:timing|\d+(?:\.\d+)?\s*MHz)", r"met\s+(?:timing|\d+(?:\.\d+)?\s*MHz)",
+    r"timing\s+(?:is\s+|was\s+|has\s+been\s+)?(?:met|closed|clean|satisfied)",
+    r"(?:positive|non-?negative)\s+(?:setup\s+|hold\s+|worst\s+)?slack", r"slack\s+(?:is\s+|stays\s+|remains\s+)?positive",
+    r"no\s+(?:setup|hold|timing)\s+violations?", r"timing\s+closure", r"runs?\s+at\s+\d+(?:\.\d+)?\s*MHz",
+    "满足时序", "时序(?:满足|达标|收敛|通过)", r"满足\s*\d+(?:\.\d+)?\s*MHz", r"正\s*slack", r"slack\s*为正",
+]
+_TIMING = re.compile("|".join(f"(?:{p})" for p in TIMING_CLAIMS), re.I)
+_MHZ = re.compile(r"(\d+(?:\.\d+)?)\s*MHz", re.I)
+# A number given as WNS / TNS / slack: "WNS +0.698 ns", "slack of 0.70", "TNS = -3.1"
+_TIMING_NUM = re.compile(r"\b(WNS|TNS|slack)\b[^\d+\-.]{0,20}([+-]?\d+(?:\.\d+)?)", re.I)
+# Sentences and clauses for R5: a decimal point or comma between digits does not end them.
+_T_SENTENCE = re.compile(r"(?:[^.!?。！？\n]|(?<=\d)\.(?=\d))+")
+_T_CLAUSE = re.compile(r"(?:[^.!?;,。！？；，\n]|(?<=\d)[.,](?=\d))+")
+# What names a timing result in a sentence: the tool, its STA, its level, or the SDC hash
+_TIMING_CITE = re.compile(r"\b(?:synth|STA|OpenSTA|E4)\b|\b[0-9a-f]{8,64}\b", re.I)
 
 
 @dataclass
@@ -179,6 +204,72 @@ def check_skipped(residual: str, results: list[dict]) -> list[str]:
             if not re.search(rf"(?<![\w]){re.escape(name)}(?![\w])", residual)]
 
 
+def timing_results(results: list[dict]) -> tuple[list[dict], list[dict]]:
+    """(valid, void) timing results of this run, in run order. A timing result carries an SDC
+    sha256 and a WNS; those measured under an SDC other than the run's latest one are void."""
+    hashes = [(r.get("metrics") or {}).get("sdc_sha256") for r in results]
+    latest = next((h for h in reversed(hashes) if h and h != "missing"), None)
+    timed = [r for r in results if (r.get("metrics") or {}).get("sdc_sha256")
+             and isinstance((r.get("metrics") or {}).get("wns"), (int, float))]
+    valid = [r for r in timed if r["metrics"]["sdc_sha256"] == latest]
+    return valid, [r for r in timed if r not in valid]
+
+
+def _timing_numbers(r: dict) -> set[float]:
+    m = r.get("metrics") or {}
+    nums = [m.get("wns"), m.get("tns"), m.get("hold_wns"), (m.get("worst_path") or {}).get("slack")]
+    for c in (m.get("corners") or {}).values():
+        nums += [c.get(k) for k in ("setup_wns", "setup_tns", "hold_wns", "hold_tns")]
+    return {float(x) for x in nums if isinstance(x, (int, float))}
+
+
+def _matches(value: float, decimals: int, known: set[float]) -> bool:
+    return any(abs(value - k) <= 0.5 * 10 ** -decimals + 1e-9 or abs(value - round(k, decimals)) < 1e-9
+               for k in known)
+
+
+def check_timing(claims: str, results: list[dict]) -> list[str]:
+    valid, void = timing_results(results)
+    void_note = (f" ({len(void)} earlier timing result(s) are void: the SDC changed during this run)"
+                 if void else "")
+    reasons = []
+    for sentence in _T_SENTENCE.findall(claims):
+        claimed = []
+        for clause in _T_CLAUSE.findall(sentence):
+            for m in _TIMING.finditer(clause):
+                if not _NEG.search(clause[:m.start()]):
+                    claimed.append(m.group(0))
+        numbers = [(m.group(1), m.group(2)) for m in _TIMING_NUM.finditer(sentence)]
+        if not claimed and not numbers:
+            continue
+        text = sentence.strip()
+        if not valid:
+            reasons.append(f"timing statement '{(claimed or [numbers[0][0]])[0]}' but no result of this run "
+                           f"carries an SDC sha256 and a timing estimate{void_note}; run synth: {text!r}")
+            continue
+        if claimed and not _TIMING_CITE.search(sentence):
+            reasons.append(f"timing claim '{claimed[0]}' must name the result it rests on (synth / STA, E4 "
+                           f"or the SDC sha256) in the same sentence: {text!r}")
+        if claimed and not any(r["metrics"].get("timing_met") for r in valid):
+            reasons.append(f"timing claim '{claimed[0]}', but the synth result of this run says timing is "
+                           f"NOT met under its SDC (WNS {valid[-1]['metrics'].get('wns')}): {text!r}")
+        periods = {r["metrics"].get("clock_period") for r in valid}
+        for mhz in _MHZ.findall(sentence):
+            if not any(p and abs(1000.0 / p - float(mhz)) < 0.5 for p in periods):
+                reasons.append(f"says {mhz} MHz but the timing results of this run used a clock period of "
+                               f"{', '.join(f'{p:g} ns' for p in periods if p)}: {text!r}")
+        known = set().union(*(_timing_numbers(r) for r in valid))
+        stale = set().union(*(_timing_numbers(r) for r in void)) if void else set()
+        for name, num in numbers:
+            decimals = len(num.split(".")[1]) if "." in num else 0
+            if _matches(float(num), decimals, known):
+                continue
+            why = "it comes from a timing result made void by an SDC change" if _matches(
+                float(num), decimals, stale) else "no valid timing result of this run reports it"
+            reasons.append(f"cites {name} {num} but {why}: {text!r}")
+    return reasons
+
+
 def check_report(report: str, results: list[dict]) -> GateDecision:
     """results: the parsed tool results of this run (envelopes, describe_case output, ...)."""
     envelopes = [r for r in results if r.get("evidence_level") in EVIDENCE_LEVELS]
@@ -186,7 +277,7 @@ def check_report(report: str, results: list[dict]) -> GateDecision:
     max_level = max(passing, key=_rank, default="")
     claims, residual = split_residual(report)
     reasons = (check_citations(claims, envelopes) + check_strength(claims, envelopes)
-               + check_residual(residual))
+               + check_timing(claims, envelopes) + check_residual(residual))
     if not reasons:  # R4 needs the residual-risk section, so it is checked once R1-R3 pass
         reasons = check_skipped(residual, results)
     return GateDecision(passed=not reasons, reasons=reasons, max_level=max_level)
