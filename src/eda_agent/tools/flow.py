@@ -47,14 +47,22 @@ LOCK = ".flow_run.lock"
 # XOR differences, lint warnings.
 SIGNOFF_RULES = {
     "setup": "post-route setup worst slack >= 0 on every signoff corner",
+    "clock_propagated": "post-route path reports of every signoff corner time the clock as propagated (real "
+                        "clock tree), with no clock left ideal",
     "hold": "post-route hold worst slack >= 0 on every signoff corner",
     "drc_magic": "Magic DRC error count == 0",
     "drc_klayout": "KLayout DRC error count == 0",
     "lvs": "Netgen LVS error count == 0 (and the LVS report, when present, says the circuits match)",
     "antenna": "antenna-violating nets == 0 and pins == 0 after routing",
 }
-# What E5 needs; flow_report fills the first four from the run.
-E5_PARTS = ("post_route_sta_multi_corner", "drc", "lvs", "antenna", "gate_level_sim", "vcd_power")
+# The E5 checklist. A complete E5 needs every item; flow_report fills those a LibreLane run can show.
+# The last two need a simulation of the routed netlist, which LibreLane does not do:
+#   gate_level_sim_sdf: the routed netlist simulated with the post-route SDF at the slow and the fast
+#     corner, timing checks ON (a run with +notimingchecks, or zero-delay, does not count);
+#   vcd_power: power from that simulation's switching activity, with its annotation coverage and the
+#     activity corner and Liberty corner named (vectorless power is an estimate, not this).
+E5_PARTS = ("post_route_sta_multi_corner", "propagated_clock", "parasitics_annotated", "drc", "lvs",
+            "antenna", "gate_level_sim_sdf", "vcd_power")
 
 _GIT_TIMEOUT = 20
 
@@ -79,6 +87,19 @@ def evaluate_signoff(f: dict, signoff_corners: list[str]) -> dict[str, dict]:
                                          f"{', '.join(missing) or '(none configured)'}")
         else:
             out[kind] = _rule("pass", ", ".join(f"{c} {timing[c][key]:+.3f}" for c in signoff_corners))
+    clk = f.get("clock") or {}
+    no_rpt = [c for c in signoff_corners if c not in clk]
+    ideal = {c: clk[c] for c in signoff_corners if c in clk and (clk[c]["ideal"] or clk[c]["unpropagated_clocks"])}
+    if ideal:
+        out["clock_propagated"] = _rule("fail", "; ".join(
+            f"{c}: {v['ideal']} path(s) with an ideal clock, unpropagated: {v['unpropagated_clocks'] or 'none'}"
+            for c, v in ideal.items()))
+    elif no_rpt or not signoff_corners:
+        out["clock_propagated"] = _rule("missing", f"no post-route path report for corner(s) "
+                                                   f"{', '.join(no_rpt) or '(none configured)'}")
+    else:
+        out["clock_propagated"] = _rule("pass", ", ".join(f"{c} {clk[c]['propagated']} propagated path(s)"
+                                                          for c in signoff_corners))
     for rule, tool, n in (("drc_magic", "Magic", f["drc"]["magic"]), ("drc_klayout", "KLayout", f["drc"]["klayout"])):
         out[rule] = (_rule("missing", f"no {tool} DRC result in this run") if n is None else
                      _rule("pass" if n == 0 else "fail", f"{n} {tool} DRC error(s)"))
@@ -107,18 +128,20 @@ def e5_parts(f: dict, rules: dict[str, dict], signoff_corners: list[str]) -> dic
     ran = lambda r: rules[r]["outcome"] != "missing"  # noqa: E731
     return {
         "post_route_sta_multi_corner": len(signoff_corners) > 1 and ran("setup") and ran("hold"),
+        "propagated_clock": rules["clock_propagated"]["outcome"] == "pass",
+        "parasitics_annotated": f["electrical"].get("unannotated_nets_filtered") == 0,
         "drc": ran("drc_magic") and ran("drc_klayout"),
         "lvs": ran("lvs"),
         "antenna": ran("antenna"),
-        "gate_level_sim": False,   # LibreLane does not simulate the routed netlist
-        "vcd_power": False,        # its power is vectorless (default switching activity)
+        "gate_level_sim_sdf": False,   # LibreLane does not simulate the routed netlist
+        "vcd_power": False,            # its power is vectorless (default switching activity)
     }
 
 
 def signoff_level(parts: dict[str, bool]) -> str:
     if all(parts.values()):
         return "E5"
-    if parts["post_route_sta_multi_corner"] and parts["drc"] and parts["lvs"]:
+    if parts["post_route_sta_multi_corner"] and parts["propagated_clock"] and parts["drc"] and parts["lvs"]:
         return "E5-partial"
     return "E4"
 
@@ -374,8 +397,29 @@ def compare_runs(new: dict, base: dict, new_resolved: dict, base_resolved: dict)
     elif new["sdc"]["sha256"] != base["sdc"]["sha256"]:
         notes.append("different SDC (sha256 differs): timing deltas mix design and constraint changes")
     out["not_comparable"] = notes
+    out["better"], out["worse"] = _better_worse(out)
     out["config_differences"] = _config_diff(base_resolved, new_resolved, base["run"], new["run"])
     return out
+
+
+# Direction of "better" for compared numbers: +1 higher is better, -1 lower is better. Area, cells and
+# runtime have no direction here: smaller is not better if it costs timing.
+_BETTER = {"setup_wns": 1, "hold_wns": 1, "setup_tns": 1, "setup_violations": -1, "hold_violations": -1,
+           "drc_magic": -1, "drc_klayout": -1, "lvs_errors": -1, "antenna_nets": -1, "max_slew_violations": -1,
+           "max_cap_violations": -1, "max_fanout_violations": -1, "power_total_w": -1}
+
+
+def _better_worse(cmp: dict) -> tuple[list[str], list[str]]:
+    """Which compared numbers moved in the good and in the bad direction: the list a person reads
+    first to accept or reject a change (a rejected optimisation is documented by its 'worse' list)."""
+    rows = list(cmp["metrics"].items()) + \
+        [(f"{k}@{c}", r) for c, rs in cmp["corners"].items() for k, r in rs.items()]
+    better, worse = [], []
+    for name, r in rows:
+        sign = _BETTER.get(name.split("@")[0])
+        if sign and r.get("delta"):
+            (better if r["delta"] * sign > 0 else worse).append(f"{name} {r['baseline']} -> {r['run']}")
+    return better, worse
 
 
 def _config_diff(a: dict, b: dict, run_a: str, run_b: str, limit: int = 20) -> list[dict]:
@@ -472,15 +516,16 @@ def _scope(f: dict, sdc: dict, corners: list[str], level: str) -> str:
                f"SDC {sdc['path']} whose content at run time is not known ({sdc['basis']})")
     return (
         f"LibreLane {f['librelane_version']} run '{f['tag']}' of top '{f['design']}' on {f['pdk']} "
-        f"(PDK version {str(f['pdk_version'])[:12]}): post-route STA with extracted parasitics on corner(s) "
+        f"(PDK version {str(f['pdk_version'])[:12]}): post-route STA with a propagated clock and extracted parasitics on corner(s) "
         f"{', '.join(corners) or 'none'} at a {f['clock_period']} ns clock under {sdc_txt}; Magic DRC "
         f"({Path(str(decks['magic_tech'])).name}), KLayout DRC ({Path(str(decks['klayout_drc_runset'])).name}), "
         f"Netgen LVS ({Path(str(decks['netgen_setup'])).name}) and the OpenROAD antenna check on the final "
         f"layout. Signoff level {level}" + {"E5-partial": ": the physical-signoff parts of E5", "E5": "",
-                                            "E4": " (not all of post-route STA on several corners, DRC and LVS "
-                                                  "have results)"}[level] + ". It does not show gate-level "
-        "simulation of the routed netlist, power from real switching activity (power here is vectorless), "
-        "timing at RC-extraction corners other than those named, or anything about function."
+                                            "E4": " (not all of post-route STA on several corners with a "
+                                                  "propagated clock, DRC and LVS have results)"}[level]
+        + ". It does not show gate-level simulation of the routed netlist (with post-route SDF and timing "
+        "checks), power from real switching activity (power here is vectorless), timing at RC-extraction "
+        "corners other than those named, IR drop or electromigration signoff, or anything about function."
     )
 
 
@@ -498,8 +543,10 @@ def _stale(changed: dict | None) -> str:
 def _risks(f: dict, sdc: dict, corners: list[str], changed: dict | None, level: str) -> list[str]:
     risks = []
     if level != "E5":
-        risks.append("no gate-level simulation of the routed netlist (with SDF): behaviour after PnR is not checked")
-        risks.append("power is vectorless (OpenSTA default switching activity at the default corner), not from a VCD")
+        risks.append("no gate-level simulation of the routed netlist: E5 needs it with the post-route SDF at the "
+                     "slow and fast corners and timing checks on; behaviour after PnR is not checked")
+        risks.append("power is vectorless (OpenSTA default switching activity at the default corner), not from a "
+                     "simulation VCD with stated annotation coverage and activity/Liberty corners")
     if corners and all(c.startswith("nom_") for c in corners):
         risks.append("only nominal RC extraction was timed (nom_* corners); min/max RC corners were not analysed")
     risks.append("timing is only as meaningful as the SDC: its I/O delays and exceptions are assumptions")
@@ -509,7 +556,8 @@ def _risks(f: dict, sdc: dict, corners: list[str], changed: dict | None, level: 
     if "Equivalence Check" in f["skipped_steps"] or any("EQY" in s for s in f["skipped_steps"]):
         risks.append("the netlist was not checked for equivalence with the RTL (Yosys.EQY skipped)")
     if f["ir_drop"]["worst_v"] is not None:
-        risks.append("IR drop is OpenROAD's static estimate without real supply-pad locations")
+        risks.append("IR drop is OpenROAD's static estimate without real supply-pad locations; electromigration "
+                     "was not checked")
     if _stale(changed):
         risks.append(f"the RTL changed after this run ({_stale(changed)}): it may not describe the current design")
     return risks
@@ -548,6 +596,14 @@ def run_flow_report(project: Project, run_ref: str, baseline: str | None = None,
     for k, v in f["electrical"].items():
         if k.endswith("violations") and v:
             diags.append(Diagnostic("warning", k.upper(), f"{v} {k.replace('_', ' ')} (not a signoff rule here)"))
+    for c, v in (f.get("clock") or {}).items():
+        if v["nonzero_source_latency"]:
+            diags.append(Diagnostic("warning", "CLOCK_SOURCE_LATENCY", f"{c}: clock source latency "
+                                    f"{v['nonzero_source_latency']} ns in the path reports; a latency on one "
+                                    "side only shifts every slack"))
+    if (un := f["electrical"].get("unannotated_nets_filtered")):
+        diags.append(Diagnostic("warning", "UNANNOTATED_NETS", f"{un} net(s) without extracted parasitics in "
+                                                                "post-route STA"))
     for x in f["cross_checks"]:
         if not x["agree"]:
             diags.append(Diagnostic("warning", "CROSS_CHECK", f"{x['what']}: metric {x['metric']} vs report {x['report']}"))
@@ -605,6 +661,9 @@ def run_flow_report(project: Project, run_ref: str, baseline: str | None = None,
         "config_sha256": f["config_sha256"], "pdk": f["pdk"], "pdk_version": f["pdk_version"],
         "librelane_version": f["librelane_version"], "inputs_changed": changed, "setup_issues": issues,
         "comparison": comparison,
+        "clock": f["clock"], "clock_skew": f["clock_skew"],
+        # where each number comes from (their sha256 are in artifacts)
+        "sources": {"metrics": f["metrics_source"], "post_route_sta": f["post_route_sta_step"], **f["reports"]},
     }
     if sdc["sha256"]:
         metrics["sdc_sha256"] = sdc["sha256"]  # only then may a timing claim cite this result (gate R5)

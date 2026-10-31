@@ -66,6 +66,9 @@ def print_result(res: dict) -> None:
             s = rows["setup_wns"]
             if "delta" in s:
                 print(f"  setup WNS {c:14} {_fmt(s['baseline']):>12} -> {_fmt(s['run']):>12}  {s['delta']:+g}")
+        for label in ("better", "worse"):
+            if b.get(label):
+                print(f"  {label}: " + "; ".join(b[label]))
         for n in b["not_comparable"]:
             print(f"  note: {n}")
         if b["config_differences"]:

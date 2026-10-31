@@ -108,9 +108,9 @@ def test_full_p10_fails_on_slow_corner_setup_only(tmp_path):
     rules = r.metrics["signoff"]
     assert rules["setup"]["outcome"] == "fail" and SLOW in rules["setup"]["detail"]
     assert {k: v["outcome"] for k, v in rules.items() if k != "setup"} == dict.fromkeys(
-        ("hold", "drc_magic", "drc_klayout", "lvs", "antenna"), "pass")
+        ("hold", "clock_propagated", "drc_magic", "drc_klayout", "lvs", "antenna"), "pass")
     assert r.metrics["signoff_level"] == "E5-partial"
-    assert r.metrics["e5_parts"]["gate_level_sim"] is False and r.metrics["e5_parts"]["drc"] is True
+    assert r.metrics["e5_parts"]["gate_level_sim_sdf"] is False and r.metrics["e5_parts"]["drc"] is True
     assert r.metrics["wns"] == pytest.approx(-4.3499, abs=1e-4) and r.metrics["worst_corner"] == SLOW
     assert r.metrics["worst_path"]["endpoint"] == "s_haddr[8]"
     assert not r.metrics["timing_met"]
@@ -162,6 +162,34 @@ def test_incomplete_run_is_an_error_not_a_pass(tmp_path):
     assert r.metrics["signoff"]["lvs"]["outcome"] == "missing" and r.metrics["signoff_level"] == "E4"
     assert r.metrics["timing_met"]  # timing itself was met; only signoff is incomplete
     assert any(d.code == "INCOMPLETE" for d in r.diagnostics)
+
+
+def test_parse_clock_paths():
+    text = ("   0.000000    0.000000   clock source latency\n   0.000000   10.000000   clock network delay (propagated)\n"
+            "   0.000000    0.950000   clock source latency\n   0.000000    0.000000   clock network delay (ideal)\n")
+    assert ll.parse_clock_paths(text) == {"propagated": 1, "ideal": 1, "nonzero_source_latency": [0.95]}
+
+
+def test_ideal_clock_in_post_route_sta_fails_signoff(tmp_path):
+    cfg, runs = _project(tmp_path)
+    run = runs / "full_p10"
+    _close_timing(run)
+    rpt = run / "55-openroad-stapostpnr" / TYP / "max.rpt"
+    rpt.write_text(rpt.read_text().replace("(propagated)", "(ideal)")
+                   + "   0.000000   -0.900000   clock source latency\n")
+    r = run_flow_report(load_project(cfg), "full_p10")
+    assert r.status == "fail" and r.metrics["signoff"]["clock_propagated"]["outcome"] == "fail"
+    assert r.metrics["signoff_level"] == "E4" and not r.metrics["e5_parts"]["propagated_clock"]
+    assert any(d.code == "CLOCK_SOURCE_LATENCY" and TYP in d.msg for d in r.diagnostics)
+
+
+def test_e5_checklist_on_full_p10():
+    f = ll.read_run(FIXTURE)
+    corners = [SLOW, TYP, FAST]
+    parts = flow_mod.e5_parts(f, evaluate_signoff(f, corners), corners)
+    assert parts == {"post_route_sta_multi_corner": True, "propagated_clock": True, "parasitics_annotated": True,
+                     "drc": True, "lvs": True, "antenna": True, "gate_level_sim_sdf": False, "vcd_power": False}
+    assert flow_mod.signoff_level(parts) == "E5-partial"
 
 
 def test_no_post_route_sta_means_timing_missing():
@@ -222,6 +250,7 @@ def test_compare_with_baseline_reports_deltas_and_config_differences(tmp_path):
     assert b["metrics"]["die_area_um2"]["delta"] == 500000 - 559132
     assert b["corners"][SLOW]["setup_wns"]["delta"] == pytest.approx(-0.7 + 4.349882, abs=1e-5)
     assert [d["key"] for d in b["config_differences"]] == ["SYNTH_MUL_BOOTH"]
+    assert any(x.startswith(f"setup_wns@{SLOW}") for x in b["better"]) and b["worse"] == []
     assert res.metrics["comparison"]["pre_pnr_same_run"][SLOW]["setup_wns"]["baseline"] == pytest.approx(-1.786, abs=1e-3)
 
 

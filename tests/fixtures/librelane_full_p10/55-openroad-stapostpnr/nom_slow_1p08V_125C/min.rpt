@@ -1,0 +1,12 @@
+Startpoint: i_hready (input port clocked by CLK)
+                                  0.000000    0.000000   clock network delay (propagated)
+                                  0.000000    0.000000   clock source latency
+Startpoint: s_hrdata[26] (input port clocked by CLK)
+                                  0.000000    0.000000   clock network delay (propagated)
+                                  0.000000    0.000000   clock source latency
+Startpoint: s_hrdata[4] (input port clocked by CLK)
+                                  0.000000    0.000000   clock network delay (propagated)
+                                  0.000000    0.000000   clock source latency
+Startpoint: d_hrdata[17] (input port clocked by CLK)
+                                  0.000000    0.000000   clock network delay (propagated)
+                                  0.000000    0.000000   clock source latency

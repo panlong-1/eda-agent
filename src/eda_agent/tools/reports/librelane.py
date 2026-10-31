@@ -137,6 +137,20 @@ def parse_power_report(text: str) -> dict | None:
     return {"internal_w": internal, "switching_w": switching, "leakage_w": leakage, "total_w": total}
 
 
+_CLK_NET = re.compile(r"clock network delay \((propagated|ideal)\)")
+_SRC_LAT = re.compile(r"^\s*(-?[\d.]+)\s+(-?[\d.]+)\s+clock source latency", re.M)
+
+
+def parse_clock_paths(text: str) -> dict:
+    """How the clock was timed in OpenSTA path reports: paths with a propagated or an ideal
+    clock network, and launch/capture clock source latencies that are not zero (a source latency
+    applied to one side only shifts every slack)."""
+    kinds = _CLK_NET.findall(text)
+    nonzero = sorted({float(b) for a, b in _SRC_LAT.findall(text) if float(b) != 0.0})
+    return {"propagated": kinds.count("propagated"), "ideal": kinds.count("ideal"),
+            "nonzero_source_latency": nonzero[:5]}
+
+
 def parse_runtime(text: str) -> float | None:
     m = _RUNTIME.match(text.strip())
     return (int(m[1] or 0) * 3600 + int(m[2]) * 60 + float(m[3])) if m else None
@@ -197,13 +211,20 @@ def read_run(run: Path, violators: int = 10) -> dict:
         return None
 
     timing = {c: corner_timing(post, c) for c in names} if post else {}
-    viol, power_by_corner = {}, {}
+    viol, power_by_corner, clock_by_corner = {}, {}, {}
     for c in names:
         if (vp := post_step / c / "violator_list.rpt").is_file():
             viol[c] = parse_violators(vp.read_text(errors="replace"), violators)
             reports[f"violators_{c}"] = vp
         if (pp := post_step / c / "power.rpt").is_file():
             power_by_corner[c] = parse_power_report(pp.read_text(errors="replace"))
+        paths = [post_step / c / n for n in ("max.rpt", "min.rpt") if (post_step / c / n).is_file()]
+        if paths:
+            clk = parse_clock_paths("\n".join(p.read_text(errors="replace") for p in paths))
+            unprop = post_step / c / "unpropagated.rpt"  # LibreLane lists clocks left ideal here
+            clk["unpropagated_clocks"] = [ln.strip() for ln in _text(unprop).splitlines() if ln.strip()][:5]
+            clock_by_corner[c] = clk
+            reports[f"paths_{c}"] = paths[0]
     if post_step and (s := post_step / "summary.rpt").is_file():
         reports["sta_summary"] = s
 
@@ -258,10 +279,14 @@ def read_run(run: Path, violators: int = 10) -> dict:
         "timing": timing,
         "pre_pnr_timing": {c: corner_timing(pre, c) for c in corners(pre)} if pre else {},
         "violators": viol,
+        "clock": clock_by_corner,
+        "clock_skew": {"setup": m.get("clock__skew__worst_setup"), "hold": m.get("clock__skew__worst_hold")},
         "electrical": {"max_slew_violations": m.get("design__max_slew_violation__count"),
                        "max_cap_violations": m.get("design__max_cap_violation__count"),
                        "max_fanout_violations": m.get("design__max_fanout_violation__count"),
                        "unannotated_nets": m.get("timing__unannotated_net__count"),
+                       # nets without parasitics after LibreLane drops those that need none (e.g. constants)
+                       "unannotated_nets_filtered": m.get("timing__unannotated_net_filtered__count"),
                        "floating_nets": m.get("timing__drv__floating__nets")},
         "drc": {"magic": m.get("magic__drc_error__count"), "klayout": m.get("klayout__drc_error__count"),
                 "detailed_router": m.get("route__drc_errors"),

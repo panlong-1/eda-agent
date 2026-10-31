@@ -25,7 +25,7 @@ def test_flow_report_full_p10():
     assert _status() == before  # nothing in the TORV checkout changed
     m = r.metrics
     assert r.status == "fail" and m["signoff"]["setup"]["outcome"] == "fail"
-    assert all(m["signoff"][k]["outcome"] == "pass" for k in ("hold", "drc_magic", "drc_klayout", "lvs", "antenna"))
+    assert all(m["signoff"][k]["outcome"] == "pass" for k in ("hold", "clock_propagated", "drc_magic", "drc_klayout", "lvs", "antenna"))
     assert m["signoff_level"] == "E5-partial" and r.evidence_level == "E4"
     assert m["worst_corner"] == "nom_slow_1p08V_125C" and m["wns"] == pytest.approx(-4.3499, abs=1e-3)
     assert m["area"]["die_area_um2"] == 559132 and m["area"]["stdcell_count"] == 23130

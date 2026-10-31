@@ -310,16 +310,22 @@ eda-agent flow-run --project projects/torv.toml --tag mytag [--dry-run]
 ```
 
 **Signoff rules** (one table, `SIGNOFF_RULES` in `tools/flow.py`): post-route setup and hold
-worst slack ≥ 0 on every signoff corner, Magic DRC = 0, KLayout DRC = 0, Netgen LVS errors = 0
-with a matching report, antenna-violating nets and pins = 0. Any rule failing → `fail`; a
+worst slack ≥ 0 on every signoff corner, the post-route path reports time a propagated clock (no
+ideal clock left; a non-zero clock source latency is flagged, since one applied to one side only
+shifts every slack), Magic DRC = 0, KLayout DRC = 0, Netgen LVS errors = 0 with a matching
+report, antenna-violating nets and pins = 0. Any rule failing → `fail`; a
 check that did not run → `error` (incomplete); else `pass`. Max slew/cap/fanout, IR drop and
 detailed-router DRC are reported as warnings. Metric counts are cross-checked against the
 report files they come from.
 
 **Evidence level.** E5 means post-route multi-corner STA + DRC/LVS + gate-level simulation +
 VCD power. LibreLane gives the first two, with vectorless power and no gate-level simulation of
-the routed netlist, so `metrics.signoff_level` is `E5-partial` (with `e5_parts` saying what is
-there) and the envelope stays **E4**: the gate treats E5 as a functional level (R2), and a
+the routed netlist, so `metrics.signoff_level` is `E5-partial` and the envelope stays **E4**.
+`e5_parts` is the checklist: multi-corner post-route STA, propagated clock, all nets with
+parasitics, DRC, LVS, antenna, then the two a flow cannot give, gate-level simulation of the
+routed netlist with post-route SDF at slow and fast corners **with timing checks on**, and power
+from that simulation's activity with its annotation coverage and corners named. The envelope
+stays E4: the gate treats E5 as a functional level (R2), and a
 physical flow says nothing about function.
 
 **Which SDC.** A timing result is tied to its SDC (R5). LibreLane does not record the SDC's
