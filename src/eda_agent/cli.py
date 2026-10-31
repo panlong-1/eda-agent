@@ -10,11 +10,14 @@
     eda-agent run --project projects/torv.toml "Lint the design and run the smoke case"
     eda-agent run --provider deepseek --review I2 --project projects/torv.toml "..."
     eda-agent review <run_id> --review I3 --project projects/torv.toml   (review a finished run)
-    eda-agent approve <run_id>                                          (human gate)
+    eda-agent approve <run_id> [--reason "..."] [--override]           (human gate; see human_gate.py)
     eda-agent reject <run_id> --reason "..."
+    eda-agent pending <run_id> --note "..."                             (decide later; the run stays open)
+    eda-agent review-ui [--port 8799]                                   (decide by clicking, on localhost)
+    eda-agent receipt <run_id> [--narrate]                              (re-render .md/.html [+ model summary])
 
 --project may be left out when the current directory (or a parent) has eda-agent.toml.
-Personal defaults (provider, model, effort, review) live in ~/.config/eda-agent/config.toml.
+Personal defaults (provider, model, effort, review, narrate) live in ~/.config/eda-agent/config.toml.
 """
 from __future__ import annotations
 
@@ -32,7 +35,11 @@ from .agent import human_gate
 from .agent.loop import Budget, run_agent
 from .agent.mcp_client import mcp_tools
 from .agent.models import AnthropicAdapter, OpenAICompatAdapter
-from .agent.receipt import build_receipt, write_receipt
+from .agent.receipt import build_receipt, render_files, write_receipt
+from .agent.receipt_llm import PROMPT as SUMMARY_PROMPT
+from .agent.receipt_llm import write_narrative
+from .agent.receipt_tables import with_trace_data
+from .agent.receipt_view import render_summary_md, summarize
 from .agent.reviewer import LEVELS, load_trace, model_review, rules_review
 from .core.project import load_project, regress_cases
 from .core.settings import PROJECT_FILE, find_project, user_defaults
@@ -147,7 +154,8 @@ async def _run(args: argparse.Namespace) -> int:
         )
         receipt = build_receipt(report, run_id=run_id, task=args.task, provider=args.provider,
                                 project=project.name, all_cases=regress_cases(project), trace=str(trace),
-                                prompt=args.prompt)
+                                prompt=args.prompt, sdc_origin=project.flow.sdc_origin if project.flow else "",
+                                project_root=str(project.root))
         if getattr(args, "preset", None):
             receipt["preset"] = f"{args.preset}@{PRESETS}"
         if args.review != "none":
@@ -156,6 +164,8 @@ async def _run(args: argparse.Namespace) -> int:
             except Exception as e:  # a failed review must not lose the author's receipt
                 receipt["review_error"] = f"{type(e).__name__}: {e}"
                 print(f"review failed: {receipt['review_error']}", file=sys.stderr)
+    if args.narrate:
+        await narrate(receipt, args.provider, model_name, args.effort, trace.parent)
     if report.status == "done" and not args.no_approval:
         human_gate.request_approval(receipt, "final report",
                                     "the evidence gate passed; a person accepts the result")
@@ -167,10 +177,10 @@ async def _run(args: argparse.Namespace) -> int:
     _print_reviews(receipt.get("reviews", []))
     print(f"\nstatus: {receipt['status']}")
     print(f"trace: {trace}")
-    print(f"receipt: {md} (json: {js})")
+    print(f"receipt: {md.with_suffix('.html')} (also {md.name}, json: {js.name})")
     if receipt["status"] == human_gate.AWAITING:
-        print(f"waiting for a person: eda-agent approve {run_id}   or   "
-              f"eda-agent reject {run_id} --reason \"...\"")
+        print(f"waiting for a person ({_levels(receipt)}): eda-agent review-ui, or eda-agent approve / "
+              f"reject {run_id} (the receipt's commands say what approve needs)")
     return 0 if report.status == "done" else 1
 
 
@@ -188,24 +198,80 @@ async def _review(args: argparse.Namespace) -> int:
     receipt["reviews"] = receipt.get("reviews", []) + reviews
     js, md = write_receipt(receipt, runs_dir)
     _print_reviews(reviews)
-    print(f"receipt: {md} (json: {js})")
+    print(f"receipt: {md.with_suffix('.html')} (also {md.name}, json: {js.name})")
     return 0
+
+
+def _levels(receipt: dict) -> str:
+    from .agent.levels import counts_line
+    return counts_line((receipt.get("levels") or {}).get("counts") or {"fatal": 0, "error": 0, "warning": 0})
 
 
 def _decide(args: argparse.Namespace, decision: str) -> int:
     runs_dir = Path(args.runs_dir)
+    by = args.by or human_gate.default_approver()
     try:
         receipt, _ = human_gate.load_receipt(args.run_id, runs_dir)
-        human_gate.decide(receipt, decision, by=args.by or human_gate.default_approver(),
-                          reason=args.reason or "", override_gate=getattr(args, "override_gate", False))
+        if decision == "pending":
+            human_gate.defer(receipt, by=by, note=args.note or "")
+        else:
+            human_gate.decide(receipt, decision, by=by, reason=args.reason or "",
+                              override=getattr(args, "override", False))
     except human_gate.ApprovalError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
     js, md = write_receipt(receipt, runs_dir)
     a = receipt["approval"]
-    print(f"run {args.run_id}: {a['status']} by {a['by']} at {a['at']}")
-    print(f"receipt: {md} (json: {js})")
+    if decision == "pending":
+        print(f"run {args.run_id}: still open; note {len(a['notes'])} recorded by {by}")
+    else:
+        print(f"run {args.run_id}: {a['status']} by {a['by']} at {a['at']} ({_levels(receipt)})")
+    print(f"receipt: {md.with_suffix('.html')} (also {md.name}, json: {js.name})")
     return 0
+
+
+async def narrate(receipt: dict, provider: str, model_name: str, effort: str, base: Path) -> None:
+    """Add a model-written summary to receipt["narrative"]. A failure (no key, network) is
+    reported and the receipt is rendered without it."""
+    try:
+        n = await write_narrative(with_trace_data(receipt, base), make_model(provider, model_name, effort),
+                                  load_prompt(SUMMARY_PROMPT), provider=provider)
+    except Exception as e:  # the receipt must not depend on the model
+        print(f"summary not written: {type(e).__name__}: {e}", file=sys.stderr)
+        return
+    receipt["narrative"] = n
+    print(f"summary by {provider}/{n['model']}: evidence gate "
+          f"{'passed' if n['gate']['passed'] else 'REJECTED'} after {n['gate']['rewrites']} rewrite(s)")
+
+
+def _receipt(args: argparse.Namespace) -> int:
+    """Re-render the .md and .html of a receipt from its .json and bring its `levels` up to
+    date. With --narrate, first add a model-written summary (outside the decided sha256)."""
+    runs_dir = Path(args.runs_dir)
+    try:
+        receipt, _ = human_gate.load_receipt(args.run_id, runs_dir)
+    except human_gate.ApprovalError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    if args.narrate:
+        provider = args.provider or receipt["provider"]
+        model_name = args.model or (receipt["model"] if provider == receipt["provider"] else DEFAULT_MODELS[provider])
+        asyncio.run(narrate(receipt, provider, model_name, args.effort, runs_dir))
+    if args.out_dir:
+        md, page = render_files(receipt, Path(args.out_dir), base=runs_dir)
+    else:
+        _, md = write_receipt(receipt, runs_dir)
+        page = md.with_suffix(".html")
+    if args.print:
+        print(render_summary_md(summarize(with_trace_data(receipt, runs_dir))))
+    print(f"receipt: {page} (also {md.name})")
+    return 0
+
+
+def _review_ui(args: argparse.Namespace) -> int:
+    from .review_ui import serve
+    return serve(Path(args.runs_dir), port=args.port, by=args.by,
+                 projects_dir=Path(args.projects_dir) if args.projects_dir else None)
 
 
 def _init(args: argparse.Namespace) -> int:
@@ -360,6 +426,9 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--trace")
     p.add_argument("--no-approval", action="store_true",
                    help="end with status done instead of awaiting_approval (no human gate)")
+    p.add_argument("--narrate", action="store_true",
+                   help="add a model-written summary to the receipt (same provider and model; checked by "
+                        "the evidence gate; the tables stay the record)")
     _add_review_args(p, "none")
 
 
@@ -442,6 +511,25 @@ def main() -> None:
     rev.add_argument("--runs-dir", default="runs")
     _add_review_args(rev, "I2")
 
+    rec = sub.add_parser("receipt", help="re-render a receipt's .md and .html (review summary on top)")
+    rec.add_argument("run_id")
+    rec.add_argument("--runs-dir", default="runs")
+    rec.add_argument("--out-dir", help="write the rendered files here instead of next to the .json")
+    rec.add_argument("--print", action="store_true", help="also print the review summary")
+    rec.add_argument("--narrate", action="store_true",
+                     help="add a model-written summary (checked by the evidence gate); needs the provider's "
+                          "API key")
+    rec.add_argument("--provider", choices=sorted(DEFAULT_MODELS), help="for --narrate (default: the run's)")
+    rec.add_argument("--model", help="for --narrate (default: the run's model)")
+    rec.add_argument("--effort", default="high", choices=["low", "medium", "high", "xhigh", "max"])
+
+    ui = sub.add_parser("review-ui", help="a local page to approve / leave pending / reject runs by clicking")
+    ui.add_argument("--runs-dir", default="runs")
+    ui.add_argument("--port", type=int, default=8799)
+    ui.add_argument("--by", help="who decides (default: git user.name, else the login name)")
+    ui.add_argument("--projects-dir", help="where the project configs are, to find each run's project root for "
+                                           "its file references (default: projects/ next to the runs folder)")
+
     # Personal defaults apply to run and check; anything on the command line wins.
     try:
         defaults = user_defaults()
@@ -451,22 +539,34 @@ def main() -> None:
     check.set_defaults(**defaults)
     if "provider" in defaults:
         doc.set_defaults(provider=defaults["provider"])
+    # provider/model of `receipt --narrate` default to the run's
 
-    for name, help_text in (("approve", "approve a run awaiting approval"), ("reject", "reject a run")):
+    for name, help_text in (("approve", "approve a run awaiting approval (Error items need --reason, Fatal "
+                                        "items --override and --reason)"),
+                            ("reject", "reject a run"),
+                            ("pending", "decide later: record a note, the run stays awaiting approval")):
         p = sub.add_parser(name, help=help_text)
         p.add_argument("run_id")
         p.add_argument("--by", help="who decides (default: git user.name, else the login name)")
-        p.add_argument("--reason", required=name == "reject")
+        if name == "pending":
+            p.add_argument("--note", help="what is missing, or why later")
+        else:
+            p.add_argument("--reason", required=name == "reject")
         p.add_argument("--runs-dir", default="runs")
         if name == "approve":
-            p.add_argument("--override-gate", action="store_true",
-                           help="approve a run the evidence gate rejected (needs --reason)")
+            p.add_argument("--override", "--override-gate", dest="override", action="store_true",
+                           help="approve despite Fatal items or the evidence gate's rejection (needs --reason; "
+                                "recorded in the receipt)")
 
     args = ap.parse_args()
     if args.cmd == "init":
         sys.exit(_init(args))
     if args.cmd == "doctor":
         sys.exit(_doctor(args))
+    if args.cmd == "receipt":
+        sys.exit(_receipt(args))
+    if args.cmd == "review-ui":
+        sys.exit(_review_ui(args))
     if args.cmd == "mutate":
         sys.exit(_mutate(args))
     if args.cmd == "perf":

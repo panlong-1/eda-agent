@@ -1,8 +1,10 @@
 """Run receipt: what was asked, what was checked, what was not, and what was claimed.
 
-Written at the end of every run as runs/<id>.receipt.json (for tools) and
-runs/<id>.receipt.md (for a human reviewer). Everything in it is taken from the
-run report and the tool envelopes; nothing is re-derived by a model.
+Written at the end of every run as runs/<id>.receipt.json (for tools) and, for a human
+reviewer, runs/<id>.receipt.md and runs/<id>.receipt.html: a review summary on top
+(receipt_view.py), the data tables, the full receipt below. Everything in it is taken from the
+run report and the tool envelopes; nothing is re-derived by a model. The .json also carries
+`levels`: the Fatal / Error / Warning issues (levels.py), derived from the rest.
 """
 from __future__ import annotations
 
@@ -12,10 +14,18 @@ from pathlib import Path
 from ..core.envelope import EVIDENCE_LEVELS
 from .gate import described_cases, executed_cases, split_residual, timing_results
 from .loop import RunReport
+from .levels import levels_record
+from .receipt_tables import with_trace_data
+from .receipt_view import (render_data_md, render_html, render_narrative_md, render_summary_md, static_linker,
+                           summarize)
+from .sources import Sources, project_roots
+
+MAX_DIAGNOSTICS = 50  # per check; the count of all of them is kept in diagnostics_total
 
 
 def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, project: str,
-                  all_cases: list[str], trace: str = "", prompt: str = "") -> dict:
+                  all_cases: list[str], trace: str = "", prompt: str = "", sdc_origin: str = "",
+                  project_root: str = "") -> dict:
     envelopes = [c for c in report.checks if c["result"] and c["result"].get("evidence_level") in EVIDENCE_LEVELS]
     others = [c for c in report.checks if all(c is not e for e in envelopes)]
     # Same definitions as gate rule R4, so the receipt and the gate never disagree.
@@ -37,6 +47,7 @@ def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, p
         "model": report.model,
         "prompt": prompt,
         "project": project,
+        **({"project_root": project_root} if project_root else {}),
         "stop_reason": report.stop_reason,
         "status": report.status,
         "gate": {"status": gate_status, "rewrites": max(0, len(report.gate) - 1), "decisions": report.gate},
@@ -50,6 +61,10 @@ def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, p
             "tool_versions": c["result"].get("tool_versions", {}),
             "artifacts": [{"path": a.get("path"), "sha256": a.get("sha256")}
                           for a in c["result"].get("artifacts", [])],
+            "duration_s": c.get("duration_s"),
+            "metrics": c["result"].get("metrics") or {},
+            "diagnostics": (c["result"].get("diagnostics") or [])[:MAX_DIAGNOSTICS],
+            "diagnostics_total": c["result"].get("diagnostics_total", 0),
             **_timing(c["result"], void),
             **_perf(c["result"]),
         } for c in envelopes],
@@ -68,6 +83,9 @@ def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, p
         "tool_errors": report.tool_errors,
         "wall_s": report.wall_s,
         "trace": trace,
+        **({"sdc_origin": sdc_origin} if sdc_origin else {}),
+        "case_sources": {k["name"]: k["source"] for x in results if x.get("tool") == "describe_case"
+                         for k in x.get("cases", []) if isinstance(k, dict) and k.get("name") and k.get("source")},
     }
 
 
@@ -99,6 +117,15 @@ def _cell(text: str) -> str:
 
 
 def render_markdown(r: dict) -> str:
+    """The review summary, the model-written summary if there is one, the data tables; then the
+    full receipt (details) and the long lists."""
+    data, more = render_data_md(r)
+    narrative = render_narrative_md(r)
+    return (render_summary_md(summarize(r)) + ("\n" + narrative if narrative else "") + "\n" + data
+            + "\n---\n\n" + render_details(r) + ("\n" + more if more else ""))
+
+
+def render_details(r: dict) -> str:
     gate = r["gate"]
     out = [
         f"# Run receipt {r['run_id']}",
@@ -112,6 +139,8 @@ def render_markdown(r: dict) -> str:
         f"- **Cost:** {r['turns']} turns, {r['tool_calls']} tool calls ({r['tool_errors']} errors), "
         f"{r['usage'].get('input_tokens', 0)} in / {r['usage'].get('output_tokens', 0)} out tokens, "
         f"{r['wall_s']} s",
+        *([f"- **Preset:** {r['preset']}"] if r.get("preset") else []),
+        *([f"- **SDC origin:** {r['sdc_origin']}"] if r.get("sdc_origin") else []),
         "",
         "## Checks run",
         "",
@@ -189,13 +218,33 @@ def _render_review(v: dict) -> list[str]:
     return out
 
 
-def write_receipt(receipt: dict, out_dir: Path) -> tuple[Path, Path]:
+def write_receipt(receipt: dict, out_dir: Path, base: Path | None = None) -> tuple[Path, Path]:
+    """runs/<id>.receipt.json (with its `levels` brought up to date), plus the rendered .md and
+    .html next to it. `base`: where the receipt's trace may be found (default out_dir)."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    js, md = (out_dir / f"{receipt['run_id']}.receipt.{ext}" for ext in ("json", "md"))
-    js.write_text(json.dumps(receipt, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    if receipt.get("kind") == "testgen":  # eda-agent write-tests has its own receipt layout
+    js = out_dir / f"{receipt['run_id']}.receipt.json"
+    if receipt.get("kind") == "testgen":
+        # eda-agent write-tests keeps its own Markdown layout for now (no levels, no HTML page yet).
         from .testgen import render_markdown as render_testgen
+        js.write_text(json.dumps(receipt, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        md = out_dir / f"{receipt['run_id']}.receipt.md"
         md.write_text(render_testgen(receipt), encoding="utf-8")
-    else:
-        md.write_text(render_markdown(receipt), encoding="utf-8")
+        return js, md
+    receipt["levels"] = levels_record(with_trace_data(receipt, base or out_dir))
+    js.write_text(json.dumps(receipt, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    md, _ = render_files(receipt, out_dir, base=base)
     return js, md
+
+
+def render_files(receipt: dict, out_dir: Path, *, base: Path | None = None) -> tuple[Path, Path]:
+    """(Re-)write runs/<id>.receipt.md and .html from the receipt data; the .json is not
+    touched. `base`: where the receipt's trace may be found (default out_dir)."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    view = with_trace_data(receipt, base or out_dir)
+    name = f"{receipt['run_id']}.receipt"
+    md, page = out_dir / f"{name}.md", out_dir / f"{name}.html"
+    md.write_text(render_markdown(view), encoding="utf-8")
+    runs_dir = base or out_dir
+    sources = Sources(runs_dir, project_roots([runs_dir.parent / "projects"]))
+    page.write_text(render_html(view, link=static_linker(view, sources)), encoding="utf-8")
+    return md, page

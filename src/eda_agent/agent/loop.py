@@ -128,12 +128,15 @@ async def run_agent(model: ModelAdapter, tools: list[ToolSpec], execute: Executo
                     results.append(ToolOutcome(call.id, "tool-call budget exhausted", True))
                     continue
                 report.tool_calls += 1
+                started = time.monotonic()
                 text, is_error = await execute(call.name, call.input)
+                duration = round(time.monotonic() - started, 2)
                 failed = _is_tool_error(text, is_error)
                 report.tool_errors += failed
                 consecutive[call.name] = consecutive.get(call.name, 0) + 1 if failed else 0
                 results.append(ToolOutcome(call.id, text, is_error))
-                report.checks.append({"tool": call.name, "args": call.input, "result": _parse(text)})
+                report.checks.append({"tool": call.name, "args": call.input, "result": _parse(text),
+                                      "duration_s": duration})
                 # The whole result, so a trace can be replayed through the gate later.
                 log("tool", name=call.name, input=call.input, is_error=failed, result=text)
             model.add_tool_results(results)
