@@ -38,7 +38,8 @@ def test_snapshot_is_stable_and_follows_the_rtl(tmp_path):
     (d / "rtl" / "a.sv").write_text("module a; wire w; endmodule\n")
     e = _snap(d)
     assert e["design_id"] != a["design_id"]
-    assert compare_snapshots(a, e) == {"same_design": False, "common_rtl_files": 1, "differences": ["RTL rtl/a.sv differs"]}
+    assert compare_snapshots(a, e) == {"same_design": False, "common_rtl_files": 1,
+                                     "differences": ["RTL rtl/a.sv differs"], "unknown": []}
 
 
 def test_a_copy_of_the_design_is_the_same_design(tmp_path):
