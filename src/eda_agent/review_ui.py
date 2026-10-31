@@ -30,9 +30,9 @@ from urllib.parse import parse_qs, quote, urlparse
 
 from .agent import human_gate
 from .agent.levels import LEVELS, TITLE, assess, counts
-from .agent.receipt import write_receipt
-from .agent.receipt_tables import with_trace_data
-from .agent.receipt_view import CSS, RUN_CLASS, _badge, _level_badge, e, render_html
+from .agent.receipt import with_trace_data, write_receipt
+from .agent.receipt.page import CSS, _badge, _level_badge, e, render_html
+from .agent.receipt.summary import RUN_CLASS
 from .agent.sources import Refused, Sources, project_roots, split_ref
 
 RUN_ID = re.compile(r"^[A-Za-z0-9_.-]{1,200}$")

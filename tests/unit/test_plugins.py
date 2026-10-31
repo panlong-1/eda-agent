@@ -124,7 +124,11 @@ def test_import_judges_records_and_writes_a_receipt(project, tmp_path):
     assert "the core judged it" in r.claim_scope
     rec = imported(project, "cdc")
     assert len(rec) == 1 and rec[0]["made_by"] == "unknown (imported report)"
-    assert Path(m["receipt"]).is_file() and Path(m["receipt"].replace(".json", ".md")).is_file()
+    assert Path(m["receipt"]).is_file()
+    from eda_agent.agent.receipt import write_receipt
+    js, md = write_receipt(json.loads(Path(m["receipt"]).read_text()), Path(m["receipt"]).parent)
+    assert js == Path(m["receipt"]) and md.is_file() and md.with_suffix(".html").is_file()
+    assert "Import receipt" in md.read_text() and "Fatal 0 · Error 1 · Warning 2" in md.read_text()
 
 
 def test_unrecognized_directory_is_refused(project, tmp_path):

@@ -41,6 +41,7 @@ RULES = [
     ("a reviewer's verdict is reject", "fatal"),
     ("mutation: the original checkout changed during the run", "fatal"),
     ("the receipt changed after its decision", "fatal"),
+    ("import: the report fails its category's rule, or could not be judged", "fatal"),
     ("a reviewer finding of severity high or medium (incl. rule-based errors: multiple drivers, "
      "width truncation, latches, blocking assignment in a clocked block)", "error"),
     ("the gate needed rewrites before it passed", "error"),
@@ -53,6 +54,7 @@ RULES = [
     ("the run was approved over the gate (--override)", "error"),
     ("a review failed to run", "error"),
     ("mutation: mutants that ended in an error", "error"),
+    ("import: the report does not identify the design it describes (no RTL hashes)", "error"),
     ("lint warnings", "warning"),
     ("a reviewer finding of severity low or info; a reviewer note; a review format problem", "warning"),
     ("only part of the case list ran; lint was not run; no independent review", "warning"),
@@ -60,6 +62,8 @@ RULES = [
     ("timing is a pre-PnR estimate only", "warning"),
     ("mutation: surviving or likely-equivalent mutants", "warning"),
     ("the model-written summary was rejected by the gate", "warning"),
+    ("import: input files the report names were not found here; waived items; the tool was not run by "
+     "eda-agent", "warning"),
 ]
 
 FINDING_LEVEL = {"high": "error", "medium": "error", "low": "warning", "info": "warning"}
@@ -180,15 +184,42 @@ def _assess_testgen(r: dict, add) -> None:
             add("error", f"Mutant {t.get('mutant')}: gap not closed", quote=t.get("note") or "", source="testgen")
 
 
+def _assess_import(r: dict, add) -> None:
+    """Issues of an import receipt (a report made elsewhere, judged by its category's rule)."""
+    e = r["envelope"]
+    m = e.get("metrics") or {}
+    cat = m.get("category") or "?"
+    if e.get("status") == "fail":
+        add("fatal", f"The imported {cat} report fails its category's rule", quote=e.get("summary") or "",
+            source="import")
+    elif e.get("status") != "pass":
+        add("fatal", f"The imported {cat} report could not be judged (status {e.get('status')})",
+            quote=e.get("summary") or "", source="import")
+    snap = e.get("snapshot") or {}
+    if snap.get("state") == "unknown":
+        add("error", "The report does not identify the design it describes, so no check can be tied to it "
+                     "(eda-agent import --rtl-manifest)", quote=snap.get("note") or "", source="snapshot")
+    missing = [f["path"] for f in (m.get("files") or {}).get("inputs", []) if not f.get("sha256")]
+    if missing:
+        add("warning", f"{len(missing)} input file(s) the report names were not found here; their sha256 is "
+                       "unknown", quote=", ".join(missing), source="import")
+    if m.get("approved_waivers"):
+        add("warning", f"{m['approved_waivers']} item(s) waived by a person (core/standards.py)", source="import")
+    add("warning", f"eda-agent did not run {m.get('tool_name') or 'the tool'}: the result is only as complete as "
+                   "the report", source="import")
+
+
 def assess(r: dict) -> list[Issue]:
     """All issues of a receipt, Fatal first, then Error, then Warning."""
     from .human_gate import content_sha256  # human_gate uses assess() for its policy
+    from .receipt.data import receipt_kind  # the receipt package uses this module
     out: list[Issue] = []
     def add(level: str, text: str, quote: str = "", source: str = "") -> None:
         out.append(Issue(level, text, shorten(quote, 400), source))
     a = r.get("approval") or {}
-    if r.get("kind") == "testgen":
-        _assess_testgen(r, add)
+    kind = receipt_kind(r)
+    if kind in ("testgen", "import"):
+        (_assess_testgen if kind == "testgen" else _assess_import)(r, add)
         return sorted(out, key=lambda i: LEVELS.index(i.level))
 
     # the run and the gate

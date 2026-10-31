@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 
 from .core.project import load_project
 from .core.settings import PROJECT_FILE
@@ -62,8 +63,6 @@ def dispatch(args: argparse.Namespace, resolve_project) -> int | None:
         return None
     project = load_project(resolve_project(args.project))
     if args.cmd == "import":
-        from pathlib import Path
-
         from .tools.importing import run_import, run_import_all
         manifest = Path(args.rtl_manifest) if args.rtl_manifest else None
         if args.all and args.plugin:
@@ -79,7 +78,10 @@ def dispatch(args: argparse.Namespace, resolve_project) -> int | None:
             for d in res["diagnostics"]:
                 print(f"  {d['severity']:7} {d['code']} {d['msg']}")
             if r := res["metrics"].get("receipt"):
-                print(f"receipt: {r}")
+                from .agent.receipt import write_receipt
+                rec = json.loads(Path(r).read_text())
+                js, md = write_receipt(rec, Path(r).parent)
+                print(f"receipt: {md.with_suffix('.html')} (also {md.name}, json: {js.name})")
         worst = max(({"pass": 0, "fail": 1}.get(r["status"], 2) for r in results), default=2)
         return worst
     from .agent import human_gate

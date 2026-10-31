@@ -4,7 +4,8 @@
 2. the core validates it, recomputes every file's sha256, and judges it by its category's rule
    (core/categories.py) with the human-set waivers and targets (core/standards.py);
 3. the result is appended to the design's imported table (<experience_dir>/<project>/imported_reports.jsonl,
-   provenance "imported") and a receipt is written (runs/imports/).
+   provenance "imported") and the receipt data is written (runs/imports/); `eda-agent import` then
+   draws its .md and .html with the common receipt pipeline (agent/receipt).
 The agent reads these with the MCP tool `imported_results`; it never runs an import itself.
 """
 from __future__ import annotations
@@ -164,21 +165,9 @@ def imported(project: Project, category: str | None = None) -> list[dict]:
 
 
 def write_receipt(rec: dict) -> Path:
-    """A small receipt for one import (json + md), next to the run receipts."""
+    """The receipt data of one import (runs/imports/<design>_<id>.receipt.json). Its .md and .html
+    are drawn by the receipt pipeline (agent/receipt), which `eda-agent import` runs next."""
     RECEIPTS_DIR.mkdir(parents=True, exist_ok=True)
-    e = rec["envelope"]
-    m = e["metrics"]
     js = RECEIPTS_DIR / f"{rec['design']}_{rec['id']}.receipt.json"
     js.write_text(json.dumps(rec, indent=1) + "\n")
-    lines = [f"# Import receipt {rec['id']}", "", f"- **Design:** {rec['design']}  ·  **Category:** {m['category']}  ·  "
-             f"**Tool:** {m['tool_name']} {e['tool_versions']}", f"- **Imported:** {rec['imported_at']} from "
-             f"`{m['source_dir']}` by importer {m['importer']} {m['importer_version']}; made by: {rec['made_by']}",
-             f"- **Status (core's rule):** {e['status']}  ·  **Level:** {e['evidence_level']}",
-             f"- **Snapshot:** {e['snapshot'].get('id') or '-'} ({e['snapshot'].get('state')}: {e['snapshot'].get('note')})",
-             "", f"Claim scope: {e['claim_scope']}", "", "| side | role | path | sha256 |", "|---|---|---|---|"]
-    lines += [f"| {side} | {f['role']} | `{f['path']}` | `{(f['sha256'] or 'not found')[:16]}` |"
-              for side in ("inputs", "outputs") for f in m["files"][side]]
-    lines += ["", "Findings:"] + ([f"- [{d['severity']}] {d['msg']}" for d in e["diagnostics"]] or ["- none"])
-    lines += ["", "Not covered:"] + [f"- {r}" for r in e["residual_risk"]]
-    (RECEIPTS_DIR / f"{rec['design']}_{rec['id']}.receipt.md").write_text("\n".join(lines) + "\n")
     return js

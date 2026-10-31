@@ -39,11 +39,11 @@ from .agent import human_gate
 from .agent.loop import Budget, run_agent
 from .agent.mcp_client import mcp_tools
 from .agent.models import AnthropicAdapter, OpenAICompatAdapter
-from .agent.receipt import build_receipt, render_files, write_receipt
-from .agent.receipt_llm import PROMPT as SUMMARY_PROMPT
-from .agent.receipt_llm import write_narrative
-from .agent.receipt_tables import with_trace_data
-from .agent.receipt_view import render_summary_md, summarize
+from .agent.receipt import build_receipt, render_files, testgen_receipt, with_trace_data, write_receipt
+from .agent.receipt.markdown import render_summary_md
+from .agent.receipt.narrative import PROMPT as SUMMARY_PROMPT
+from .agent.receipt.narrative import write_narrative
+from .agent.receipt.summary import summarize
 from .agent.reviewer import LEVELS, load_trace, model_review, rules_review
 from .core.project import load_project, regress_cases
 from .core.settings import PROJECT_FILE, find_project, user_defaults
@@ -230,11 +230,7 @@ def _decide(args: argparse.Namespace, decision: str) -> int:
         print(f"run {args.run_id}: still open; note {len(a['notes'])} recorded by {by}")
     else:
         print(f"run {args.run_id}: {a['status']} by {a['by']} at {a['at']} ({_levels(receipt)})")
-    page = md.with_suffix(".html")
-    if page.is_file():
-        print(f"receipt: {page} (also {md.name}, json: {js.name})")
-    else:  # write-tests receipts have no HTML page yet
-        print(f"receipt: {md} (json: {js.name})")
+    print(f"receipt: {md.with_suffix('.html')} (also {md.name}, json: {js.name})")
     return 0
 
 
@@ -405,21 +401,17 @@ async def _write_tests(args: argparse.Namespace) -> int:
             results.append(r)
     gate = testgen.gate_results(results)
     closed = [r for r in results if r.status == "closed"]
-    receipt = {
-        "kind": "testgen", "run_id": run_id, "project": project.name, "provider": args.provider,
-        "model": model_name, "prompt": testgen.PROMPT, "review_prompt": testgen.REVIEW_PROMPT,
-        "mutate_run": args.mutate_run, "targets": args.mutants,
-        "results": [testgen.to_dict(r) for r in results], "gate": gate, "final_claims": gate["report"],
-        "usage": usage, "wall_s": round(time.monotonic() - t0, 1),
-        "status": "done" if closed and gate["decision"]["passed"] else "failed",
-    }
+    receipt = testgen_receipt(run_id=run_id, project=project.name, provider=args.provider, model=model_name,
+                              prompt=testgen.PROMPT, review_prompt=testgen.REVIEW_PROMPT, mutate_run=args.mutate_run,
+                              targets=args.mutants, results=[testgen.to_dict(r) for r in results], gate=gate,
+                              usage=usage, wall_s=round(time.monotonic() - t0, 1), closed=bool(closed))
     ok = receipt["status"] == "done"
     if ok:
         human_gate.request_approval(receipt, "new tests",
                                     "a person decides whether the new test(s) and patch enter the regression")
     js, md = write_receipt(receipt, Path("runs"))
     print(gate["report"])
-    print(f"\nreceipt: {md} (json: {js})")
+    print(f"\nreceipt: {md.with_suffix('.html')} (also {md.name}, json: {js.name})")
     return 0 if ok else 1
 
 
