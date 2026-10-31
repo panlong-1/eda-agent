@@ -1,0 +1,22 @@
+{
+ "metrics": {
+  "design__instance__count": 20088,
+  "design__instance__area": 264188.1312,
+  "power__total": 0.010105596855282784,
+  "timing__hold__ws__corner:nom_fast_1p32V_m40C": 0.07096606836376103,
+  "timing__setup__ws__corner:nom_fast_1p32V_m40C": 3.713796930655135,
+  "timing__setup__tns__corner:nom_fast_1p32V_m40C": 0,
+  "timing__setup_vio__count__corner:nom_fast_1p32V_m40C": 0,
+  "timing__hold__ws__corner:nom_slow_1p08V_125C": 0.3015004442557559,
+  "timing__setup__ws__corner:nom_slow_1p08V_125C": -1.7862432039083405,
+  "timing__setup__tns__corner:nom_slow_1p08V_125C": -22.640347126781588,
+  "timing__setup_vio__count__corner:nom_slow_1p08V_125C": 33,
+  "timing__hold__ws__corner:nom_typ_1p20V_25C": 0.15488377685449162,
+  "timing__setup__ws__corner:nom_typ_1p20V_25C": 1.6498229915870628,
+  "timing__setup__tns__corner:nom_typ_1p20V_25C": 0,
+  "timing__setup_vio__count__corner:nom_typ_1p20V_25C": 0,
+  "design__max_fanout_violation__count": 1318,
+  "timing__setup__tns": -22.640347126781588,
+  "timing__setup_vio__count": 33
+ }
+}

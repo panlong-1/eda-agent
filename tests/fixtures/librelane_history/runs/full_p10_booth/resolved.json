@@ -1,0 +1,42 @@
+{
+ "DESIGN_NAME": "rv32im_ahb_top",
+ "PDK": "ihp-sg13g2",
+ "PDK_ROOT": "/fixture-pdk/versions/c4b8b4e5e7a05f375cca3815d51b3a37721fbf5c",
+ "meta": {
+  "version": 3,
+  "flow": "Classic",
+  "substituting_steps": null,
+  "step": null,
+  "librelane_version": "3.0.16"
+ },
+ "CLOCK_PORT": "hclk",
+ "CLOCK_PERIOD": 10,
+ "STA_CORNERS": [
+  "nom_fast_1p32V_m40C",
+  "nom_slow_1p08V_125C",
+  "nom_typ_1p20V_25C"
+ ],
+ "SYNTH_MUL_BOOTH": true,
+ "RUN_POST_GRT_RESIZER_TIMING": true,
+ "SYNTH_HIERARCHY_MODE": "flatten",
+ "SYNTH_ABC_BUFFERING": true,
+ "USE_SLANG": true,
+ "FP_CORE_UTIL": 50,
+ "VERILOG_FILES": [
+  "/fixture-design/rtl/addr_decode.sv",
+  "/fixture-design/rtl/pc_unit.sv",
+  "/fixture-design/rtl/regfile.sv",
+  "/fixture-design/rtl/imm_gen.sv",
+  "/fixture-design/rtl/decoder.sv",
+  "/fixture-design/rtl/alu_control.sv",
+  "/fixture-design/rtl/alu.sv",
+  "/fixture-design/rtl/muldiv_unit.sv",
+  "/fixture-design/rtl/forwarding_unit.sv",
+  "/fixture-design/rtl/hazard_unit.sv",
+  "/fixture-design/rtl/lsu.sv",
+  "/fixture-design/rtl/rv32im_core.sv",
+  "/fixture-design/rtl/rv32im_ahb_dport.sv",
+  "/fixture-design/rtl/rv32im_ahb_fetch.sv",
+  "/fixture-design/rtl/rv32im_ahb_top.sv"
+ ]
+}
