@@ -233,6 +233,8 @@ def test_r6_numbers_and_ids():
     assert "mutant 3" in check_tests("score_tests: the test kills mutant 3.", [SCORE])[0]
     assert "75%" in check_tests("score_tests: kill rate rose from 50% to 75%.", [SCORE])[0]
     assert check_tests("mutate: mutant 6 is killed, 68.75% overall.", [MUTATE]) == []
+    assert check_tests("mutate: mutant 6 is killed, 69% overall.", [MUTATE]) == []  # 68.75% rounded
+    assert check_tests("mutate: mutant 6 is killed, 70% overall.", [MUTATE])
     assert "mutant 3" in check_tests("mutate: mutant 3 was killed.", [MUTATE])[0]
     # a stated limit is not a claim
     assert check_tests("The existing cases do not catch mutant 3.", [MUTATE]) == []

@@ -548,7 +548,9 @@ def check_tests(claims: str, results: list[dict]) -> list[str]:
                     reasons.append(f"names mutant {n}, but no cited result of this run reports it killed: {text!r}")
         for p in _PCT.findall(sentence):
             decimals = len(p.split(".")[1]) if "." in p else 0
-            if not _matches(float(p), decimals, rates):
+            # a percentage is a rounded ratio: 15/16 may be written 94% (unlike WNS, where 0 decimals
+            # means the value itself has none)
+            if not any(abs(float(p) - r) <= 0.5 * 10 ** -decimals + 1e-9 for r in rates):
                 reasons.append(f"cites {p}% but no score_tests or mutate result of this run reports that kill rate: "
                                f"{text!r}")
     return reasons
