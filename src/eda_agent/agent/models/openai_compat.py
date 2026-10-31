@@ -44,7 +44,8 @@ class OpenAICompatAdapter:
             model=self.model,
             max_tokens=self.max_tokens,
             messages=self.messages,
-            tools=self.tools,
+            # An empty tool list is sent as no tools: some endpoints reject tools=[].
+            **({"tools": self.tools} if self.tools else {}),
             reasoning_effort=self.effort,
             extra_body={"thinking": {"type": "enabled" if self.thinking else "disabled"}},
         )

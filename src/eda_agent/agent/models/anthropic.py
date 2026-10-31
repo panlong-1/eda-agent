@@ -36,7 +36,7 @@ class AnthropicAdapter:
             model=self.model,
             max_tokens=self.max_tokens,
             system=self.system,
-            tools=self.tools,
+            **({"tools": self.tools} if self.tools else {}),
             messages=self.messages,
             output_config={"effort": self.effort},
             cache_control={"type": "ephemeral"},

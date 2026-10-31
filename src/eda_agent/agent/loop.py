@@ -71,7 +71,7 @@ def _parse(text: str) -> dict | None:
 
 async def run_agent(model: ModelAdapter, tools: list[ToolSpec], execute: Executor, task: str,
                     system: str, budget: Budget | None = None, trace: Path | None = None,
-                    gate: Gate | None = check_report) -> RunReport:
+                    gate: Gate | None = check_report, resume: bool = False) -> RunReport:
     budget = budget or Budget()
     report = RunReport(stop_reason="", model=model.name)
     usage: dict[str, int] = {}
@@ -83,8 +83,12 @@ async def run_agent(model: ModelAdapter, tools: list[ToolSpec], execute: Executo
         if trace_f:
             trace_f.write(json.dumps({"t": round(time.monotonic() - t0, 3), "kind": kind, **data}) + "\n")
 
-    model.start(system, tools, task)
-    log("start", trace_version=TRACE_VERSION, model=model.name, task=task, tools=[t.name for t in tools])
+    if resume:  # continue the model's conversation with one more user message
+        model.add_user_message(task)
+        log("resume", model=model.name, task=task)
+    else:
+        model.start(system, tools, task)
+        log("start", trace_version=TRACE_VERSION, model=model.name, task=task, tools=[t.name for t in tools])
     try:
         while True:
             if report.turns >= budget.max_turns:

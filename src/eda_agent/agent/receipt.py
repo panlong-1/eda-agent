@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 
 from ..core.envelope import EVIDENCE_LEVELS
-from .gate import described_cases, executed_cases, split_residual
+from .gate import described_cases, executed_cases, split_residual, timing_results
 from .loop import RunReport
 
 
@@ -24,6 +24,8 @@ def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, p
     executed = executed_cases(results)
     claims, residual = split_residual(report.final_text)
     tool_risks = sorted({r for c in envelopes for r in c["result"].get("residual_risk", [])})
+    # Same definition as gate rule R5: timing under an SDC other than the latest one is void.
+    _, void = timing_results(results)
     if not report.gate:
         gate_status = "not_run"
     else:
@@ -48,6 +50,7 @@ def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, p
             "tool_versions": c["result"].get("tool_versions", {}),
             "artifacts": [{"path": a.get("path"), "sha256": a.get("sha256")}
                           for a in c["result"].get("artifacts", [])],
+            **_timing(c["result"], void),
         } for c in envelopes],
         "other_tool_calls": [{"tool": c["tool"], "args": c["args"],
                               "status": (c["result"] or {}).get("status", "")} for c in others],
@@ -56,7 +59,7 @@ def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, p
             "cases_not_run": [n for n in all_cases if n not in executed],
             "lint_run": any(c["tool"] == "lint" for c in envelopes),
         },
-        "final_claims": claims.strip(),
+        "final_claims": claims.rstrip().rstrip("#*").strip(),  # without the residual heading's "###"
         "residual_risk": {"report": residual.strip(), "from_tools": tool_risks},
         "usage": report.usage,
         "turns": report.turns,
@@ -65,6 +68,19 @@ def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, p
         "wall_s": report.wall_s,
         "trace": trace,
     }
+
+
+def _timing(result: dict, void: list[dict]) -> dict:
+    """The SDC hash and timing numbers of a synth/check_sdc result; nothing for other tools."""
+    m = result.get("metrics") or {}
+    if not m.get("sdc_sha256"):
+        return {}
+    out = {"sdc": m.get("sdc"), "sdc_sha256": m["sdc_sha256"]}
+    if "wns" in m:
+        out["timing"] = {k: m.get(k) for k in ("clock_period", "wns", "tns", "hold_wns", "worst_corner",
+                                               "timing_met", "cells", "area", "latches")}
+        out["timing"]["void"] = any(result is v for v in void)
+    return out
 
 
 def _cell(text: str) -> str:
@@ -80,7 +96,8 @@ def render_markdown(r: dict) -> str:
         f"- **Task:** {r['task']}",
         f"- **Project:** {r['project']}  ·  **Model:** {r['provider']} / {r['model']}"
         f"  ·  **Prompt:** {r.get('prompt') or 'n/a'}",
-        f"- **Stop:** {r['stop_reason']}  ·  **Status:** {r['status']}  ·  "
+        f"- **Stop:** {r['stop_reason']}  ·  **Status:** {r['status']}"
+        + (f" (agent: {r['agent_status']})" if r.get("agent_status") else "") + "  ·  "
         f"**Gate:** {gate['status']} ({gate['rewrites']} rewrite(s))",
         f"- **Cost:** {r['turns']} turns, {r['tool_calls']} tool calls ({r['tool_errors']} errors), "
         f"{r['usage'].get('input_tokens', 0)} in / {r['usage'].get('output_tokens', 0)} out tokens, "
@@ -99,6 +116,16 @@ def render_markdown(r: dict) -> str:
         out += ["", f"**{c['tool']} {json.dumps(c['args'])}** claim scope: {c['claim_scope']}"]
         out += [f"- artifact `{a['path']}` sha256 `{a['sha256']}`" for a in c["artifacts"]]
         out += [f"- {name}: {version}" for name, version in c.get("tool_versions", {}).items()]
+    timed = [c for c in r["checks_run"] if c.get("timing")]
+    if timed:
+        out += ["", "## Timing estimates (E4, pre-PnR)", "",
+                "| tool | clock | setup WNS | TNS | hold WNS | worst corner | met | SDC sha256 | void |",
+                "|---|---|---|---|---|---|---|---|---|"]
+        for c in timed:
+            t = c["timing"]
+            out.append(f"| {c['tool']} | {t['clock_period']} ns | {t['wns']} | {t['tns']} | {t['hold_wns']} "
+                       f"| {t['worst_corner']} | {'yes' if t['timing_met'] else 'no'} | `{c['sdc_sha256'][:16]}…` "
+                       f"| {'VOID (SDC changed later in the run)' if t['void'] else 'no'} |")
     nr = r["not_run"]
     out += ["", "## Not run", "",
             f"- lint run: {'yes' if nr['lint_run'] else 'no'}",
@@ -115,9 +142,41 @@ def render_markdown(r: dict) -> str:
             "", "## Residual risk", "", r["residual_risk"]["report"] or "(none stated in the report)",
             "", "From the tools:"]
     out += [f"- {x}" for x in r["residual_risk"]["from_tools"]] or ["- (none)"]
+    for review in r.get("reviews", []):
+        out += _render_review(review)
+    if r.get("approval"):
+        a = r["approval"]
+        out += ["", "## Human approval", "",
+                f"- **Step:** {a.get('step')}  ·  **Status:** {a['status']}",
+                f"- requested: {a.get('requested_at')} ({a.get('why')})"]
+        if a["status"] != "pending":
+            out += [f"- decided by **{a['by']}** at {a['at']}" + (f": {a['reason']}" if a.get("reason") else ""),
+                    f"- receipt content sha256 at decision: `{a['receipt_sha256']}`"]
+            if a.get("overrode_gate"):
+                out.append("- this approval overrode the evidence gate's rejection")
+        else:
+            out.append(f"- decide with `eda-agent approve {r['run_id']}` or "
+                       f"`eda-agent reject {r['run_id']} --reason \"...\"`")
     if r["trace"]:
         out += ["", f"Trace: `{r['trace']}`"]
     return "\n".join(out) + "\n"
+
+
+def _render_review(v: dict) -> list[str]:
+    who = "rule-based (no model)" if v["reviewer"] == "rules" else f"{v['reviewer']}, {v['provider']} / {v['model']}"
+    out = ["", f"## Review: {who}", "", f"- **Saw:** {v['context']}",
+           f"- **Verdict:** {v['verdict'] or '(none given)'}"
+           + ("" if v.get("format_ok", True) else "  ·  format not followed (checklist first, findings, verdict)")]
+    if v.get("note"):
+        out.append(f"- **Note:** {v['note']}")
+    if v.get("tool_calls"):
+        out.append("- **Re-ran:** " + "; ".join(f"{c['tool']} {json.dumps(c['args'])} -> {c['status']} "
+                                                f"{c['evidence_level']}" for c in v["tool_calls"]))
+    out += ["", "Checklist (written before the findings):", ""]
+    out += [f"- {x}" for x in v["checklist"]] or ["- (none)"]
+    out += ["", "Findings:", ""]
+    out += [f"- [{f['severity']}] {f['text']}" for f in v["findings"]] or ["- (none)"]
+    return out
 
 
 def write_receipt(receipt: dict, out_dir: Path) -> tuple[Path, Path]:
