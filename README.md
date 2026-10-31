@@ -1,11 +1,14 @@
 # eda-agent
 
 An evidence-gated agent for digital chip design. It drives open-source EDA tools
-(Verilator today; Yosys and LibreLane next) through an MCP server, and every tool
+(Verilator; Yosys and OpenSTA in the LibreLane container) through an MCP server, and every tool
 answers with a typed envelope that says **what the check proved and what it did not**.
 
-Status: **M1** — case descriptions, pluggable regression result formats, a second
-design (PicoRV32), an evidence gate on the final report, and a receipt for every run.
+Status: **M2** — synthesis with a pre-PnR timing estimate under the project's SDC (E4),
+an SDC completeness check, gate rule R5 for timing claims, an independent reviewer with
+configurable independence (I0–I3) plus a rule-based reviewer, and a human gate: a run that
+passes the evidence gate waits in `awaiting_approval` until a person approves it.
+(M1: case descriptions, regression result formats, PicoRV32, evidence gate, receipts.)
 
 ## Why
 
@@ -28,23 +31,33 @@ src/eda_agent/
     describe.py          what a regression case covers: source file + its leading comment
     regress.py           the project's own regression (E2), read by one of formats/
     formats/             torv.py | junit.py | exitcode.py: run cases, read results, claim_scope
-  server/mcp_server.py   MCP server (stdio): registers lint / list_regress_cases / describe_case / regress
+    synth.py             synth: Yosys + OpenSTA per corner in the project's container (E4);
+                         check_sdc: OpenSTA check_setup on the netlist (facts, E0)
+    rtl_rules.py         fixed RTL rules: Verilator BLKSEQ/COMBDLY/WIDTHTRUNC/LATCH/MULTIDRIVEN
+                         + a reset-polarity text scan (E0)
+  server/mcp_server.py   MCP server (stdio): lint / list_regress_cases / describe_case / regress /
+                         rtl_rules / synth / check_sdc
   agent/                 the agent runtime; reaches the tools only through MCP
     models/              base.py (ModelAdapter protocol), anthropic.py, openai_compat.py (DeepSeek),
                          scripted.py (for tests)
     loop.py              tool loop with budgets: turns, tool calls, 2-strike retry stop; JSONL trace
     gate.py              evidence gate on the final report (no LLM), up to 2 rewrites
     receipt.py           runs/<id>.receipt.json + .md at the end of every run
+    reviewer.py          independent review I0-I3 (context assembled by code) + rule-based reviewer
+    human_gate.py        awaiting_approval / approve / reject, recorded in the receipt
     mcp_client.py        connects the loop to the MCP server
-  cli.py                 eda-agent run ...
+  cli.py                 eda-agent run | review | approve | reject
 projects/torv.toml       TORV rv32m SoC (format torv)
 projects/picorv32.toml   YosysHQ PicoRV32 (format exitcode + pass/fail regex)
-src/eda_agent/prompts/system.v1.md  system prompt, shipped with the package; its name is recorded
-                         in every receipt (--prompt picks another, or a path to a draft .md)
+src/eda_agent/prompts/  system.v2.md (default; v1 kept), reviewer.v1.md; the prompt name is
+                         recorded in every receipt (--prompt picks another, or a path to a draft .md)
 tests/unit/              offline and free, a few seconds
-tests/eda/               marker "eda": needs Verilator and the design checkouts
+tests/eda/               marker "eda": needs Verilator and the design checkouts; the synth test also
+                         needs docker, the LibreLane image and the IHP PDK (skipped otherwise)
 tests/fixtures/          recorded tool output and model replies (for later tests)
-docs/examples/           two real run receipts (PicoRV32, TORV hazard task)
+docs/examples/           real run receipts: M1 (PicoRV32, TORV hazard task); M2 TORV end to end
+                         (lint, smoke, synth+STA, check_sdc, reviews rules/I2/I3) awaiting approval,
+                         and a copy approved only to demonstrate the human gate
 runs/                    traces, receipts and logs of your runs (not in git)
 ```
 
@@ -67,6 +80,15 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 
 # the agent on DeepSeek (needs DEEPSEEK_API_KEY)
 .venv/bin/eda-agent run --provider deepseek --project projects/torv.toml "Lint the design and run the smoke case"
+
+# ... with an independent review (rule-based + an I2 model reviewer), then a person decides
+.venv/bin/eda-agent run --provider deepseek --review I2 --project projects/torv.toml \
+    "Lint, run smoke, synthesize and estimate timing at the project clock"
+.venv/bin/eda-agent approve <run_id>                       # or:
+.venv/bin/eda-agent reject <run_id> --reason "slow corner too close"
+
+# review a finished run again, e.g. at I3 (another model), without re-running the author
+.venv/bin/eda-agent review <run_id> --review I3 --project projects/torv.toml
 ```
 
 Each run writes `runs/<id>.jsonl` (every model turn, tool call, gate decision, token
@@ -118,6 +140,27 @@ Two optional top-level keys make results repeatable and keep the tools on a shor
 Every trace (`runs/<id>.jsonl`) keeps each tool result whole, so a finished run can be
 replayed through a changed gate.
 
+### Synthesis and timing: `[flow]`
+
+`synth` runs Yosys (`read_slang` or `read_verilog -sv`, `synth -flatten`, `dfflibmap`, `abc`
+with fanout buffering) and then OpenSTA on the netlist under the project's own SDC, once per
+Liberty corner, inside the container image named in `[flow] image` (docker, as the calling
+user, no network, the design and PDK mounted read-only). It reports cells, area, latches,
+setup WNS/TNS, hold WNS and the worst path per corner; the worst corner decides `status`.
+The envelope records the SDC's sha256 (also as an artifact), the image digest and the
+Yosys/OpenSTA versions, and its `claim_scope` says: an estimate under this SDC, before
+placement and routing. `check_sdc` runs OpenSTA `check_setup` (clocks on the configured
+port, unconstrained endpoints, loops) and reports facts at E0: a complete SDC raises no level.
+
+The SDC is a design input written by people; the tools only read it. `[flow]` names it with
+`top`, `files`/`filelists`, `sdc`, `clock_port`, `clock_period` (also handed to the SDC as
+`$::env(CLOCK_PERIOD)`, as LibreLane does), `liberty`, `[flow.corners]`, `image`, `pdk_root`
+and PDK details (`dont_use_file`, tie and buffer cells, ABC driving cell and load). TORV's
+section mirrors its `librelane/config.yaml`; on TORV the estimate is within about 0.7 ns of
+LibreLane's own pre-PnR STA per corner. A project without `[flow]` (PicoRV32 today) gets a
+clean `not_configured` refusal. Containers come from an allowlist (`ghcr.io/librelane/librelane`
+built in; `allowed_images` adds more) and may only start allowlisted programs.
+
 ## Evidence gate
 
 When the model ends its turn, `agent/gate.py` checks the report against the tool
@@ -136,11 +179,61 @@ results of this run. All rules are in that one file:
 - **R3 residual risk.** The report must have a section headed "Residual risk" with content.
 - **R4 skipped cases.** A case the agent read with `describe_case` but did not run must be
   named in that section, so that leaving out a relevant test is stated, not silent.
+- **R5 timing.** A timing claim ("meets 100 MHz", "positive slack", "timing met", "no setup
+  violations", 满足时序 …) must name, in the same sentence, a result of this run that carries
+  an SDC sha256 (`synth`, `STA`, `E4` or the hash), and agree with it: the result must say
+  timing is met, a stated frequency must match its clock period, and every WNS/TNS/slack
+  number must be one the result reports (rounding allowed). If the SDC hash changes during a
+  run, timing results measured under the earlier SDC are void and cannot be cited.
 
 A rejected report goes back to the model with the reasons, at most twice; then the run
 stops with `stop_reason: gate_rejected` and `status: pending` for a human to judge. The
 checks are deliberately conservative and explainable: they can reject a fair sentence,
 which costs a rewrite, but they do not try to understand the design.
+
+## Independent review
+
+`--review` adds a review after the run; the program, not a model, assembles what the
+reviewer sees, from the author's trace:
+
+| level | the reviewer sees | tools |
+|---|---|---|
+| I0 | the author's whole history: task, turns, tool calls and results, final report | no |
+| I1 | a fresh conversation with the final report only | no |
+| I2 | the task and the tool results, none of the author's text or conclusions | may re-run the project's tools |
+| I3 | as I2, on a different model | as I2 |
+
+The reviewer first writes a checklist in a turn of its own, then goes through it and
+writes findings (`[high|medium|low|info] … — evidence: …`) and a verdict (accept,
+accept_with_findings, reject); a tool call before the checklist, or a missing section,
+is marked `format_ok: false`. Whenever any review is asked for, a **rule-based reviewer**
+(no model) also runs: the `rtl_rules` tool (blocking assignments in clocked blocks,
+non-blocking in combinational logic, width truncation, latches, multiple drivers, reset
+polarity against edge and name) plus plain checks of the author's results (errors, failing
+cases, latches, timing not met, mixed SDC hashes). `--review rules` runs it alone. All
+reviews go into the receipt.
+
+**On I3 here.** Only a DeepSeek key is available, so I3 uses DeepSeek's other model
+(`deepseek-v4-flash` reviewing `deepseek-v4-pro`, or the reverse). Two models of one vendor
+likely share training data and blind spots, so this is weaker independence than a reviewer
+from a different vendor; the receipt says so in the review's `note`. With an Anthropic key,
+`--review-provider anthropic` gives a cross-vendor I3.
+
+## Human gate
+
+A run whose report passes the evidence gate does not end as `done`: its receipt has
+`status: awaiting_approval` (the agent's own outcome is kept as `agent_status`) and an
+`approval` record `pending`. Nothing waits on a prompt. A person decides later:
+
+```bash
+eda-agent approve <run_id> [--by NAME]
+eda-agent reject  <run_id> --reason "..."
+eda-agent approve <run_id> --override-gate --reason "..."   # a gate-rejected (pending) run
+```
+
+The receipt then records who decided (`--by`, else `git config user.name`, else the login
+name), when, the reason, and the sha256 of the receipt content they decided on. Decisions
+are final; a rejected run is fixed by a new run. `--no-approval` skips the gate (status `done`).
 
 ## Related work: what we borrowed
 
@@ -156,11 +249,14 @@ Ideas only, unless marked as a dependency; no code was copied.
 | [VerilogCoder](https://github.com/NVlabs/VerilogCoder), [MAGE](https://github.com/stable-lab/MAGE) | (planned, M3) trace a failing signal back to its drivers; debug with checkpoints | |
 | [wave-mcp](https://github.com/Tencent/wave-mcp), [wavepeek](https://github.com/kleverhq/wavepeek) | (planned, M3, dependency) read waveforms | wrapped as two diagnostic tools that report values, not causes |
 | [MCY](https://github.com/YosysHQ/mcy) | (planned, M2.5, dependency) mutants to score generated tests | |
+| [LibreLane](https://github.com/librelane/librelane) | (dependency) its container image with Yosys and OpenSTA; its ABC script, driving cell and corners for IHP SG13G2 | we run only synthesis + pre-PnR STA, and record the SDC hash and image digest in an envelope |
+| [mcp-rtl-review](https://github.com/zesun33/mcp-rtl-review) | deterministic RTL review rules (blocking assignments, reset polarity, width truncation) as a reviewer without an LLM | it walks an AST; our rules come from Verilator's own warnings plus one text scan; findings feed the receipt next to a model reviewer |
+| [Agent-as-a-Judge](https://github.com/metauto-ai/agent-as-a-judge) | a judge that uses tools to check the work instead of reading the author's account | the I2/I3 reviewer gets the task and raw tool results, never the author's conclusions, and re-runs the same MCP tools |
 
 ## Roadmap
 
 M1 case descriptions, evidence gate, receipts · M1.1 tool versions, command allowlist,
-whole tool results in traces · M2 Yosys synth tool, independent reviewer with configurable
-independence (I0–I3), human gate · M2.5 test generation scored by mutants · M3
+whole tool results in traces · M2 (done) synth + pre-PnR STA under the SDC, check_sdc, gate
+R5, reviewer I0–I3 + rule-based reviewer, human gate · M2.5 test generation scored by mutants · M3
 simulation-failure localisation (logs, waveforms), lessons store · M4 LibreLane flow tool
 (PPA, DRC/LVS).
