@@ -78,10 +78,10 @@ def resolve_project(given: str | None) -> str:
     return str(found)
 
 
-def make_model(provider: str, model: str, effort: str):
+def make_model(provider: str, model: str, effort: str, max_tokens: int = 16000):
     if provider == "deepseek":
-        return OpenAICompatAdapter(model=model, effort=effort)
-    return AnthropicAdapter(model=model, effort=effort)
+        return OpenAICompatAdapter(model=model, effort=effort, max_tokens=max_tokens)
+    return AnthropicAdapter(model=model, effort=effort, max_tokens=max_tokens)
 
 
 def _server_args(project_path: str) -> list[str]:
@@ -385,11 +385,12 @@ async def _write_tests(args: argparse.Namespace) -> int:
     results = []
     async with mcp_tools(sys.executable, _server_args(args.project)) as (_, execute, _instructions):
         for mid in args.mutants:
-            r = await testgen.close_gap(make_model(args.provider, model_name, args.effort), execute, system,
-                                        run_id=run_id, mutate_run=args.mutate_run, mutant=mid, usage=usage,
-                                        attempts=args.attempts)
+            author = make_model(args.provider, model_name, args.effort, max_tokens=args.max_tokens)
+            r = await testgen.close_gap(author, execute, system, run_id=run_id, mutate_run=args.mutate_run,
+                                        mutant=mid, usage=usage, attempts=args.attempts)
             if r.status == "closed" and not args.no_review:
-                reviewer = make_model(args.provider, args.review_model or model_name, args.effort)
+                reviewer = make_model(args.provider, args.review_model or model_name, args.effort,
+                                      max_tokens=args.max_tokens)
                 r.review = await testgen.review_test(reviewer, review_system, Path(r.test).read_text(), r.diff,
                                                      r.scores[-1], usage)
             print(f"mutant {mid}: {r.status}" + (f" — {r.test}" if r.test else f" — {r.note}"))
@@ -499,7 +500,10 @@ def main() -> None:
     wt.add_argument("--mutants", type=int, nargs="+", required=True, help="mutant ids to close")
     wt.add_argument("--provider", default="anthropic", choices=sorted(DEFAULT_MODELS))
     wt.add_argument("--model")
-    wt.add_argument("--effort", default="high", choices=["low", "medium", "high", "xhigh", "max"])
+    # Thinking models can spend a whole reply reasoning; medium effort and a larger cap leave room
+    # for the test file itself.
+    wt.add_argument("--effort", default="medium", choices=["low", "medium", "high", "xhigh", "max"])
+    wt.add_argument("--max-tokens", type=int, default=32000, help="output limit per reply (default 32000)")
     wt.add_argument("--review-model", help="reviewer model (default: the author's)")
     wt.add_argument("--no-review", action="store_true")
     wt.add_argument("--attempts", type=int, default=3)

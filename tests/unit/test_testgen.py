@@ -149,6 +149,14 @@ def test_loop_feeds_back_and_closes_the_gap():
     assert fed == [] or any("FAILS on the unmodified design" in f for f in fed)
 
 
+def test_loop_stops_after_replies_cut_off_at_the_limit():
+    model = ScriptedAdapter([Turn(stop="max_tokens", text="")] * 2)
+    execute, calls = _fake_execute({"test_context": [CTX]})
+    r = asyncio.run(testgen.close_gap(model, execute, "sys", run_id="r", mutate_run="mr", mutant=2, usage={}))
+    assert r.status == "not closed" and "cut off at the output limit 2 times" in r.note
+    assert [t.original for t in r.tries] == ["cut off (output limit)"] * 2 and len(calls) == 1
+
+
 def test_loop_reports_an_unclosed_gap():
     code = "```sh\ntrue\n```"
     model = ScriptedAdapter([Turn(stop="end", text=code)] * 2)

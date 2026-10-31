@@ -24,7 +24,8 @@ from .models import ModelAdapter
 
 ATTEMPTS = 3   # new tests per mutant
 FIXES = 2      # corrections of one test that fails on the unmodified design
-PROMPT = "testgen.v1"
+MAX_CUT_OFFS = 2  # replies in a row cut off at the output limit before giving up on a mutant
+PROMPT = "testgen.v2"  # v2 asks for brief reasoning: v1 replies hit the output limit (run tg_m3_1)
 REVIEW_PROMPT = "testgen-review.v1"
 
 Execute = Callable[[str, dict], Awaitable[tuple[str, bool]]]
@@ -95,6 +96,7 @@ async def close_gap(model: ModelAdapter, execute: Execute, system: str, *, run_i
         return out
     out.diff = ctx.get("patch", "")
     model.start(system, [], render_task(ctx))
+    cut_offs = 0
     for a in range(1, attempts + 1):
         passed_file = ""
         for f in range(fixes + 1):
@@ -104,9 +106,20 @@ async def close_gap(model: ModelAdapter, execute: Execute, system: str, *, run_i
             t = Try(a, f)
             out.tries.append(t)
             if code is None:
-                t.original = "no code"
-                model.add_user_message("Reply with the complete test file in exactly one fenced code block.")
+                if turn.stop == "max_tokens":
+                    t.original = "cut off (output limit)"
+                    cut_offs += 1
+                    if cut_offs >= MAX_CUT_OFFS:
+                        out.note = (f"could not close this gap: the model's reply was cut off at the output limit "
+                                    f"{cut_offs} times in a row before it wrote a test")
+                        return out
+                    model.add_user_message("Your reply was cut off at the output limit before the code block. "
+                                           "Reason briefly, then give the complete test file in one fenced block.")
+                else:
+                    t.original = "no code"
+                    model.add_user_message("Reply with the complete test file in exactly one fenced code block.")
                 continue
+            cut_offs = 0
             res_text, err = await execute("write_case", {"run_id": run_id, "name": f"m{mutant}_a{a}",
                                                          "content": code, "mutate_run": mutate_run})
             res = json.loads(res_text) if not err else {"status": "error", "summary": res_text}
