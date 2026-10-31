@@ -255,7 +255,8 @@ def _mutate(args: argparse.Namespace) -> int:
                      confirm_full=args.confirm_full, equivalence=not args.no_equiv, jobs=args.jobs)
     print(f"mutate {args.file}: {res.status} — {res.summary}")
     for d in res.diagnostics:
-        print(f"  survived {d.file}:{d.line}  {d.msg}")
+        label = {"SURVIVED": "survived", "PERF_KILLED": "perf-killed"}.get(d.code, d.code.lower())
+        print(f"  {label} {d.file}:{d.line}  {d.msg}")
     for r in res.residual_risk:
         print(f"  risk: {r}")
     if work := res.metrics.get("work_dir"):
