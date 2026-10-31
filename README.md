@@ -269,6 +269,33 @@ eda-agent mutate --project projects/torv.toml --file rtl/torv_hazard_unit.sv --c
   pass but whose cycle count moves (against the unmodified design in the same copy) is
   `perf_killed`, reported apart from functional kills; the kill rate is given both ways.
 
+### New tests against surviving mutants: `[tests]`, `write-tests`
+
+```bash
+eda-agent write-tests --project projects/torv.toml --mutate-run <runs/work dir of a mutate run> \
+    --mutants 3 --provider deepseek
+```
+
+A fixed loop in code (`agent/testgen.py`); the model only writes the test text. Per mutant:
+`test_context` (the change, the module, two example tests) → the model writes one test →
+`write_case` puts it in `generated/<run_id>/` and runs it on the unmodified design in a copy
+(a failure goes back to the model, at most twice) → `score_tests` → if the target survives,
+a new attempt (at most three). `score_tests` gives E3 only when the test passes twice on the
+unmodified design, fails on the target in both of two runs, and lists every other mutant of
+that mutate run it kills (or only slows), with the kill rate before and after; then it writes
+a patch (the test file plus a case-list line). A fresh model call reviews the test (it sees
+the test, the diff and the measured facts, not the author's reasoning), and the run waits for
+a person: `eda-agent approve <run_id>`, then `git apply` the patch in the design. eda-agent
+never writes into the design. A gap that could not be closed is reported as such.
+
+`[tests]` needs one line, `run` (runs one test file: `{file}`, `{name}`); optional `log` (where
+the detailed output is), `register` (the case-list line in the patch) and `examples`. Pass/fail
+is judged as for the regression. New tests check results the specification defines (registers,
+memory), not timing; a test whose header says `kind=perf` checks cycles and is counted apart.
+The same loop fits a UVM bench (a test class run with `+UVM_TESTNAME={name}`, judged by
+UVM_ERROR/UVM_FATAL counts). eda-agent currently runs on open-source simulators; commercial
+simulators (needed for full UVM) are planned, and need only a different `run` command.
+
 ### Performance: `[perf]`
 
 `perf` runs regression cases and reads the counters the testbench already prints, with the
@@ -316,6 +343,10 @@ results of this run. All rules are in that one file:
   number must be one the result reports (rounding allowed). If the SDC hash changes during a
   run, timing results measured under the earlier SDC are void and cannot be cited.
 
+- **R6 tests.** A claim that a test catches / detects / kills a bug or mutant, or that the kill
+  rate rose, must name a `score_tests` result in the same sentence (`mutate` also counts for
+  plain facts about mutants, never for a rise); its percentages must be ones those results
+  report, and every mutant it names must have been killed there.
 - **R7 performance.** A performance claim (faster, slower, speed-up, "N cycles", IPC/CPI,
   throughput, 更快/更慢/周期数 …) must name a `perf` result (or `mutate`, for a mutant) in the
   same sentence, and its cycle, IPC/CPI and percentage numbers must be ones those results
