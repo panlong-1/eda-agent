@@ -96,6 +96,29 @@ def test_context_write_and_score(toy_run):
 
 
 @needs_avl
+def test_a_timing_test_closes_its_target_by_cycle_count(toy_run):
+    project, run, mid = toy_run
+    from dataclasses import replace
+
+    from eda_agent.core.project import PerfConfig
+    project = replace(project, perf=PerfConfig(patterns=(r"cycles=(?P<cycles>\d+)",)))
+    text = ("# eda-agent: target mutant 2 rtl/add.sv:4 kind=perf\n"
+            "if grep -q 'a & c;' rtl/add.sv; then n=10; else n=12; fi\necho \"cycles=$n\"\n")
+    w = T.run_write_case(project, "r3", "timing", text, run)
+    s = T.run_score_tests(project, "r3", w.metrics["path"], run, [mid])
+    m = s.metrics
+    assert s.status == "pass" and s.evidence_level == "E3" and m["kind"] == "perf"
+    assert m["targets"][str(mid)]["verdict"] == "perf_killed" and mid in m["perf_killed"]
+    assert m["kill_rate_after"] == m["kill_rate_before"]  # not a functional kill
+    assert m["kill_rate_with_perf_after"] > m["kill_rate_with_perf_before"]
+    assert "kind=perf" in s.claim_scope
+    r = testgen.TargetResult(mid, status="closed", test=w.metrics["path"], scores=[s.to_dict()])
+    g = testgen.gate_results([r])
+    assert g["decision"]["passed"], g["decision"]["reasons"]
+    assert "by cycle count" in g["report"]
+
+
+@needs_avl
 def test_score_refuses_a_test_that_fails_on_the_original(toy_run):
     project, run, mid = toy_run
     path = Path("generated/r2/flaky.sh")

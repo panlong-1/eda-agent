@@ -25,7 +25,9 @@ from .models import ModelAdapter
 ATTEMPTS = 3   # new tests per mutant
 FIXES = 2      # corrections of one test that fails on the unmodified design
 MAX_CUT_OFFS = 2  # replies in a row cut off at the output limit before giving up on a mutant
-PROMPT = "testgen.v2"  # v2 asks for brief reasoning: v1 replies hit the output limit (run tg_m3_1)
+# v2 asks for brief reasoning (v1 replies hit the output limit, run tg_m3_1); v3 adds timing-only
+# mutants and kind=perf tests (run tg_m3_2: the op mutant only adds stalls, no functional test can see it)
+PROMPT = "testgen.v3"
 REVIEW_PROMPT = "testgen-review.v1"
 
 Execute = Callable[[str, dict], Awaitable[tuple[str, bool]]]
@@ -65,6 +67,7 @@ class Try:
     file: str = ""
     original: str = ""      # PASS / FAIL / no code
     detail: str = ""
+    reply: str = ""         # the end of the model's reply, for a person to see what it did
 
 
 @dataclass
@@ -103,7 +106,7 @@ async def close_gap(model: ModelAdapter, execute: Execute, system: str, *, run_i
             turn = await model.step()
             _add(usage, turn.usage)
             code = extract_block(turn.text)
-            t = Try(a, f)
+            t = Try(a, f, reply=(turn.text or "")[-1500:])
             out.tries.append(t)
             if code is None:
                 if turn.stop == "max_tokens":
@@ -151,11 +154,14 @@ async def close_gap(model: ModelAdapter, execute: Execute, system: str, *, run_i
         if score.get("status") == "error":
             out.status, out.note = "error", score.get("summary", "")
             return out
-        tgt = ((score.get("metrics") or {}).get("targets") or {}).get(str(mutant), {})
+        sm = score.get("metrics") or {}
+        tgt = (sm.get("targets") or {}).get(str(mutant), {})
         model.add_user_message(
             f"The test passes on the unmodified design, but on mutant {mutant} it gave {tgt.get('runs')} "
-            f"(verdict: {tgt.get('verdict')}): it does not detect the change. Think again about which input "
-            "makes the mutated line produce a different architectural result, and write a new test.")
+            f"(verdict: {tgt.get('verdict')}; the test was {sm.get('kind')}, and on the unmodified design it "
+            f"printed {sm.get('original_perf')}): it does not detect the change. Think again about which input "
+            "makes the mutated line decide differently. If that can only change timing, follow rule 6 (kind=perf) "
+            "and make the situation occur several times; otherwise write a new functional test.")
     out.note = (f"could not close this gap: {attempts} attempts; "
                 + "; ".join(f"attempt {t.attempt}.{t.fix}: {t.original}" for t in out.tries))
     return out
@@ -183,11 +189,17 @@ def report_text(results: list[TargetResult]) -> str:
     for r in results:
         if r.status == "closed":
             m = r.scores[-1]["metrics"]
-            lines.append(f"score_tests: the new test {r.test} kills mutant {r.mutant} (failed in "
-                         f"{len(m['targets'][str(r.mutant)]['runs'])} of {len(m['targets'][str(r.mutant)]['runs'])} "
-                         f"runs, passed {len(m['original'])} of {len(m['original'])} on the unmodified design); "
-                         f"kill rate {m['kill_rate_before']:.0%} -> {m['kill_rate_after']:.0%} over "
-                         f"{m['scored']} mutants (score_tests).")
+            runs = len(m["targets"][str(r.mutant)]["runs"])
+            if m.get("kind") == "perf":
+                lines.append(f"score_tests: the new timing test (kind=perf) {r.test} kills mutant {r.mutant} by cycle "
+                             f"count (in {runs} of {runs} runs; it passed {len(m['original'])} of {len(m['original'])} "
+                             f"on the unmodified design); kill rate with perf {m['kill_rate_with_perf_before']:.0%} -> "
+                             f"{m['kill_rate_with_perf_after']:.0%} over {m['scored']} mutants (score_tests).")
+            else:
+                lines.append(f"score_tests: the new test {r.test} kills mutant {r.mutant} (failed in {runs} of {runs} "
+                             f"runs, passed {len(m['original'])} of {len(m['original'])} on the unmodified design); "
+                             f"kill rate {m['kill_rate_before']:.0%} -> {m['kill_rate_after']:.0%} over "
+                             f"{m['scored']} mutants (score_tests).")
             if m["newly_killed"] and m["newly_killed"] != [r.mutant]:
                 lines.append(f"score_tests: it also newly kills mutants {', '.join(map(str, m['newly_killed']))}.")
         else:

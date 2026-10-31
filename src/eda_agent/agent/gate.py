@@ -494,8 +494,11 @@ def check_perf(claims: str, results: list[dict]) -> list[str]:
 
 def _killed_ids(results: list[dict]) -> tuple[set[int], set[int]]:
     """(mutants a score_tests result of this run killed, mutants a mutate result reports killed)."""
+    # a kind=perf test kills by cycle count: its perf_killed mutants count as killed by it
     scored = {int(i) for r in results if r.get("tool") == "score_tests" and r.get("status") in ("pass", "fail")
-              for i in (r.get("metrics") or {}).get("killed", [])}
+              for i in [*(r.get("metrics") or {}).get("killed", []),
+                        *((r.get("metrics") or {}).get("perf_killed", [])
+                          if (r.get("metrics") or {}).get("kind") == "perf" else [])]}
     mutated = {int(x["id"]) for r in results if r.get("tool") == "mutate"
                for x in (r.get("metrics") or {}).get("mutant_list", []) if x.get("status") in ("killed", "perf_killed")}
     return scored, mutated

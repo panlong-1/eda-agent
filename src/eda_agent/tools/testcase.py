@@ -319,7 +319,9 @@ def run_score_tests(project: Project, run_id: str, file: str, mutate_run: str, t
     new_perf = {m for m, v in verdict.items() if v == "perf_killed"}
     after_killed = (killed_before | new_killed) & scored
     after_perf = ((perf_before | new_perf) - after_killed) & scored
-    target_ok = {t: verdict.get(t) == "killed" and stable[t] for t in targets}
+    # A functional test must make the target fail; a kind=perf test may instead move its cycle count.
+    hits = ("killed", "perf_killed") if kind == "perf" else ("killed",)
+    target_ok = {t: verdict.get(t) in hits and stable[t] for t in targets}
     success = all(target_ok.values()) and golden_stable
     metrics = {
         "test": str(test), "kind": kind, "mutate_run": mutate_run, "file": rel,
@@ -343,6 +345,9 @@ def run_score_tests(project: Project, run_id: str, file: str, mutate_run: str, t
         metrics |= {"patch": str(pfile), "patch_dest": dest}
         arts.append(artifact(pfile))
     killed_txt = ", ".join(map(str, sorted(new_killed))) or "none"
+    if kind == "perf":
+        perf_txt = ", ".join(map(str, sorted(new_perf - new_killed))) or "none"
+        killed_txt += f" (and moved the cycle count on mutants {perf_txt})"
     scope = (f"The new test {test} passed {ATTEMPT_RUNS} times on the unmodified design and was run on the "
              f"{len(mutants)} judged mutants of {rel} from {mutate_run}" + (f" ({ATTEMPT_RUNS} times on each target)")
              + f". It failed on mutants {killed_txt}. "
@@ -350,7 +355,9 @@ def run_score_tests(project: Project, run_id: str, file: str, mutate_run: str, t
                 "bugs, and kill rates are over this run's mutants only." if success else
                 "It did not fail on every target in every run, so this is not E3 for the targets."))
     if kind == "perf":
-        scope += " The test checks cycle counts (kind=perf): it depends on this implementation's timing."
+        scope += (" The test is kind=perf: it detects its target by the cycle count the testbench prints "
+                  "(compared with the unmodified design), so it depends on this implementation's timing and "
+                  "counts only toward the kill rate with perf, not the functional one.")
     diags = [Diagnostic("warning", "TARGET_NOT_KILLED", f"mutant {t}: {metrics['targets'][str(t)]}")
              for t, ok in target_ok.items() if not ok]
     risks = ["kill rates are over the mutants of one mutate run (a sample of one module), not over the design"]
