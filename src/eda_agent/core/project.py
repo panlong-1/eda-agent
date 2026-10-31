@@ -147,6 +147,21 @@ class MutationConfig:
 
 
 @dataclass(frozen=True)
+class NewTestsConfig:
+    """How one new test file is run ([tests]); used by write_case and score_tests. Pass/fail is
+    judged as for the regression: exit status plus [regress] pass/fail/summary regexes."""
+    run: tuple[str, ...]        # runs ONE test file: {file} (absolute path), {name} (its stem)
+    log: str = ""               # the test's detailed output, relative to the root ({name}); default:
+                                # the command's own output
+    register: str = ""          # line the patch adds to [regress] case_list ({name}, {path})
+    examples: tuple[str, ...] = ()  # cases to imitate; default: those that kill most mutants of the file
+
+    def __post_init__(self) -> None:
+        if not any("{file}" in a for a in self.run):
+            raise ValueError("[tests] run must contain {file}, e.g. [\"scripts/run_case.sh\", \"{file}\"]")
+
+
+@dataclass(frozen=True)
 class PerfConfig:
     """Performance numbers the testbench already prints ([perf]), read per case with regexes.
     Each pattern's named groups become that case's numbers, e.g. cycles, instr, ipc."""
@@ -189,6 +204,16 @@ class Project:
     flow: FlowConfig | None = None   # None: synth and check_sdc refuse (no [flow] section)
     mutation: MutationConfig | None = None  # None: mutate refuses (no [mutation] section)
     perf: PerfConfig | None = None          # None: perf refuses (no [perf] section)
+    tests: NewTestsConfig | None = None     # None: write_case / score_tests refuse (no [tests])
+
+
+def _tests(data: dict | None) -> NewTestsConfig | None:
+    if data is None:
+        return None
+    unknown = set(data) - set(NewTestsConfig.__dataclass_fields__)
+    if unknown:
+        raise ValueError(f"unknown [tests] key(s) {sorted(unknown)}")
+    return NewTestsConfig(**{k: tuple(v) if k in ("run", "examples") else v for k, v in data.items()})
 
 
 def _perf(data: dict | None, config: Path) -> PerfConfig | None:
@@ -246,6 +271,7 @@ def load_project(path: str | Path) -> Project:
         flow=_flow(data.get("flow"), root),
         mutation=_mutation(data.get("mutation")),
         perf=_perf(data.get("perf"), Path(path)),
+        tests=_tests(data.get("tests")),
         lint=LintConfig(
             top=lint["top"],
             filelists=tuple(lint.get("filelists", ())),

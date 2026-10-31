@@ -18,6 +18,10 @@ lets an overclaim through.
                 of this run that carries an SDC sha256 and agrees with it (met/not met, the
                 clock, every WNS/TNS/slack number); when the SDC hash changes during a run,
                 timing results measured under the earlier SDC are void
+  R6 tests      a claim that a test catches / detects / kills a bug or mutant, or that the kill rate
+                rose, names a score_tests result of this run in the same sentence (mutate also counts
+                for plain mutant facts, never for a rise); its percentages are ones those results
+                report, and every mutant it names was killed there
   R7 perf       a performance claim (faster/slower, speed-up, "N cycles", IPC/CPI, throughput, "no
                 performance regression") names a perf (or mutate) result of this run in the same
                 sentence, and its numbers are ones those results report; "no regression / not
@@ -124,6 +128,26 @@ _PERF_NUMS = [
     re.compile(r"\b(?:IPC|CPI)\b\s*(?:of|is|was|=|:|：)?\s*([+-]?\d+(?:\.\d+)?)", re.I),
     re.compile(r"([+-]?\d+(?:\.\d+)?)\s*%\s*(?:faster|slower|more|fewer|less|speed-?up|slow-?down|更快|更慢)", re.I),
 ]
+
+
+# R6: claims that tests catch bugs, and kill-rate rises (only score_tests can back a rise).
+TEST_CLAIMS = [
+    r"(?:catch(?:es|ing)?|caught|detect(?:s|ed|ing)?|kill(?:s|ed|ing)?|expos(?:es|ed|ing))\s+(?:\w+\s+){0,3}?"
+    r"(?:bugs?|mutants?|mutations?|faults?|defects?)",
+    r"(?:bugs?|mutants?|mutations?|faults?)\s+(?:\d+(?:\s*(?:,|and)\s*\d+)*\s+)?(?:is|are|was|were|gets?|got)\s+"
+    r"(?:now\s+|also\s+)?(?:caught|killed|detected)",
+    "(?:抓到|检测到|杀死|发现)[^。，,.；;]{0,12}(?:bug|变异体|缺陷)",
+]
+RISE_CLAIMS = [
+    r"kill\s+rate\s+(?:rises?|rose|increase[sd]?|improve[sd]?|goes\s+up|went\s+up|from\s+\d)",
+    r"(?:raise[sd]?|improve[sd]?|increase[sd]?)\s+(?:the\s+)?kill\s+rate", r"kill\s+rate[^.;]{0,30}->",
+    "捕获率(?:提高|上升|提升|从)",
+]
+_TEST_CLAIM = re.compile("|".join(f"(?:{p})" for p in TEST_CLAIMS), re.I)
+_RISE = re.compile("|".join(f"(?:{p})" for p in RISE_CLAIMS), re.I)
+_SCORE_CITE = re.compile(r"(?<![\w-])score_tests(?![\w-])", re.I)
+_PCT = re.compile(r"(\d+(?:\.\d+)?)\s*%")
+_MUTANT_ID = re.compile(r"(?:mutants?|#)\s*((?:\d+)(?:\s*(?:,|and|、)\s*\d+)*)", re.I)
 
 
 @dataclass
@@ -468,6 +492,65 @@ def check_perf(claims: str, results: list[dict]) -> list[str]:
     return reasons
 
 
+def _killed_ids(results: list[dict]) -> tuple[set[int], set[int]]:
+    """(mutants a score_tests result of this run killed, mutants a mutate result reports killed)."""
+    scored = {int(i) for r in results if r.get("tool") == "score_tests" and r.get("status") in ("pass", "fail")
+              for i in (r.get("metrics") or {}).get("killed", [])}
+    mutated = {int(x["id"]) for r in results if r.get("tool") == "mutate"
+               for x in (r.get("metrics") or {}).get("mutant_list", []) if x.get("status") in ("killed", "perf_killed")}
+    return scored, mutated
+
+
+def _rates(results: list[dict]) -> set[float]:
+    """Kill rates (in %) that score_tests and mutate results of this run report."""
+    keys = ("kill_rate", "kill_rate_with_perf", "kill_rate_before", "kill_rate_after",
+            "kill_rate_with_perf_before", "kill_rate_with_perf_after")
+    return {100.0 * v for r in results if r.get("tool") in ("score_tests", "mutate")
+            for k in keys if isinstance(v := (r.get("metrics") or {}).get(k), (int, float))}
+
+
+def check_tests(claims: str, results: list[dict]) -> list[str]:
+    scores = [r for r in results if r.get("tool") == "score_tests" and r.get("status") in ("pass", "fail")]
+    mutates = [r for r in results if r.get("tool") == "mutate" and r.get("status") in ("pass", "fail")]
+    by_score, by_mutate = _killed_ids(results)
+    rates = _rates(results)
+    reasons = []
+    for sentence in _T_SENTENCE.findall(claims):
+        text = sentence.strip()
+        rise = [m.group(0) for c in _T_CLAUSE.findall(sentence) for m in _RISE.finditer(c) if not _perf_limit(c, m.start())]
+        catch = [m.group(0) for c in _T_CLAUSE.findall(sentence) for m in _TEST_CLAIM.finditer(c)
+                 if not _perf_limit(c, m.start())]
+        if not rise and not catch:
+            continue
+        first = (rise or catch)[0]
+        cites_score = bool(_SCORE_CITE.search(sentence))
+        cites_mutate = bool(re.search(r"(?<![\w-])mutate(?![\w-])", sentence, re.I))
+        if rise and not scores:
+            reasons.append(f"'{first}' claims a higher kill rate, which needs a score_tests result of this run; "
+                           f"there is none: {text!r}")
+            continue
+        if not scores and not mutates:
+            reasons.append(f"'{first}' claims that tests catch bugs, but no score_tests (or mutate) result of this "
+                           f"run backs it: {text!r}")
+            continue
+        if rise and not cites_score:
+            reasons.append(f"'{first}' must name the score_tests result it rests on in the same sentence: {text!r}")
+        elif catch and not (cites_score or cites_mutate):
+            reasons.append(f"'{first}' must name the score_tests (or mutate) result it rests on in the same "
+                           f"sentence: {text!r}")
+        killed = (by_score if cites_score else set()) | (by_mutate if cites_mutate else set())
+        for m in _MUTANT_ID.finditer(sentence):
+            for n in re.findall(r"\d+", m.group(1)):
+                if int(n) not in killed and not _perf_limit(sentence, m.start()):
+                    reasons.append(f"names mutant {n}, but no cited result of this run reports it killed: {text!r}")
+        for p in _PCT.findall(sentence):
+            decimals = len(p.split(".")[1]) if "." in p else 0
+            if not _matches(float(p), decimals, rates):
+                reasons.append(f"cites {p}% but no score_tests or mutate result of this run reports that kill rate: "
+                               f"{text!r}")
+    return reasons
+
+
 def check_report(report: str, results: list[dict]) -> GateDecision:
     """results: the parsed tool results of this run (envelopes, describe_case output, ...)."""
     envelopes = [r for r in results if r.get("evidence_level") in EVIDENCE_LEVELS]
@@ -475,7 +558,8 @@ def check_report(report: str, results: list[dict]) -> GateDecision:
     max_level = max(passing, key=_rank, default="")
     claims, residual = split_residual(report)
     reasons = (check_citations(claims, envelopes) + check_strength(claims, envelopes)
-               + check_timing(claims, envelopes) + check_perf(claims, envelopes) + check_residual(residual))
+               + check_timing(claims, envelopes) + check_tests(claims, envelopes) + check_perf(claims, envelopes)
+               + check_residual(residual))
     if not reasons:  # R4 needs the residual-risk section, so it is checked once R1-R3 pass
         reasons = check_skipped(residual, results)
     return GateDecision(passed=not reasons, reasons=reasons, max_level=max_level)

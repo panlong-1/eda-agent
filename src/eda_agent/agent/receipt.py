@@ -193,5 +193,9 @@ def write_receipt(receipt: dict, out_dir: Path) -> tuple[Path, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     js, md = (out_dir / f"{receipt['run_id']}.receipt.{ext}" for ext in ("json", "md"))
     js.write_text(json.dumps(receipt, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    md.write_text(render_markdown(receipt), encoding="utf-8")
+    if receipt.get("kind") == "testgen":  # eda-agent write-tests has its own receipt layout
+        from .testgen import render_markdown as render_testgen
+        md.write_text(render_testgen(receipt), encoding="utf-8")
+    else:
+        md.write_text(render_markdown(receipt), encoding="utf-8")
     return js, md

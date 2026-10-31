@@ -13,6 +13,7 @@ from ..tools.describe import describe_cases, list_cases
 from ..tools.lint import run_lint
 from ..tools.mutate import run_mutate
 from ..tools.perf import run_perf
+from ..tools.testcase import run_score_tests, run_test_context, run_write_case
 from ..tools.regress import run_regress
 from ..tools.rtl_rules import run_rtl_rules
 from ..tools.synth import run_check_sdc, run_synth
@@ -97,6 +98,34 @@ def build_server(project: Project) -> MCPServer:
     ))
     def perf(cases: list[str] | None = None) -> dict:
         return run_perf(project, cases).to_dict()
+
+    tests_ok = "" if project.tests and project.mutation else " Not configured for this project: refuses."
+
+    @server.tool(description=(
+        "Facts for writing a test against one mutant of a mutate run: the change (file:line, before -> "
+        "after, patch), the module source with line numbers, example tests of this project and how a test "
+        "is judged pass/fail." + tests_ok
+    ))
+    def test_context(mutate_run: str, mutant: int) -> dict:
+        return run_test_context(project, mutate_run, mutant)
+
+    @server.tool(description=(
+        "Write a new test file (only into generated/<run_id>/; the design is never written) and run it once "
+        "on the unmodified design, in a copy. Returns pass/fail with the output tail; a test that fails on "
+        "the unmodified design is wrong." + tests_ok
+    ))
+    def write_case(run_id: str, name: str, content: str, mutate_run: str) -> dict:
+        return run_write_case(project, run_id, name, content, mutate_run).to_dict()
+
+    @server.tool(description=(
+        "Score a test written by write_case: it must pass twice on the unmodified design, fail on each "
+        "target mutant in both of two runs, and every other mutant of the mutate run it kills is listed, "
+        "with the kill rate before and after. Only then evidence E3, for the killed mutants only; writes a "
+        "patch for a person to apply after approval. Any claim that a test catches a bug or raises the kill "
+        "rate must cite this result." + tests_ok
+    ))
+    def score_tests(run_id: str, file: str, mutate_run: str, targets: list[int]) -> dict:
+        return run_score_tests(project, run_id, file, mutate_run, targets).to_dict()
 
     mut = project.mutation
     mut_files = (f"one of {list(mut.files)}" if mut.files else "a .sv/.v file under the project root") \
