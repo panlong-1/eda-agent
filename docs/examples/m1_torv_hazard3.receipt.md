@@ -18,9 +18,9 @@
 
 ## Checks
 
-| check | result | evidence | tool summary |
-|---|---|---|---|
-| regress `{"cases": ["bypass", "hazard", "muldiv_stall"]}` | ✅ pass | E2 these tests passed | 3 passed, 0 failed, 0 skipped |
+| check | result | evidence | time (s) | tool summary |
+|---|---|---|---|---|
+| regress `{"cases": ["bypass", "hazard", "muldiv_stall"]}` | ✅ pass | E2 these tests passed | 29.16 | 3 passed, 0 failed, 0 skipped |
 
 ## What the evidence allows
 
@@ -47,6 +47,30 @@
 ## Approval
 
 - no approval record
+
+## Data
+
+Numbers marked † come from the run's trace runs/m1_torv_hazard3.jsonl (this receipt predates them); the receipt .json is unchanged.
+
+### Simulation (regress)
+
+| cases asked | run | passed | failed | skipped | testbench sub-tests | failed cases |
+|---|---|---|---|---|---|---|
+| bypass, hazard, muldiv_stall † | 3 | 3 | 0 | 0 | — | — |
+
+### Evidence gate decisions
+
+| attempt | result | best passing evidence | reasons |
+|---|---|---|---|
+| 1 | reject | E2 | 'correctly' claims functional correctness, which needs E3+; the best passing evidence here is E2, which supports only 'these checks/cases passed': 'That supports that the tested forwarding and load-use scenarios run correctly in simulation' |
+| 2 | pass | E2 | — |
+
+### Cost
+
+| who | model | turns | tool calls | tokens in | tokens out | cached in | wall time (s) |
+|---|---|---|---|---|---|---|---|
+| author (the agent) | deepseek / deepseek-v4-pro | 5 | 4 | 14,847 | 1,211 | 12,160 | 52.02 |
+| total |  | 5 | 4 | 14,847 | 1,211 | 12,160 | 52.02 |
 
 ---
 

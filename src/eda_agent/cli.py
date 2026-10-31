@@ -9,6 +9,7 @@
     eda-agent approve <run_id>                                          (human gate)
     eda-agent reject <run_id> --reason "..."
     eda-agent receipt <run_id> --lang zh                                (re-render .md/.html)
+    eda-agent receipt <run_id> --narrate --all-langs                    (+ model-written summaries)
 
 --project may be left out when the current directory (or a parent) has eda-agent.toml.
 Personal defaults (provider, model, effort, review, lang) live in ~/.config/eda-agent/config.toml.
@@ -30,6 +31,8 @@ from .agent.loop import Budget, run_agent
 from .agent.mcp_client import mcp_tools
 from .agent.models import AnthropicAdapter, OpenAICompatAdapter
 from .agent.receipt import build_receipt, render_files, write_receipt
+from .agent.receipt_llm import PROMPT as SUMMARY_PROMPT
+from .agent.receipt_llm import write_narrative
 from .agent.receipt_view import LANGS, render_summary_md, summarize
 from .agent.reviewer import LEVELS, load_trace, model_review, rules_review
 from .core.project import load_project, regress_cases
@@ -154,6 +157,8 @@ async def _run(args: argparse.Namespace) -> int:
             except Exception as e:  # a failed review must not lose the author's receipt
                 receipt["review_error"] = f"{type(e).__name__}: {e}"
                 print(f"review failed: {receipt['review_error']}", file=sys.stderr)
+    if args.narrate:
+        await narrate(receipt, [args.lang], args.provider, model_name, args.effort, trace.parent)
     if report.status == "done" and not args.no_approval:
         human_gate.request_approval(receipt, "final report",
                                     "the evidence gate passed; a person accepts the result")
@@ -206,14 +211,43 @@ def _decide(args: argparse.Namespace, decision: str) -> int:
     return 0
 
 
+async def narrate(receipt: dict, langs: list[str], provider: str, model_name: str, effort: str,
+                  base: Path) -> None:
+    """Add a model-written summary per language to receipt["narratives"]. A failure (no key,
+    network) is reported and the receipt is rendered without it."""
+    from .agent.receipt_tables import with_trace_data
+    view = with_trace_data(receipt, base)
+    for lang in langs:
+        try:
+            n = await write_narrative(view, make_model(provider, model_name, effort), lang,
+                                      load_prompt(SUMMARY_PROMPT), provider=provider)
+        except Exception as e:  # the receipt must not depend on the model
+            print(f"summary ({lang}) not written: {type(e).__name__}: {e}", file=sys.stderr)
+            continue
+        receipt.setdefault("narratives", {})[lang] = n
+        print(f"summary ({lang}) by {provider}/{n['model']}: evidence gate "
+              f"{'passed' if n['gate']['passed'] else 'REJECTED'} after {n['gate']['rewrites']} rewrite(s)")
+
+
 def _receipt(args: argparse.Namespace) -> int:
-    """Re-render the .md and .html of a receipt from its .json (which is left as it is)."""
+    """Re-render the .md and .html of a receipt from its .json. With --narrate, first add
+    model-written summaries to the .json (they are outside the sha256 a decision records)."""
+    runs_dir = Path(args.runs_dir)
     try:
-        receipt, _ = human_gate.load_receipt(args.run_id, Path(args.runs_dir))
+        receipt, path = human_gate.load_receipt(args.run_id, runs_dir)
     except human_gate.ApprovalError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
-    md, page = render_files(receipt, Path(args.out_dir or args.runs_dir), args.lang)
+    if args.narrate:
+        provider = args.provider or receipt["provider"]
+        model_name = args.model or (receipt["model"] if provider == receipt["provider"] else DEFAULT_MODELS[provider])
+        before = len(receipt.get("narratives") or {})
+        asyncio.run(narrate(receipt, list(LANGS) if args.all_langs else [args.lang], provider, model_name,
+                            args.effort, runs_dir))
+        if len(receipt.get("narratives") or {}) != before or args.all_langs:
+            path.write_text(json.dumps(receipt, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    md, page = render_files(receipt, Path(args.out_dir or args.runs_dir), args.lang, base=runs_dir,
+                            all_langs=args.all_langs)
     if args.print:
         print(render_summary_md(summarize(receipt, args.lang)))
     print(f"receipt: {page} (also {md.name})")
@@ -274,6 +308,9 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--no-approval", action="store_true",
                    help="end with status done instead of awaiting_approval (no human gate)")
     _add_lang_arg(p)
+    p.add_argument("--narrate", action="store_true",
+                   help="add a model-written summary to the receipt (same provider and model; checked by "
+                        "the evidence gate; the tables stay the record)")
     _add_review_args(p, "none")
 
 
@@ -330,6 +367,14 @@ def main() -> None:
     rec.add_argument("--runs-dir", default="runs")
     rec.add_argument("--out-dir", help="write the rendered files here instead of next to the .json")
     rec.add_argument("--print", action="store_true", help="also print the review summary")
+    rec.add_argument("--all-langs", action="store_true",
+                     help="also write <id>.receipt.en.md and .zh.md (the .html always has both)")
+    rec.add_argument("--narrate", action="store_true",
+                     help="add a model-written summary (checked by the evidence gate) for --lang, or for "
+                          "both languages with --all-langs; needs the provider's API key")
+    rec.add_argument("--provider", choices=sorted(DEFAULT_MODELS), help="for --narrate (default: the run's)")
+    rec.add_argument("--model", help="for --narrate (default: the run's model)")
+    rec.add_argument("--effort", default="high", choices=["low", "medium", "high", "xhigh", "max"])
     _add_lang_arg(rec)
 
     # Personal defaults apply to run and check; anything on the command line wins.
@@ -343,7 +388,7 @@ def main() -> None:
         doc.set_defaults(provider=defaults["provider"])
     lang_default = {"lang": defaults["lang"]} if "lang" in defaults else {}
     rev.set_defaults(**lang_default)
-    rec.set_defaults(**lang_default)
+    rec.set_defaults(**lang_default)  # provider/model of `receipt --narrate` default to the run's
 
     for name, help_text in (("approve", "approve a run awaiting approval"), ("reject", "reject a run")):
         p = sub.add_parser(name, help=help_text)

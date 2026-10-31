@@ -13,7 +13,11 @@ from pathlib import Path
 from ..core.envelope import EVIDENCE_LEVELS
 from .gate import described_cases, executed_cases, split_residual, timing_results
 from .loop import RunReport
-from .receipt_view import render_html, render_summary_md, summarize
+from .receipt_tables import with_trace_data
+from .receipt_view import (LANGS, render_data_md, render_html, render_narrative_md, render_summary_md,
+                           summarize)
+
+MAX_DIAGNOSTICS = 50  # per check; the count of all of them is kept in diagnostics_total
 
 
 def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, project: str,
@@ -52,6 +56,10 @@ def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, p
             "tool_versions": c["result"].get("tool_versions", {}),
             "artifacts": [{"path": a.get("path"), "sha256": a.get("sha256")}
                           for a in c["result"].get("artifacts", [])],
+            "duration_s": c.get("duration_s"),
+            "metrics": c["result"].get("metrics") or {},
+            "diagnostics": (c["result"].get("diagnostics") or [])[:MAX_DIAGNOSTICS],
+            "diagnostics_total": c["result"].get("diagnostics_total", 0),
             **_timing(c["result"], void),
         } for c in envelopes],
         "other_tool_calls": [{"tool": c["tool"], "args": c["args"],
@@ -92,8 +100,12 @@ def _cell(text: str) -> str:
 
 
 def render_markdown(r: dict, lang: str = "en") -> str:
-    """The review summary (in `lang`) on top, then the full receipt (details, in English)."""
-    return render_summary_md(summarize(r, lang)) + "\n---\n\n" + render_details(r)
+    """In `lang`: the review summary, the model-written summary if there is one, the data tables;
+    then the full receipt (details, in English) and the long lists."""
+    data, more = render_data_md(r, lang)
+    narrative = render_narrative_md(r, lang)
+    return (render_summary_md(summarize(r, lang)) + ("\n" + narrative if narrative else "") + "\n" + data
+            + "\n---\n\n" + render_details(r) + ("\n" + more if more else ""))
 
 
 def render_details(r: dict) -> str:
@@ -198,10 +210,18 @@ def write_receipt(receipt: dict, out_dir: Path, lang: str = "en") -> tuple[Path,
     return js, md
 
 
-def render_files(receipt: dict, out_dir: Path, lang: str = "en") -> tuple[Path, Path]:
-    """(Re-)write runs/<id>.receipt.md and .html from the receipt data; the .json is not touched."""
+def render_files(receipt: dict, out_dir: Path, lang: str = "en", *, base: Path | None = None,
+                 all_langs: bool = False) -> tuple[Path, Path]:
+    """(Re-)write runs/<id>.receipt.md (in `lang`) and .html (both languages, `lang` first) from
+    the receipt data; all_langs also writes <id>.receipt.en.md and .zh.md. The .json is not
+    touched. `base`: where the receipt's trace may be found (default out_dir)."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    md, page = (out_dir / f"{receipt['run_id']}.receipt.{ext}" for ext in ("md", "html"))
-    md.write_text(render_markdown(receipt, lang), encoding="utf-8")
-    page.write_text(render_html(receipt, lang), encoding="utf-8")
+    view = with_trace_data(receipt, base or out_dir)
+    name = f"{receipt['run_id']}.receipt"
+    md, page = out_dir / f"{name}.md", out_dir / f"{name}.html"
+    md.write_text(render_markdown(view, lang), encoding="utf-8")
+    page.write_text(render_html(view, lang), encoding="utf-8")
+    if all_langs:
+        for other in LANGS:
+            (out_dir / f"{name}.{other}.md").write_text(render_markdown(view, other), encoding="utf-8")
     return md, page

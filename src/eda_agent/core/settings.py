@@ -6,6 +6,7 @@
       provider = "deepseek"
       review = "I2"
       lang = "zh"          # review summary of receipts in Chinese (default "en")
+      narrate = true       # add a model-written summary to each receipt (needs the API key)
   Command-line options always win.
 """
 from __future__ import annotations
@@ -15,7 +16,7 @@ import tomllib
 from pathlib import Path
 
 PROJECT_FILE = "eda-agent.toml"
-USER_KEYS = ("provider", "model", "effort", "review", "review_provider", "review_model", "lang")
+USER_KEYS = ("provider", "model", "effort", "review", "review_provider", "review_model", "lang", "narrate")
 LANGS = ("en", "zh")
 
 

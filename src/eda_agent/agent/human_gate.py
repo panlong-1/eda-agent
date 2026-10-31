@@ -28,8 +28,9 @@ def _now() -> str:
 
 def content_sha256(receipt: dict) -> str:
     """Hash of what the person decided on: the receipt without the fields the decision itself
-    writes (approval, status, agent_status), so it can be re-checked on the saved receipt."""
-    body = {k: v for k, v in receipt.items() if k not in ("approval", "status", "agent_status")}
+    writes (approval, status, agent_status), so it can be re-checked on the saved receipt.
+    Model-written summaries (narratives) are advisory and may be added later; they are left out."""
+    body = {k: v for k, v in receipt.items() if k not in ("approval", "status", "agent_status", "narratives")}
     return hashlib.sha256(json.dumps(body, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 

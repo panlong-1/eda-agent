@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 
 from ..core.envelope import EVIDENCE_LEVELS
 from .human_gate import AWAITING, content_sha256
+from .receipt_tables import Table, data_tables, trace_note
 
 LANGS = ("en", "zh")
 SEVERITIES = ("high", "medium", "low", "info")
@@ -104,6 +105,23 @@ T = {
     "checks": {"en": "Checks", "zh": "每项检查"},
     "col_check": {"en": "check", "zh": "检查"}, "col_result": {"en": "result", "zh": "结果"},
     "col_level": {"en": "evidence", "zh": "证据等级"}, "col_summary": {"en": "tool summary", "zh": "工具摘要"},
+    "col_time": {"en": "time (s)", "zh": "耗时（秒）"},
+    "data": {"en": "Data", "zh": "数据"},
+    "more_data": {"en": "More data (long lists)", "zh": "更多数据（长列表）"},
+    "narr_title": {"en": "Summary written by a model", "zh": "模型撰写的摘要"},
+    "narr_by": {"en": "Written by {provider} / {model} (prompt {prompt}) at {at}, from the receipt data only. "
+                      "Check it against the tables: they are the record.",
+                "zh": "由 {provider} / {model}（提示词 {prompt}）于 {at} 根据收据数据撰写。请对照下面的表格核对："
+                      "表格才是正式记录。"},
+    "narr_after": {"en": "Written after the decision; not part of what was decided.",
+                   "zh": "写于决定之后；不属于当时决定的内容。"},
+    "narr_gate_ok": {"en": "passed the evidence gate", "zh": "通过证据门"},
+    "narr_gate_bad": {"en": "REJECTED by the evidence gate: do not rely on it", "zh": "被证据门拒绝：不要依赖这段文字"},
+    "narr_rewrites": {"en": "{n} rewrite(s)", "zh": "重写 {n} 次"},
+    "narr_other": {"en": "A model-written summary exists in {langs}.", "zh": "另有模型撰写的摘要（{langs}）。"},
+    "i_narr_rejected": {"en": "The model-written summary was rejected by the evidence gate; rely on the tables.",
+                        "zh": "模型撰写的摘要被证据门拒绝；请以表格为准。"},
+    "details_en": {"en": "Details (full receipt)", "zh": "详细记录（完整收据，英文原文）"},
     "no_checks": {"en": "no check ran", "zh": "没有运行任何检查"},
     "evidence": {"en": "What the evidence allows", "zh": "证据能说明什么"},
     "highest": {"en": "Highest evidence reached: {lvl} ({words}).", "zh": "达到的最高证据：{lvl}（{words}）。"},
@@ -388,6 +406,7 @@ def _checks(s: Summary, r: dict, lang: str) -> None:
             "level": lvl, "level_text": LEVELS[lvl][lang][0] if lvl in LEVELS else lvl,
             "summary": c["summary"].splitlines()[0] if c["summary"] else "",
             "void": bool((c.get("timing") or {}).get("void")),
+            "duration": c.get("duration_s"),
         })
 
 
@@ -449,8 +468,9 @@ def _attention(r: dict, a: dict, lang: str) -> list[Item]:
     # The decision itself
     if a.get("overrode_gate"):
         add("stop", "i_override")
-    if a.get("receipt_sha256") and a["receipt_sha256"] != content_sha256(r):
-        add("stop", "i_changed", old=a["receipt_sha256"][:12], new=content_sha256(r)[:12])
+    saved = r.get("_source", r)  # the receipt as saved, not the copy with trace data for display
+    if a.get("receipt_sha256") and a["receipt_sha256"] != content_sha256(saved):
+        add("stop", "i_changed", old=a["receipt_sha256"][:12], new=content_sha256(saved)[:12])
     if r["gate"]["status"] == "rejected":
         add("stop", "i_gate_rejected")
     if r["stop_reason"] not in ("end", "gate_rejected"):
@@ -530,6 +550,9 @@ def _attention(r: dict, a: dict, lang: str) -> list[Item]:
         add("warn", "i_review_error", err="", quote=r["review_error"])
     if not r.get("reviews") and not r.get("review_error"):
         add("info", "i_no_review")
+    n = (r.get("narratives") or {}).get(lang)
+    if n and not n["gate"]["passed"]:
+        add("warn", "i_narr_rejected")
     for v, _ in reviews:
         if not v.get("format_ok", True):
             add("info", "i_format", who=_reviewer_name(v, lang))
@@ -555,6 +578,40 @@ def _item_md(i: Item, colon: str) -> str:
     return f"- {MARK[i.level]} {text}" + (f"{colon}{_md(_short(i.quote))}" if i.quote else "")
 
 
+def _cell_text(c) -> str:
+    return c["text"] if isinstance(c, dict) else str(c)
+
+
+def table_md(tb: Table) -> list[str]:
+    out = [f"### {tb.title}", ""]
+    if tb.note:
+        out += [tb.note, ""]
+    out += ["| " + " | ".join(_md(c) for c in tb.cols) + " |", "|" + "---|" * len(tb.cols)]
+    out += ["| " + " | ".join(_md(_cell_text(c)).replace("\n", "<br>") for c in row) + " |" for row in tb.rows]
+    return out + [""]
+
+
+def _secs(x) -> str:
+    return f"{x:g}" if isinstance(x, (int, float)) else "—"
+
+
+def _narrative(r: dict, lang: str) -> dict | None:
+    return (r.get("narratives") or {}).get(lang)
+
+
+def _narr_meta(r: dict, n: dict, L: str) -> tuple[str, str]:
+    """(who/when line, gate line) of a narrative."""
+    meta = t(L, "narr_by", provider=n.get("provider") or "?", model=n.get("model") or "?",
+             prompt=n.get("prompt") or "?", at=n.get("at") or "?")
+    a = r.get("approval") or {}
+    if a.get("at") and n.get("at") and n["at"] > a["at"]:
+        meta += " " + t(L, "narr_after")
+    gate = t(L, "narr_gate_ok" if n["gate"]["passed"] else "narr_gate_bad")
+    if n["gate"].get("rewrites"):
+        gate += f" ({t(L, 'narr_rewrites', n=n['gate']['rewrites'])})"
+    return meta, gate
+
+
 def render_summary_md(s: Summary) -> str:
     L = s.lang
     col = "：" if L == "zh" else ": "
@@ -571,12 +628,12 @@ def render_summary_md(s: Summary) -> str:
     out += [_item_md(i, col) for i in s.attention] or [f"- {t(L, 'attention_none')}"]
     out += ["", f"## {t(L, 'checks')}", ""]
     if s.checks:
-        out += [f"| {t(L, 'col_check')} | {t(L, 'col_result')} | {t(L, 'col_level')} | {t(L, 'col_summary')} |",
-                "|---|---|---|---|"]
+        out += [f"| {t(L, 'col_check')} | {t(L, 'col_result')} | {t(L, 'col_level')} | {t(L, 'col_time')} "
+                f"| {t(L, 'col_summary')} |", "|---|---|---|---|---|"]
         for c in s.checks:
             name = c["tool"] + (f" `{_md(c['args'])}`" if c["args"] else "")
             out.append(f"| {name} | {BADGE_MD.get(c['status'], '❔')} {c['status_text']} "
-                       f"| {c['level']} {c['level_text']} | {_md(c['summary'])} |")
+                       f"| {c['level']} {c['level_text']} | {_secs(c.get('duration'))} | {_md(c['summary'])} |")
     else:
         out.append(f"- {t(L, 'no_checks')}")
     out += ["", f"## {t(L, 'evidence')}", ""] + [f"- {x}" for x in s.evidence]
@@ -595,48 +652,87 @@ def render_summary_md(s: Summary) -> str:
     return "\n".join(out) + "\n"
 
 
+def render_narrative_md(r: dict, L: str) -> str:
+    n = _narrative(r, L)
+    if not n:
+        others = sorted(r.get("narratives") or {})
+        return f"> {t(L, 'narr_other', langs=', '.join(others))}\n" if others else ""
+    meta, gate = _narr_meta(r, n, L)
+    quoted = "\n".join(f"> {line}" if line.strip() else ">" for line in n["text"].splitlines())
+    return f"## {t(L, 'narr_title')}\n\n*{meta}* **{gate}**\n\n{quoted}\n"
+
+
+def render_data_md(r: dict, L: str) -> tuple[str, str]:
+    """(the data tables, the long lists) as Markdown."""
+    tables = data_tables(r, L)
+    main = [f"## {t(L, 'data')}", ""] + ([trace_note(r, L), ""] if trace_note(r, L) else [])
+    for tb in tables:
+        if not tb.collapsed:
+            main += table_md(tb)
+    more = [line for tb in tables if tb.collapsed for line in table_md(tb)]
+    return "\n".join(main), ("\n".join([f"## {t(L, 'more_data')}", ""] + more) if more else "")
+
+
 # ---------------------------------------------------------------- HTML
 
 CSS = """
 :root{--bg:#fbfaf7;--fg:#1d1d1f;--muted:#5f6368;--card:#fff;--line:#e3e1dc;--code:#f3f1ec;
 --ok:#1e7a3c;--ok-bg:#e3f4e8;--bad:#b3261e;--bad-bg:#fbe5e3;--warn:#8a5a00;--warn-bg:#fdf1d6;
---info:#245a9c;--info-bg:#e5eefa;--accent:#3d5a80}
+--info:#245a9c;--info-bg:#e5eefa;--accent:#3d5a80;--ai:#6b4fa0;--ai-bg:#f1ecf8}
 @media (prefers-color-scheme:dark){:root{--bg:#17181a;--fg:#e8e6e3;--muted:#a3a7ad;--card:#202225;
 --line:#34373b;--code:#2a2c30;--ok:#7fd49a;--ok-bg:#1d3324;--bad:#ff9b92;--bad-bg:#3d1f1d;
---warn:#f2c46b;--warn-bg:#3a2f17;--info:#9cc1f2;--info-bg:#1c2a3d;--accent:#9db6d8}}
+--warn:#f2c46b;--warn-bg:#3a2f17;--info:#9cc1f2;--info-bg:#1c2a3d;--accent:#9db6d8;--ai:#c7b2ef;--ai-bg:#2a2236}}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,"Segoe UI","PingFang SC",
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 -apple-system,"Segoe UI","PingFang SC",
 "Microsoft YaHei","Noto Sans CJK SC",system-ui,sans-serif}
-main{max-width:980px;margin:0 auto;padding:24px 16px 64px}
-h1{font-size:1.5rem;margin:0 0 4px}h2{font-size:1.15rem;margin:28px 0 8px;color:var(--accent)}
-h3{font-size:1rem;margin:16px 0 6px}
-.sub{color:var(--muted);font-size:.9rem;margin:0 0 16px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 20px;margin:16px 0}
+main{max-width:1040px;margin:0 auto;padding:20px 16px 64px}
+h1{font-size:1.45rem;margin:0 0 4px}h2{font-size:1.12rem;margin:26px 0 8px;color:var(--accent)}
+h3{font-size:.98rem;margin:18px 0 6px}
+.sub{color:var(--muted);font-size:.88rem;margin:0 0 14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:14px 0}
 .decide{border-left:5px solid var(--accent)}
-.k{font-weight:600;color:var(--muted);font-size:.85rem;text-transform:uppercase;letter-spacing:.03em}
-.badge{display:inline-block;padding:1px 9px;border-radius:999px;font-size:.82rem;font-weight:600;
+.k{font-weight:600;color:var(--muted);font-size:.82rem;text-transform:uppercase;letter-spacing:.03em}
+.badge{display:inline-block;padding:1px 9px;border-radius:999px;font-size:.8rem;font-weight:600;
 white-space:nowrap;border:1px solid transparent}
 .ok{color:var(--ok);background:var(--ok-bg)}.bad{color:var(--bad);background:var(--bad-bg)}
 .warn{color:var(--warn);background:var(--warn-bg)}.info{color:var(--info);background:var(--info-bg)}
 .lvl{color:var(--accent);background:var(--code)}
+.v-ok{color:var(--ok);font-weight:600}.v-bad{color:var(--bad);font-weight:700}.v-warn{color:var(--warn);font-weight:600}
+.v-info{color:var(--info)}.v-k{font-weight:600}
 ul.att{list-style:none;padding:0;margin:0}
-ul.att li{padding:8px 12px;border-radius:8px;margin:6px 0}
+ul.att li{padding:7px 12px;border-radius:8px;margin:5px 0}
 ul.att li.stop{background:var(--bad-bg)}ul.att li.warn{background:var(--warn-bg)}
 ul.att li.info{background:var(--info-bg)}
-.q{font-family:ui-monospace,Consolas,monospace;font-size:.86rem;overflow-wrap:anywhere}
-table{border-collapse:collapse;width:100%;font-size:.92rem}
-th,td{text-align:left;vertical-align:top;padding:6px 8px;border-bottom:1px solid var(--line)}
-th{color:var(--muted);font-weight:600}
-code,pre{font-family:ui-monospace,Consolas,monospace;font-size:.86rem;background:var(--code);border-radius:5px}
+.q{font-family:ui-monospace,Consolas,monospace;font-size:.84rem;overflow-wrap:anywhere}
+table{border-collapse:collapse;width:100%;font-size:.88rem;font-variant-numeric:tabular-nums}
+th,td{text-align:left;vertical-align:top;padding:5px 8px;border-bottom:1px solid var(--line)}
+th{color:var(--muted);font-weight:600;background:var(--code)}
+td.num{text-align:right;white-space:nowrap}
+table.kv td:first-child{color:var(--muted);width:34%}
+code,pre{font-family:ui-monospace,Consolas,monospace;font-size:.84rem;background:var(--code);border-radius:5px}
 code{padding:1px 5px;overflow-wrap:anywhere}
 pre{padding:12px;white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0}
 pre.cmd{border-left:4px solid var(--accent)}
 details{background:var(--card);border:1px solid var(--line);border-radius:10px;margin:10px 0;padding:0 16px}
-details>summary{cursor:pointer;padding:12px 0;font-weight:600}
+details>summary{cursor:pointer;padding:10px 0;font-weight:600}
 details[open]>summary{border-bottom:1px solid var(--line);margin-bottom:8px}
 .muted{color:var(--muted)}
-.headline{font-size:1.05rem;margin:0 0 12px;padding-bottom:10px;border-bottom:1px solid var(--line)}
-.tbl{overflow-x:auto}
+.tbl{overflow-x:auto;margin:4px 0 10px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:0 20px}
+.headline{font-size:1.02rem;margin:0 0 10px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+.narr{background:var(--ai-bg);border:1px dashed var(--ai);border-radius:10px;padding:12px 18px;margin:14px 0}
+.narr .tag{display:inline-block;background:var(--ai);color:var(--ai-bg);border-radius:4px;padding:0 6px;
+font-size:.75rem;font-weight:700;margin-right:6px}
+.narr .meta{font-size:.84rem;color:var(--muted);margin:4px 0 8px}
+.narr p,.narr li{margin:4px 0}
+.lang-radio{position:absolute;opacity:0;pointer-events:none}
+.langbar{float:right;margin-top:4px}
+.langbar label{cursor:pointer;padding:3px 10px;border:1px solid var(--line);font-size:.85rem;color:var(--muted)}
+.langbar label:first-child{border-radius:6px 0 0 6px}.langbar label:last-child{border-radius:0 6px 6px 0;border-left:0}
+#lang-en:checked~main .l-zh,#lang-zh:checked~main .l-en{display:none}
+#lang-en:checked~main label[for=lang-en],#lang-zh:checked~main label[for=lang-zh]{background:var(--accent);
+color:var(--bg);border-color:var(--accent)}
+@media print{.langbar{display:none}details{border:0}}
 """
 
 ITEM_CLASS = {"stop": "stop", "warn": "warn", "info": "info"}
@@ -645,6 +741,7 @@ VERDICT_CLASS = {"accept": "ok", "accept_with_findings": "warn", "reject": "bad"
 SEV_CLASS = {"high": "bad", "medium": "warn", "low": "info", "info": "lvl"}
 RUN_CLASS = {"approved": "ok", "rejected": "bad", "awaiting_approval": "warn", "pending": "bad", "done": "lvl"}
 ICON = {"stop": "■", "warn": "▲", "info": "●"}
+_NUMERIC = re.compile(r"^[+-]?[\d,]+(?:\.\d+)?(?: ns)?$|^—$")
 
 
 def e(text) -> str:
@@ -655,29 +752,96 @@ def _badge(text: str, cls: str) -> str:
     return f'<span class="badge {cls}">{e(text)}</span>'
 
 
-def render_html(r: dict, lang: str = "en") -> str:
-    s = summarize(r, lang)
-    L = lang
-    h = [f'<!doctype html><html lang="{"zh-CN" if L == "zh" else "en"}"><head><meta charset="utf-8">',
-         '<meta name="viewport" content="width=device-width,initial-scale=1">',
-         f"<title>{e(t(L, 'title'))} {e(r['run_id'])}</title><style>{CSS}</style></head><body><main>"]
-    h.append(f"<h1>{e(t(L, 'title'))} · {e(r['run_id'])} "
-             f"{_badge(s.status, RUN_CLASS.get(r['status'], 'lvl'))}</h1>")
-    h.append(f'<p class="sub">{e(t(L, "generated"))}</p>')
+def _cell_html(c, header: str = "") -> str:
+    text = _cell_text(c)
+    cls = c.get("cls", "") if isinstance(c, dict) else ""
+    inner = e(text).replace("\n", "<br>")
+    if cls in ("ok", "bad", "warn", "info", "lvl") and not _NUMERIC.match(text):
+        inner = _badge(text, cls)
+    elif cls:
+        inner = f'<span class="v-{cls}">{inner}</span>'
+    return f'<td class="num">{inner}</td>' if _NUMERIC.match(text) else f"<td>{inner}</td>"
 
+
+def table_html(tb: Table) -> str:
+    kv = len(tb.cols) == 2 and tb.cols[0] in ("item", "项目")
+    body = (f'<div class="tbl"><table{" class=kv" if kv else ""}><tr>'
+            + "".join(f"<th>{e(c)}</th>" for c in tb.cols) + "</tr>"
+            + "".join("<tr>" + "".join(_cell_html(c) for c in row) + "</tr>" for row in tb.rows)
+            + "</table></div>")
+    note = f'<p class="muted">{e(tb.note)}</p>' if tb.note else ""
+    if tb.collapsed:
+        return f"<details><summary>{e(tb.title)} ({len(tb.rows)})</summary>{note}{body}</details>"
+    return f"<h3>{e(tb.title)}</h3>{note}{body}"
+
+
+_BOLD = re.compile(r"\*\*(.+?)\*\*")
+_CODE = re.compile(r"`([^`]+)`")
+
+
+def _inline(text: str) -> str:
+    return _CODE.sub(r"<code>\1</code>", _BOLD.sub(r"<b>\1</b>", e(text)))
+
+
+def md_light(text: str) -> str:
+    """The few Markdown forms a model summary uses (paragraphs, bullets, headings, bold, code);
+    everything is escaped first, so nothing in the text can become HTML."""
+    out, in_list = [], False
+    for line in text.splitlines():
+        s = line.strip()
+        bullet = re.match(r"^[-*•]\s+(.*)$|^\d+[.)]\s+(.*)$", s)
+        if bullet:
+            if not in_list:
+                out.append("<ul>")
+                in_list = True
+            out.append(f"<li>{_inline(bullet.group(1) or bullet.group(2))}</li>")
+            continue
+        if in_list:
+            out.append("</ul>")
+            in_list = False
+        if not s:
+            continue
+        heading = re.match(r"^#{1,6}\s+(.*)$", s)
+        out.append(f"<h3>{_inline(heading.group(1))}</h3>" if heading else f"<p>{_inline(s)}</p>")
+    if in_list:
+        out.append("</ul>")
+    return "".join(out)
+
+
+def _narrative_html(r: dict, L: str) -> str:
+    n = _narrative(r, L)
+    if not n:
+        others = sorted(r.get("narratives") or {})
+        return f'<p class="muted">{e(t(L, "narr_other", langs=", ".join(others)))}</p>' if others else ""
+    meta, gate = _narr_meta(r, n, L)
+    gate_html = _badge(gate, "ok" if n["gate"]["passed"] else "bad")
+    reasons = ""
+    if not n["gate"]["passed"]:
+        last = (n["gate"].get("decisions") or [{}])[-1].get("reasons", [])
+        reasons = "<ul>" + "".join(f'<li class="q">{e(x)}</li>' for x in last) + "</ul>"
+    body = md_light(n["text"])
+    if not n["gate"]["passed"]:
+        body = f"<details><summary>{e(t(L, 'narr_gate_bad'))}</summary>{body}</details>"
+    return (f'<div class="narr"><div><span class="tag">AI</span><b>{e(t(L, "narr_title"))}</b> {gate_html}</div>'
+            f'<div class="meta">{e(meta)}</div>{reasons}{body}</div>')
+
+
+def _lang_block(r: dict, L: str) -> str:
+    s = summarize(r, L)
     colon = "：" if L == "zh" else ": "
-    # Decision card
-    h.append('<div class="card decide">')
-    h.append(f'<p class="headline"><b>{e(t(L, "headline"))}{colon.strip()}</b> {e(s.headline)}</p>')
-    h.append(f'<div class="k">{e(t(L, "task"))}</div><p>{e(r["task"])}</p>')
-    h.append(f'<div class="k">{e(t(L, "decide"))}</div><p>{e(s.decision)}</p>')
+    h = [f'<div class="l-{L}" lang="{"zh-CN" if L == "zh" else "en"}">',
+         f"<h1>{e(t(L, 'title'))} · {e(r['run_id'])} {_badge(s.status, RUN_CLASS.get(r['status'], 'lvl'))}</h1>",
+         f'<p class="sub">{e(t(L, "generated"))}</p>',
+         '<div class="card decide">',
+         f'<p class="headline"><b>{e(t(L, "headline"))}{colon.strip()}</b> {e(s.headline)}</p>',
+         f'<div class="k">{e(t(L, "task"))}</div><p>{e(r["task"])}</p>',
+         f'<div class="k">{e(t(L, "decide"))}</div><p>{e(s.decision)}</p>']
     if s.commands:
         h.append(f'<div class="k">{e(t(L, "commands"))}</div><pre class="cmd">{e(chr(10).join(s.commands))}</pre>')
     elif s.commands_note:
-        h.append(f'<p class="muted">{e(t(L, "commands"))}: {e(s.commands_note)}</p>')
+        h.append(f'<p class="muted">{e(t(L, "commands"))}{colon}{e(s.commands_note)}</p>')
     h.append(f'<p class="muted">{e(s.run_line)}</p></div>')
 
-    # Attention
     h.append(f"<h2>{e(t(L, 'attention'))}</h2>")
     if s.attention:
         h.append('<ul class="att">')
@@ -688,40 +852,44 @@ def render_html(r: dict, lang: str = "en") -> str:
         h.append("</ul>")
     else:
         h.append(f'<p class="muted">{e(t(L, "attention_none"))}</p>')
+    h.append(_narrative_html(r, L))
 
-    # Checks
     h.append(f"<h2>{e(t(L, 'checks'))}</h2>")
     if s.checks:
         h.append(f'<div class="tbl"><table><tr><th>{e(t(L, "col_check"))}</th><th>{e(t(L, "col_result"))}</th>'
-                 f'<th>{e(t(L, "col_level"))}</th><th>{e(t(L, "col_summary"))}</th></tr>')
+                 f'<th>{e(t(L, "col_level"))}</th><th>{e(t(L, "col_time"))}</th>'
+                 f'<th>{e(t(L, "col_summary"))}</th></tr>')
         for c in s.checks:
             args = f" <code>{e(c['args'])}</code>" if c["args"] else ""
             h.append(f"<tr><td><b>{e(c['tool'])}</b>{args}</td>"
                      f"<td>{_badge(c['status_text'], STATUS_CLASS.get(c['status'], 'warn'))}</td>"
-                     f"<td>{_badge(c['level'], 'lvl')} {e(c['level_text'])}</td><td>{e(c['summary'])}</td></tr>")
+                     f"<td>{_badge(c['level'], 'lvl')} {e(c['level_text'])}</td>"
+                     f'<td class="num">{e(_secs(c.get("duration")))}</td><td>{e(c["summary"])}</td></tr>')
         h.append("</table></div>")
     else:
         h.append(f'<p class="muted">{e(t(L, "no_checks"))}</p>')
 
+    h.append('<div class="grid"><div>')
     h.append(f"<h2>{e(t(L, 'evidence'))}</h2><ul>" + "".join(f"<li>{e(x)}</li>" for x in s.evidence) + "</ul>")
+    h.append("</div><div>")
     h.append(f"<h2>{e(t(L, 'not_checked'))}</h2><ul>" + "".join(f"<li>{e(x)}</li>" for x in s.not_checked)
-             + "</ul>")
+             + "</ul></div></div>")
     gate_cls = {"passed": "ok", "rejected": "bad"}.get(r["gate"]["status"], "warn")
     gate_word = t(L, {"passed": "gate_passed", "rejected": "gate_rejected"}.get(r["gate"]["status"], "gate_not_run"))
     h.append(f"<h2>{e(t(L, 'gate'))}</h2><p>{_badge(gate_word, gate_cls)} {e(s.gate)}</p>")
     if s.gate_reasons:
         h.append("<ul>" + "".join(f'<li class="q">{e(x)}</li>' for x in s.gate_reasons) + "</ul>")
-
     h.append(f"<h2>{e(t(L, 'reviews'))}</h2>")
     if s.reviews:
         h.append("<ul>")
         for v in s.reviews:
             counts = " ".join(_badge(f"{k} {n}", SEV_CLASS[k]) for k, n in v["counts"].items()) \
                 or e(t(L, "no_findings"))
-            line = (f"<li><b>{e(v['who'])}</b>: {_badge(v['verdict_text'], VERDICT_CLASS.get(v['verdict'], 'warn'))}"
+            verdict = _badge(v["verdict_text"], VERDICT_CLASS.get(v["verdict"], "warn"))
+            line = (f"<li><b>{e(v['who'])}</b>{colon}{verdict}"
                     f" {counts}")
             if v["worst"] and v["worst"]["severity"] in ("high", "medium"):
-                line += (f'<br><span class="muted">{e(t(L, "worst"))}:</span> '
+                line += (f'<br><span class="muted">{e(t(L, "worst"))}{colon}</span>'
                          f'<span class="q">[{e(v["worst"]["severity"])}] {e(_short(v["worst"]["text"]))}</span>')
             h.append(line + "</li>")
         h.append("</ul>")
@@ -729,7 +897,26 @@ def render_html(r: dict, lang: str = "en") -> str:
         h.append(f'<p class="muted">{e(t(L, "no_reviews"))}</p>')
     h.append(f"<h2>{e(t(L, 'approval'))}</h2><p>{e(s.approval)}</p>")
 
-    h.append(f"<h2>{e(t(L, 'details'))}</h2>")
+    h.append(f"<h2>{e(t(L, 'data'))}</h2>")
+    if trace_note(r, L):
+        h.append(f'<p class="muted">{e(trace_note(r, L))}</p>')
+    h += [table_html(tb) for tb in data_tables(r, L)]
+    h.append(f"<h2>{e(t(L, 'details_en'))}</h2></div>")
+    return "\n".join(h)
+
+
+def render_html(r: dict, lang: str = "en") -> str:
+    """One self-contained page with both languages; `lang` is the one shown first. A pair of
+    radio buttons and CSS switch between them: no script, nothing loaded from elsewhere."""
+    if lang not in LANGS:
+        raise ValueError(f"unknown language {lang!r}; use one of {LANGS}")
+    h = [f'<!doctype html><html lang="{"zh-CN" if lang == "zh" else "en"}"><head><meta charset="utf-8">',
+         '<meta name="viewport" content="width=device-width,initial-scale=1">',
+         f"<title>{e(t(lang, 'title'))} {e(r['run_id'])}</title><style>{CSS}</style></head><body>"]
+    h += [f'<input type="radio" name="lang" id="lang-{L}" class="lang-radio"{" checked" if L == lang else ""}>'
+          for L in LANGS]
+    h.append('<main><nav class="langbar"><label for="lang-en">English</label><label for="lang-zh">中文</label></nav>')
+    h += [_lang_block(r, L) for L in LANGS]
     h += _details_html(r)
     h.append("</main></body></html>")
     return "\n".join(h) + "\n"

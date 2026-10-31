@@ -15,10 +15,10 @@
 
 ## Checks
 
-| check | result | evidence | tool summary |
-|---|---|---|---|
-| lint | ✅ pass | E0 parses / structural facts | 0 error(s), 34 warning(s), top=picorv32 |
-| regress `{"cases": ["firmware"]}` | ✅ pass | E2 these tests passed | 1 passed, 0 failed, 0 skipped |
+| check | result | evidence | time (s) | tool summary |
+|---|---|---|---|---|
+| lint | ✅ pass | E0 parses / structural facts | — | 0 error(s), 34 warning(s), top=picorv32 |
+| regress `{"cases": ["firmware"]}` | ✅ pass | E2 these tests passed | 0.23 | 1 passed, 0 failed, 0 skipped |
 
 ## What the evidence allows
 
@@ -44,6 +44,29 @@
 ## Approval
 
 - no approval record
+
+## Data
+
+Numbers marked † come from the run's trace runs/m1_picorv32.jsonl (this receipt predates them); the receipt .json is unchanged.
+
+### Simulation (regress)
+
+| cases asked | run | passed | failed | skipped | testbench sub-tests | failed cases |
+|---|---|---|---|---|---|---|
+| firmware † | 1 | 1 | 0 | 0 | — | — |
+
+### Evidence gate decisions
+
+| attempt | result | best passing evidence | reasons |
+|---|---|---|---|
+| 1 | pass | E2 | — |
+
+### Cost
+
+| who | model | turns | tool calls | tokens in | tokens out | cached in | wall time (s) |
+|---|---|---|---|---|---|---|---|
+| author (the agent) | deepseek / deepseek-v4-pro | 4 | 4 | 12,193 | 1,689 | 8,192 | 30.15 |
+| total |  | 4 | 4 | 12,193 | 1,689 | 8,192 | 30.15 |
 
 ---
 

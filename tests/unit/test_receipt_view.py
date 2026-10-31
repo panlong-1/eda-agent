@@ -165,7 +165,7 @@ def test_html_is_self_contained():
 def test_markdown_summary_table_survives_pipe_in_summary():
     r = receipt(checks_run=[check("regress", "E2", "x | y")])
     row = next(line for line in render_summary_md(summarize(r)).splitlines() if line.startswith("| regress"))
-    assert row.count("|") - row.count("\\|") == 5  # four cells
+    assert row.count("|") - row.count("\\|") == 6  # five cells
 
 
 def test_render_files_leaves_the_json_alone(tmp_path):

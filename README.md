@@ -49,6 +49,8 @@ src/eda_agent/
     gate.py              evidence gate on the final report (no LLM), up to 2 rewrites
     receipt.py           runs/<id>.receipt.json + .md + .html at the end of every run
     receipt_view.py      the review summary on top of a receipt (plain code, en/zh) and the HTML page
+    receipt_tables.py    the data tables of a receipt (per check, findings, gate, cost)
+    receipt_llm.py       optional model-written summary, checked by the evidence gate
     reviewer.py          independent review I0-I3 (context assembled by code) + rule-based reviewer
     human_gate.py        awaiting_approval / approve / reject, recorded in the receipt
     mcp_client.py        connects the loop to the MCP server
@@ -97,7 +99,9 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/eda-agent review <run_id> --review I3 --project projects/torv.toml
 
 # re-render a receipt's .md and .html from its .json, with the review summary in Chinese
-.venv/bin/eda-agent receipt <run_id> --lang zh [--print] [--out-dir DIR]
+.venv/bin/eda-agent receipt <run_id> --lang zh [--all-langs] [--print] [--out-dir DIR]
+# ... and add a model-written summary in both languages (needs the API key)
+.venv/bin/eda-agent receipt <run_id> --narrate --all-langs
 ```
 
 Each run writes `runs/<id>.jsonl` (every model turn, tool call, gate decision, token
@@ -141,7 +145,8 @@ not used until a person has read it: the config decides what each check means. `
 then checks that every tool, file, container image and API key it names is there (key
 values are never printed). Put the file in the design directory as `eda-agent.toml` and
 `--project` can be left out; `~/.config/eda-agent/config.toml` holds personal defaults such
-as `provider = "deepseek"`, `review = "I2"` and `lang = "zh"` (receipt summaries in Chinese).
+as `provider = "deepseek"`, `review = "I2"`, `lang = "zh"` (receipt summaries in Chinese) and
+`narrate = true` (a model-written summary in each receipt).
 
 Left out, a project gets defaults: lint flags `-Wall -Wno-fatal`, `[versions]` with
 Verilator, regress format `exitcode` with no case flag, and with no case list one case,
@@ -312,33 +317,59 @@ are final; a rejected run is fixed by a new run. `--no-approval` skips the gate 
 
 The person who approves should not have to read tables of claim scopes, checklists and three
 reviews to find out what they are deciding. So every rendered receipt (`.html`, and `.md`)
-starts with a **review summary** that fits on about one screen, and keeps the whole receipt
-below it (in the HTML, as sections that open on a click):
+is laid out for that person, in English or Chinese:
 
-- one line: how many checks passed, the gate, the reviewers' verdicts, how many items to look at;
-- the task, **what you decide** (or who already decided, and when), and the exact
-  `approve` / `reject` commands for this run;
-- **look at these before approving**, sorted serious → warning → note: a reviewer that said
-  reject, every high-severity finding (once, even if several reviewers found it), failing or
-  skipped cases, a small setup or hold slack (under 10 % of the clock period, or under
-  0.1 ns), timing not met or void, checks without tool versions, tool errors, gate rewrites
-  and why, cases read but not run, testbench sub-test counts, a hand-made SDC
-  (`sdc_origin`), an approval that overrode the gate, a receipt changed after its decision;
-- each check with pass/fail and its evidence level in words (E0 "parses / structural facts",
-  E2 "these tests passed", E4 "synthesis estimate", …), the highest level reached and what
-  each level does and does not let you say;
-- what was **not** checked: cases not run, no lint / simulation / timing, and every residual
-  risk the tools reported;
-- the gate verdict, one line per reviewer (identical reviews merged) with its worst finding,
-  and the approval status.
+1. **Review summary**, about one screen, written by plain code from the receipt's own data:
+   - one line: how many checks passed, the gate, the reviewers' verdicts, how many items to look at;
+   - the task, **what you decide** (or who already decided, and when), and the exact
+     `approve` / `reject` commands for this run;
+   - **look at these before approving**, sorted serious → warning → note: a reviewer that said
+     reject, every high-severity finding (once, even if several reviewers found it), failing or
+     skipped cases, a small setup or hold slack (under 10 % of the clock period, or under
+     0.1 ns), timing not met or void, checks without tool versions, tool errors, gate rewrites
+     and why, cases read but not run, testbench sub-test counts, a hand-made SDC
+     (`sdc_origin`), an approval that overrode the gate, a receipt changed after its decision,
+     a model-written summary the gate rejected;
+   - each check with pass/fail, its evidence level in words (E0 "parses / structural facts",
+     E2 "these tests passed", E4 "synthesis estimate", …) and how long it took; the highest
+     level reached and what each level does and does not let you say; what was **not**
+     checked; the gate, one line per reviewer with its worst finding, and the approval status.
+2. **Summary written by a model** (optional, marked "AI"): see below.
+3. **Data**, as tables: regression (cases asked/run/passed/failed/skipped, testbench sub-tests,
+   failed cases); lint (warnings by code, by file, and the diagnostics kept); synthesis
+   (cells, area, latches, library, clock, timing met, SDC and its hash), timing per corner
+   (setup WNS/TNS, hold WNS/TNS), the worst path and the most used cells; the SDC check
+   (clocks, unconstrained endpoints); plain numbers of any other tool; every reviewer
+   finding (severity, reviewer, text, file:line); the gate's decisions and reasons; and the
+   cost (turns, tool calls, tokens, wall time of the author, each reviewer and each summary).
+4. **Details**: the whole receipt as before, unchanged (in the HTML, sections that open on a click).
 
-The summary is written by plain code from the receipt's own data, no model, so it can say
-nothing the receipt does not. `--lang zh` (or `lang = "zh"` in the user config) writes it in
-Chinese; tool output, file names, findings and the agent's report stay as they were written.
-`approve` and `reject` re-render the files; `eda-agent receipt <run_id>` re-renders any
-receipt, old ones included, without touching its `.json` (so the sha256 recorded at the
-decision still checks out). The HTML page is a single file with no scripts or external
-links, so it opens offline. Example: [docs/examples/m2_torv_e2e.receipt.html](docs/examples/m2_torv_e2e.receipt.html).
+The HTML page holds both languages, with an English / 中文 switch at the top (`--lang` picks the
+one shown first); it is a single file with no scripts or external links, so it opens
+offline. The `.md` is in `--lang`; `--all-langs` also writes `<id>.receipt.en.md` and `.zh.md`.
+`--lang zh` (or `lang = "zh"` in the user config) puts Chinese first; tool output, file names,
+findings and the agent's report stay as they were written. `approve` and `reject` re-render
+the files; `eda-agent receipt <run_id>` re-renders any receipt without touching its `.json`.
+Receipts keep each check's metrics, diagnostics (up to 50) and duration; for receipts written
+before that, the tables take the numbers from the run's own trace when it is still there,
+marked †.
+
+**The model-written summary.** `--narrate` on `run`/`check`/`receipt` (or `narrate = true`)
+asks a model (by default the run's own) for a short summary in the receipt's language. It gets
+the receipt data only: no trace, no files, no tools, and not the approval status. Its text goes
+through the same evidence gate as the agent's report (citations must match the run's results,
+no functional-correctness words without E3/E5 evidence, timing claims must name the synth
+result and its numbers, a residual-risk section that names the cases read but not run), with
+one rewrite. The receipt keeps the text with provider, model, prompt
+(`prompts/receipt_summary.v1.md`), the gate's decisions, cost and time under
+`narratives.<lang>`. The page shows it in a box marked "AI", with whether it passed the gate,
+and says the tables are the record; a rejected text is folded away and flagged. Narratives are
+outside the sha256 a decision records, so one added later does not change what was decided
+(the page says it was written after the decision). Without an API key the receipt renders
+as before. In the first runs the gate caught the same slip twice: the model cited a
+reviewer's `rtl_rules fail (E0)` as if it were a result of the run, and the rewrite fixed it.
+
+Example: [docs/examples/m2_torv_e2e.receipt.html](docs/examples/m2_torv_e2e.receipt.html).
 
 ## Related work: what we borrowed
 
