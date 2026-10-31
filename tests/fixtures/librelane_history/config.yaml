@@ -1,0 +1,26 @@
+# TORV — LibreLane on IHP SG13G2 (core + AHB masters, no SRAM macros).
+#   make -C librelane          synthesis + pre-PnR STA
+#   make -C librelane flow     full RTL-to-GDS + signoff
+PDK: ihp-sg13g2
+DESIGN_NAME: torv_cpu
+# torv_bus_types.sv is typedef-only and unused by this top
+VERILOG_FILES:
+VERILOG_INCLUDE_DIRS:
+# SystemVerilog frontend (unique case, enums, always_ff)
+USE_SLANG: true
+# Buffer high-fanout nets in ABC; without it pre-PnR STA is dominated by
+# unbuffered fanout (WNS -21.6 ns vs -4.4 ns at 5 ns, slow corner) for +3.6% area
+SYNTH_ABC_BUFFERING: true
+# Booth-encoded multiplier: -8.4% cell area and a shorter MUL path than the
+# default array (pre-PnR, 7 ns, slow corner)
+SYNTH_MUL_BOOTH: true
+# Repair setup/hold again with global-route parasitics; post-CTS repair alone
+# left ~1 ns of routing-induced degradation on the slow corner
+RUN_POST_GRT_RESIZER_TIMING: true
+CLOCK_PORT: hclk
+# 100 MHz target: met at the typ/fast corners; the slow corner
+# (1.08 V / 125 C) is ~0.7 ns short on register-to-output paths (see
+# docs/open_source_flow.md)
+CLOCK_PERIOD: 10.0
+PNR_SDC_FILE: dir::constraints.sdc
+SIGNOFF_SDC_FILE: dir::constraints.sdc

@@ -20,6 +20,10 @@ def add_parsers(sub) -> None:
     fr.add_argument("--baseline", help="run to compare with (default: [pnr] baseline; '' for none)")
     fr.add_argument("--with-synth", action="store_true", help="also run synth and compare (about a minute)")
     fr.add_argument("--json", help="write the whole result here")
+    fh = sub.add_parser("flow-history", help="all LibreLane runs in one table: what each knob did, config lessons")
+    fh.add_argument("--project", help=f"project config (default: {PROJECT_FILE} here or in a parent)")
+    fh.add_argument("--baseline", help="run the config differences are taken against (default: [pnr] baseline)")
+    fh.add_argument("--json", help="write the whole result here")
     rn = sub.add_parser("flow-run", help="run LibreLane RTL-to-GDS on a copy of the design (about an hour)")
     rn.add_argument("--project", help=f"project config (default: {PROJECT_FILE} here or in a parent)")
     rn.add_argument("--tag", help="run tag (default eda_<time>)")
@@ -98,11 +102,55 @@ def print_result(res: dict) -> None:
         print(f"  - {r}")
 
 
+def _wns(corners: dict) -> str:
+    return " ".join(f"{c.split('_')[1]}{t['setup_wns']:+.2f}" for c, t in corners.items()
+                    if isinstance(t.get("setup_wns"), (int, float)))
+
+
+def print_history(res: dict) -> None:
+    m = res.get("metrics") or {}
+    print(f"flow_history: {res['status'].upper()} — {res.get('summary', '')}")
+    if not m.get("runs"):
+        return
+    print(f"\nruns (config against {m['baseline']}; setup WNS per corner in ns):")
+    for r in m["runs"]:
+        s, p = r["synth"], r["post_route"]
+        knobs = ", ".join(f"{d['key']}={d['run']}" for d in r["config_vs_baseline"]) or "same config"
+        post = (f" | post-route {_wns(p['corners'])}, die {p['die_area_um2']} um2, DRC {p['drc_magic']}/"
+                f"{p['drc_klayout']}, LVS {p['lvs_errors']}" if p else "")
+        print(f"  {r['run']:15} {r['stage'][:24]:24} {str(r['started'])[:16]} {r['clock_period']} ns  "
+              f"synth area {s['cell_area_um2']:.0f}, pre-PnR {_wns(s['corners'])}{post}")
+        print(f"  {'':15} knobs: {knobs}")
+    print("\nwhat each knob did:")
+    for k, v in m["knob_effects"].items():
+        print(f"  {k}: {v['verdict']}")
+        for p in v["pairs"]:
+            if "summary" in p:
+                print(f"    {p['summary']}  [{p['same_rtl']}]")
+            else:
+                print(f"    {' vs '.join(p['runs'])}: also changed {', '.join(p['also_changed']) or '-'}")
+    print("\nlessons in the LibreLane config:")
+    for les in m["lessons"]:
+        print(f"  {les['verdict'].upper():14} {les['key']}: {les['why']}")
+        for run, d in ((r, x) for v in (les.get("indirect") or {}).values() for r, x in v.items()):
+            print(f"  {'':14}   indirect: {run} post-route minus pre-PnR setup WNS {d}")
+    print("\nnot covered:")
+    for r in res.get("residual_risk") or []:
+        print(f"  - {r}")
+
+
 def dispatch(args: argparse.Namespace, resolve_project) -> int | None:
-    if args.cmd not in ("flow-report", "flow-run"):
+    if args.cmd not in ("flow-report", "flow-run", "flow-history"):
         return None
     from .tools.flow import flow_command, run_flow, run_flow_report
     project = load_project(resolve_project(args.project))
+    if args.cmd == "flow-history":
+        from .tools.flow_history import run_flow_history
+        res = run_flow_history(project, baseline=args.baseline).to_dict()
+        print_history(res)
+        if args.json:
+            Path(args.json).write_text(json.dumps(res, indent=2) + "\n")
+        return 0 if res["status"] == "pass" else 2
     if args.cmd == "flow-report":
         synth = None
         if args.with_synth and project.flow:

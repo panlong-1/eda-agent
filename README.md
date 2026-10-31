@@ -341,6 +341,17 @@ makes the two not comparable), against the same run's own pre-PnR STA, and again
 that are missing, signoff steps switched off, and floorplan/PDN/macro/image errors in the logs
 (`setup_issues`, plan §0.11).
 
+**Run history** (`flow_history`, `eda-agent flow-history`, E0, plan §0.15 step 1): every run under
+the design's runs directory in one table (stage reached, config differences from the baseline,
+synthesis/pre-PnR and post-route numbers, runtime, source files with sha256). A knob's effect is
+reported only from two runs that differ in that key alone **and** read the same RTL, shown by an
+identical synthesized netlist or, for a synthesis knob, by the two runs starting within 15
+minutes; git alone cannot see uncommitted edits between runs. Anything else is "confounded",
+with every other difference listed. The comments above keys in the LibreLane config are checked
+against those pairs: a stated "N% area" is confirmed or contradicted numerically; otherwise the
+lesson is testable (numbers given), confounded (with indirect per-run numbers), or cannot be
+tested (the key never changed).
+
 `flow_run` copies the project root (minus `.git`, the design's runs and `copy_exclude`) under
 `[pnr] work_dir`, runs `librelane --manual-pdk` in the image with `--network none`, the PDK
 read-only and only the copy writable, writes the image digest, SDC sha256 and source commit

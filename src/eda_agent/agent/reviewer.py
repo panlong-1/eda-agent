@@ -34,7 +34,7 @@ CONTEXT = {
 }
 # Tools an I2/I3 reviewer may call: all of them only read the design and write under runs/.
 REVIEW_TOOLS = ("lint", "list_regress_cases", "describe_case", "regress", "rtl_rules", "synth", "check_sdc",
-                "flow_report")
+                "flow_report", "flow_history")
 SEVERITIES = ("high", "medium", "low", "info")
 VERDICTS = ("accept_with_findings", "accept", "reject")  # longest first, for matching
 

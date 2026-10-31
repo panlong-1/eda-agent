@@ -35,6 +35,24 @@ def test_flow_report_full_p10():
     assert all(a["sha256"] for a in r.artifacts)
 
 
+def test_flow_history_over_all_torv_runs():
+    import json
+    from eda_agent.tools.flow_history import run_flow_history
+    r = run_flow_history(load_project(PROJECTS / "torv.toml"), baseline="p10")
+    runs = {x["run"]: x for x in r.metrics["runs"]}
+    names = {d.name for d in (TORV / "librelane" / "runs").iterdir() if (d / "resolved.json").is_file()}
+    assert set(runs) == names and r.status == "pass" and r.evidence_level == "E0"
+    for name, row in runs.items():  # the numbers are the runs' own metrics
+        m = json.loads((TORV / "librelane" / "runs" / name / "final" / "metrics.json").read_text()) \
+            if (TORV / "librelane" / "runs" / name / "final" / "metrics.json").is_file() else {}
+        if row["post_route"] and m:
+            assert row["post_route"]["die_area_um2"] == m["design__die__area"]
+        elif m:
+            assert row["synth"]["cell_area_um2"] == m["design__instance__area"]
+    lessons = {x["key"]: x["verdict"] for x in r.metrics["lessons"]}
+    assert lessons["SYNTH_MUL_BOOTH"] == "confirmed" and lessons["SYNTH_ABC_BUFFERING"] == "cannot_test"
+
+
 def test_flow_report_compares_with_baseline():
     r = run_flow_report(load_project(PROJECTS / "torv.toml"), "full_p10_fwd", baseline="full_p10")
     b = r.metrics["comparison"]["baseline"]

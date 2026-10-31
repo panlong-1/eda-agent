@@ -11,6 +11,7 @@ from mcp.server.mcpserver import MCPServer
 from ..core.project import Project, load_project
 from ..tools.describe import describe_cases, list_cases
 from ..tools.flow import run_flow, run_flow_report
+from ..tools.flow_history import run_flow_history
 from ..tools.lint import run_lint
 from ..tools.mutate import run_mutate
 from ..tools.perf import run_perf
@@ -133,6 +134,16 @@ def build_server(project: Project) -> MCPServer:
     def flow_report(run: str, baseline: str | None = None, with_synth: bool = False) -> dict:
         synth_res = run_synth(project).to_dict() if with_synth and project.flow else None
         return run_flow_report(project, run, baseline=baseline, synth_result=synth_res).to_dict()
+
+    @server.tool(description=(
+        "Every LibreLane run of the design in one table (stage reached, config differences from the baseline, "
+        "synthesis, pre-PnR and post-route numbers, runtime, source files with sha256), what each config knob "
+        "did (only from two runs that differ in that key alone and read the same RTL; otherwise 'confounded'), "
+        "and whether the lessons written as comments in the LibreLane config are confirmed, contradicted, "
+        "confounded or untestable. Reads files only, a few seconds. Evidence level E0 (facts)."
+    ))
+    def flow_history(baseline: str | None = None) -> dict:
+        return run_flow_history(project, baseline=baseline).to_dict()
 
     @server.tool(description=(
         "Run the LibreLane RTL-to-GDS flow on a copy of the design (never in the checkout), then report it "

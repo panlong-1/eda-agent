@@ -52,6 +52,7 @@ def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, p
                           for a in c["result"].get("artifacts", [])],
             **_timing(c["result"], void),
             **_perf(c["result"]),
+            **_flow(c["result"]),
         } for c in envelopes],
         "other_tool_calls": [{"tool": c["tool"], "args": c["args"],
                               "status": (c["result"] or {}).get("status", "")} for c in others],
@@ -91,6 +92,25 @@ def _perf(result: dict) -> dict:
     m = result.get("metrics") or {}
     return {"perf": {k: m.get(k) for k in ("key", "cases", "comparison", "slower", "faster",
                                            "baseline_sha256", "baseline_by")}}
+
+
+def _flow(result: dict) -> dict:
+    """Signoff rules of a flow_report/flow_run result, or the run table summary, knob effects and
+    lesson verdicts of a flow_history result; nothing for other tools."""
+    m = result.get("metrics") or {}
+    if result.get("tool") in ("flow_report", "flow_run"):
+        cmp = (m.get("comparison") or {}).get("baseline") or {}
+        return {"flow": {"run": m.get("tag"), "signoff_level": m.get("signoff_level"), "e5_parts": m.get("e5_parts"),
+                         "signoff": {k: v.get("outcome") for k, v in (m.get("signoff") or {}).items()},
+                         "baseline": cmp.get("baseline"), "better": cmp.get("better"), "worse": cmp.get("worse")}}
+    if result.get("tool") == "flow_history":
+        return {"flow_history": {
+            "baseline": m.get("baseline"), "stages": m.get("stages"),
+            "runs": [{k: r.get(k) for k in ("run", "stage", "started", "clock_period")} for r in m.get("runs") or []],
+            "knobs": {k: {"verdict": v["verdict"], "pairs": [p.get("summary") or p for p in v["pairs"]]}
+                      for k, v in (m.get("knob_effects") or {}).items()},
+            "lessons": [{k: les.get(k) for k in ("key", "verdict", "why")} for les in m.get("lessons") or []]}}
+    return {}
 
 
 def _cell(text: str) -> str:
