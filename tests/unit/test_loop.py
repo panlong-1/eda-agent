@@ -98,3 +98,20 @@ async def test_gate_can_be_disabled():
     model = ScriptedAdapter([Turn(stop="end", text="done")])
     report = await run_agent(model, TOOLS, lint_pass, "t", "s", gate=None)
     assert (report.stop_reason, report.status, report.gate) == ("end", "done", [])
+
+
+async def test_trace_keeps_the_whole_tool_result(tmp_path):
+    import json as _json
+    from eda_agent.agent.loop import TRACE_VERSION
+    big = _json.dumps({"status": "pass", "evidence_level": "E0", "pad": "x" * 10000})
+
+    async def execute(name, args):
+        return big, False
+
+    model = ScriptedAdapter([Turn(stop="tool_use", tool_calls=[ToolCall("a", "lint", {})]),
+                             Turn(stop="end", text="lint: pass (E0).\n\nResidual risk: lint only, nothing about function.")])
+    trace = tmp_path / "t.jsonl"
+    await run_agent(model, [ToolSpec("lint", "lint", {"type": "object"})], execute, "lint", "sys", trace=trace)
+    events = [_json.loads(line) for line in trace.read_text().splitlines()]
+    assert events[0]["trace_version"] == TRACE_VERSION
+    assert next(e for e in events if e["kind"] == "tool")["result"] == big

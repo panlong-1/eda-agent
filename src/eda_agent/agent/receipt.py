@@ -45,6 +45,7 @@ def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, p
             "evidence_level": c["result"].get("evidence_level"),
             "summary": c["result"].get("summary", ""),
             "claim_scope": c["result"].get("claim_scope", ""),
+            "tool_versions": c["result"].get("tool_versions", {}),
             "artifacts": [{"path": a.get("path"), "sha256": a.get("sha256")}
                           for a in c["result"].get("artifacts", [])],
         } for c in envelopes],
@@ -97,6 +98,7 @@ def render_markdown(r: dict) -> str:
     for c in r["checks_run"]:
         out += ["", f"**{c['tool']} {json.dumps(c['args'])}** claim scope: {c['claim_scope']}"]
         out += [f"- artifact `{a['path']}` sha256 `{a['sha256']}`" for a in c["artifacts"]]
+        out += [f"- {name}: {version}" for name, version in c.get("tool_versions", {}).items()]
     nr = r["not_run"]
     out += ["", "## Not run", "",
             f"- lint run: {'yes' if nr['lint_run'] else 'no'}",

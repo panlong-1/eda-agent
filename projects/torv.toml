@@ -6,6 +6,11 @@ env_script = "scripts/env.sh"
 [env_defaults]
 PDK_ROOT = "~/.ciel"
 
+# Recorded in every regress result, so a check can be repeated with the same tools.
+[versions]
+verilator = ["verilator", "--version"]
+gcc = ["riscv64-unknown-elf-gcc", "--version"]
+
 [lint]
 top = "torv_soc"
 filelists = ["rtl/filelist.f", "ip/filelist.f"]

@@ -11,8 +11,8 @@ import re
 from pathlib import Path
 
 from ..core.envelope import Diagnostic, ToolResult
-from ..core.proc import tool_version
-from ..core.project import CaseSpec, Project, RegressConfig, case_specs, project_env
+from ..core.proc import check_allowed
+from ..core.project import CaseSpec, Project, RegressConfig, case_specs, project_env, project_versions
 from .formats import exitcode, junit, torv
 
 FORMATS = {"torv": torv, "junit": junit, "exitcode": exitcode}
@@ -44,8 +44,10 @@ def run_regress(project: Project, cases: list[str] | None = None, max_diagnostic
                           summary=f"unknown case(s) {bad}; call list_regress_cases first",
                           error_class="bad_request")
 
+    if refused := check_allowed(list(cfg.cmd), project.root, project.allowed_commands):
+        return ToolResult("regress", "error", "E2", scope, summary=refused, error_class="not_allowed")
     env = project_env(project)
-    version = tool_version(["verilator", "--version"], env)
+    versions = project_versions(project)
     if cfg.format == "exitcode":
         # No "run everything" switch to rely on: run each case on its own.
         cmds = {c: [*cfg.cmd, *_case_args(cfg, specs[c])] for c in cases or specs}
@@ -58,10 +60,10 @@ def run_regress(project: Project, cases: list[str] | None = None, max_diagnostic
     if outcome == "timeout":
         return ToolResult("regress", "timeout", "E2", scope,
                           summary=f"regression timed out after {cfg.timeout_s} s",
-                          tool_version=version, error_class="timeout")
+                          tool_versions=versions, error_class="timeout")
     if isinstance(outcome, str):
         return ToolResult("regress", "error", "E2", scope, summary=outcome,
-                          tool_version=version, error_class="infra")
+                          tool_versions=versions, error_class="infra")
 
     rows = outcome.rows
     failed = [r for r in rows if r[1] == "FAIL"]
@@ -84,6 +86,7 @@ def run_regress(project: Project, cases: list[str] | None = None, max_diagnostic
         diagnostics=diags,
         diagnostics_total=len(failed),
         artifacts=outcome.artifacts,
-        tool_version=version,
-        residual_risk=list(FORMATS[cfg.format].RESIDUAL_RISK),
+        tool_versions=versions,
+        residual_risk=list(FORMATS[cfg.format].RESIDUAL_RISK)
+        + ([] if versions else ["tool versions not recorded: the project config has no [versions] table"]),
     )

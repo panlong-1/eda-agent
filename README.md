@@ -105,6 +105,19 @@ is an existing file is taken as the source for `describe_case`) or from inline
 `[[regress.cases]]` entries with `name`, `args`, `source` and `description`. Each format's
 `claim_scope` and `residual_risk` say what it can and cannot tell.
 
+Two optional top-level keys make results repeatable and keep the tools on a short leash:
+
+- `[versions]` maps a tool name to the command that prints its version, e.g.
+  `verilator = ["verilator", "--version"]`. Every regress result records them in
+  `tool_versions` (lint records Verilator's), and the receipt lists them.
+- `allowed_commands` adds programs a check may start. Tools only run commands from the
+  project config, never text from the model, and `core/proc.py` refuses anything that is
+  neither an open-source EDA program it knows (verilator, make, yosys, iverilog, sby, …)
+  nor an executable script inside the project root (`error_class: not_allowed`).
+
+Every trace (`runs/<id>.jsonl`) keeps each tool result whole, so a finished run can be
+replayed through a changed gate.
+
 ## Evidence gate
 
 When the model ends its turn, `agent/gate.py` checks the report against the tool
@@ -129,8 +142,25 @@ stops with `stop_reason: gate_rejected` and `status: pending` for a human to jud
 checks are deliberately conservative and explainable: they can reject a fair sentence,
 which costs a rewrite, but they do not try to understand the design.
 
+## Related work: what we borrowed
+
+Ideas only, unless marked as a dependency; no code was copied.
+
+| Project | What we took | Where we differ |
+|---|---|---|
+| [MCP4EDA](https://github.com/NellyW8/MCP4EDA), [mcp-verilog](https://github.com/zesun33/mcp-verilog) | EDA tools behind an MCP server; record tool versions so a result can be repeated | their tools return raw logs; ours return an envelope with an evidence level, claim scope and residual risk |
+| [fpgaZeroMCP](https://github.com/lcapossio/fpgaZeroMCP) | only a fixed set of EDA commands may run | the allowlist sits under project configs, not under model input, which never reaches a command line |
+| [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) | a small hand-written loop with step and cost limits and a linear, fully logged trajectory | stop rules from the methodology: the same tool failing twice ends the run; a gate checks the final report |
+| [SWE-agent](https://github.com/SWE-agent/SWE-agent) | short, stable tool feedback written for a model to read | |
+| [OpenAI Agents SDK](https://github.com/openai/openai-agents-python) guardrails | an output check that can stop a run and say why | our gate is plain code over this run's tool results, and sends the reasons back for a bounded number of rewrites |
+| [VerilogCoder](https://github.com/NVlabs/VerilogCoder), [MAGE](https://github.com/stable-lab/MAGE) | (planned, M3) trace a failing signal back to its drivers; debug with checkpoints | |
+| [wave-mcp](https://github.com/Tencent/wave-mcp), [wavepeek](https://github.com/kleverhq/wavepeek) | (planned, M3, dependency) read waveforms | wrapped as two diagnostic tools that report values, not causes |
+| [MCY](https://github.com/YosysHQ/mcy) | (planned, M2.5, dependency) mutants to score generated tests | |
+
 ## Roadmap
 
-M1 case descriptions, evidence gate, receipts · M2 Yosys synth tool, independent
-reviewer with configurable independence (I0–I3), human gate · M3 simulation-failure
-localisation (logs, waveforms), lessons store · M4 LibreLane flow tool (PPA, DRC/LVS).
+M1 case descriptions, evidence gate, receipts · M1.1 tool versions, command allowlist,
+whole tool results in traces · M2 Yosys synth tool, independent reviewer with configurable
+independence (I0–I3), human gate · M2.5 test generation scored by mutants · M3
+simulation-failure localisation (logs, waveforms), lessons store · M4 LibreLane flow tool
+(PPA, DRC/LVS).

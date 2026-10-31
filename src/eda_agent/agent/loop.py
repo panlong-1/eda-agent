@@ -17,6 +17,9 @@ from pathlib import Path
 from .gate import GateDecision, check_report, rejection_message
 from .models import ModelAdapter, ToolOutcome, ToolSpec
 
+# 2: tool results are logged whole (1 cut them at 4000 characters).
+TRACE_VERSION = 2
+
 # (tool name, arguments) -> (result text, is_error)
 Executor = Callable[[str, dict], Awaitable[tuple[str, bool]]]
 # (final report, parsed tool results of this run) -> decision
@@ -81,7 +84,7 @@ async def run_agent(model: ModelAdapter, tools: list[ToolSpec], execute: Executo
             trace_f.write(json.dumps({"t": round(time.monotonic() - t0, 3), "kind": kind, **data}) + "\n")
 
     model.start(system, tools, task)
-    log("start", model=model.name, task=task, tools=[t.name for t in tools])
+    log("start", trace_version=TRACE_VERSION, model=model.name, task=task, tools=[t.name for t in tools])
     try:
         while True:
             if report.turns >= budget.max_turns:
@@ -127,7 +130,8 @@ async def run_agent(model: ModelAdapter, tools: list[ToolSpec], execute: Executo
                 consecutive[call.name] = consecutive.get(call.name, 0) + 1 if failed else 0
                 results.append(ToolOutcome(call.id, text, is_error))
                 report.checks.append({"tool": call.name, "args": call.input, "result": _parse(text)})
-                log("tool", name=call.name, input=call.input, is_error=failed, result=text[:4000])
+                # The whole result, so a trace can be replayed through the gate later.
+                log("tool", name=call.name, input=call.input, is_error=failed, result=text)
             model.add_tool_results(results)
 
             exhausted = [n for n, k in consecutive.items() if k >= budget.max_consecutive_errors]

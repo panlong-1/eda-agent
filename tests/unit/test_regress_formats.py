@@ -20,9 +20,10 @@ JUNIT = """\
 """
 
 
-def _project(tmp_path: Path, regress: str, cases: str = ""):
+def _project(tmp_path: Path, regress: str, cases: str = "",
+             allowed: str = 'allowed_commands = ["sh", "cp", "true"]\n'):
     toml = tmp_path / "p.toml"
-    toml.write_text(f'name = "p"\nroot = "{tmp_path}"\n[lint]\ntop = "t"\n[regress]\n{regress}\n{cases}')
+    toml.write_text(f'name = "p"\nroot = "{tmp_path}"\n{allowed}[lint]\ntop = "t"\n[regress]\n{regress}\n{cases}')
     return load_project(toml)
 
 
@@ -114,3 +115,31 @@ def test_torv_format(tmp_path):
     assert "testbench's own self-check" in r.claim_scope and r.artifacts[0]["path"].endswith("summary.rpt")
     bad = run_regress(project, ["nope"])
     assert bad.status == "error" and bad.error_class == "bad_request"
+
+
+def test_command_outside_the_allowlist_is_refused(tmp_path):
+    project = _project(tmp_path, 'format = "exitcode"\ncmd = ["sh", "-c"]\ncase_flag = ""',
+                       '[[regress.cases]]\nname = "a"\nargs = ["exit 0"]\n', allowed="")
+    r = run_regress(project, ["a"])
+    assert r.status == "error" and r.error_class == "not_allowed" and "'sh'" in r.summary
+
+
+def test_script_inside_the_project_is_allowed(tmp_path):
+    from eda_agent.core.proc import check_allowed
+    script = tmp_path / "scripts" / "regress.sh"
+    script.parent.mkdir()
+    script.write_text("#!/bin/sh\n")
+    script.chmod(0o755)
+    assert check_allowed(["scripts/regress.sh"], tmp_path) is None
+    assert check_allowed(["../outside.sh"], tmp_path) is not None
+    assert check_allowed(["/usr/bin/verilator", "--lint-only"], tmp_path) is None
+    assert check_allowed(["rm", "-rf", "x"], tmp_path) is not None
+
+
+def test_versions_from_the_project_config_are_recorded(tmp_path):
+    project = _project(tmp_path, 'format = "exitcode"\ncmd = ["sh", "-c"]\ncase_flag = ""',
+                       '[[regress.cases]]\nname = "a"\nargs = ["exit 0"]\n',
+                       allowed='allowed_commands = ["sh"]\n[versions]\nsh = ["sh", "-c", "echo sh 1.0"]\n')
+    r = run_regress(project, ["a"], log_dir=tmp_path / "logs")
+    assert r.status == "pass" and r.tool_versions == {"sh": "sh 1.0"}
+    assert not any("versions not recorded" in x for x in r.residual_risk)

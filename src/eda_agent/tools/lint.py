@@ -7,7 +7,7 @@ from pathlib import Path
 
 from ..core.envelope import Diagnostic, ToolResult
 from ..core.project import Project, project_env, read_filelist
-from ..core.proc import run, tool_version
+from ..core.proc import check_allowed, run, tool_version
 
 # %Warning-UNUSEDSIGNAL: /path/file.sv:12:5: Signal is not used: 'x'
 # %Error: /path/file.sv:265:22: Can't find definition ...
@@ -57,17 +57,20 @@ def lint_command(project: Project, env: dict[str, str]) -> list[str]:
 
 def run_lint(project: Project, max_diagnostics: int = 20, include_external: bool = False) -> ToolResult:
     env = project_env(project)
-    proc = run(lint_command(project, env), project.root, env, timeout_s=300)
-    version = tool_version(["verilator", "--version"], env)
+    cmd = lint_command(project, env)
+    if refused := check_allowed(cmd, project.root, project.allowed_commands):
+        return ToolResult("lint", "error", "E0", CLAIM_SCOPE, summary=refused, error_class="not_allowed")
+    proc = run(cmd, project.root, env, timeout_s=300)
+    versions = {"verilator": tool_version(["verilator", "--version"], env)}
     if proc.returncode is None:
         return ToolResult("lint", "timeout", "E0", CLAIM_SCOPE, summary="lint timed out after 300 s",
-                          tool_version=version, error_class="timeout")
+                          tool_versions=versions, error_class="timeout")
 
     all_diags = parse_verilator(proc.output)
     if proc.returncode != 0 and not all_diags:
         return ToolResult("lint", "error", "E0", CLAIM_SCOPE,
                           summary="verilator failed without parseable diagnostics: " + proc.output[-500:],
-                          tool_version=version, error_class="infra")
+                          tool_versions=versions, error_class="infra")
 
     diags = all_diags
     root = str(project.root)
@@ -91,7 +94,7 @@ def run_lint(project: Project, max_diagnostics: int = 20, include_external: bool
                  "by_code": dict(Counter(d.code for d in diags).most_common())},
         diagnostics=shown,
         diagnostics_total=len(diags),
-        tool_version=version,
+        tool_versions=versions,
         error_class="elaboration" if errors else None,
         residual_risk=["lint says nothing about function; run regress for E2"],
     )

@@ -41,7 +41,7 @@ class ToolResult:
     diagnostics: list[Diagnostic] = field(default_factory=list)
     diagnostics_total: int = 0
     artifacts: list[dict] = field(default_factory=list)
-    tool_version: str = ""
+    tool_versions: dict = field(default_factory=dict)  # tool name -> first line of its --version
     error_class: str | None = None
     residual_risk: list[str] = field(default_factory=list)
 

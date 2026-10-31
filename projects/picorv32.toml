@@ -3,6 +3,10 @@
 name = "picorv32"
 root = "~/project/picorv32"
 
+[versions]
+verilator = ["verilator", "--version"]
+gcc = ["riscv64-unknown-elf-gcc", "--version"]
+
 [lint]
 top = "picorv32"
 files = ["picorv32.v"]

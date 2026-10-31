@@ -72,6 +72,9 @@ class Project:
     regress: RegressConfig
     env_script: str | None = None
     env_defaults: dict = field(default_factory=dict, hash=False, compare=False)
+    # tool name -> command that prints its version; recorded in every result that ran it
+    versions: dict = field(default_factory=dict, hash=False, compare=False)
+    allowed_commands: tuple[str, ...] = ()
 
 
 def load_project(path: str | Path) -> Project:
@@ -84,6 +87,8 @@ def load_project(path: str | Path) -> Project:
         root=root,
         env_script=data.get("env_script"),
         env_defaults=data.get("env_defaults", {}),
+        versions={k: tuple(v) for k, v in data.get("versions", {}).items()},
+        allowed_commands=tuple(data.get("allowed_commands", ())),
         lint=LintConfig(
             top=lint["top"],
             filelists=tuple(lint.get("filelists", ())),
@@ -122,6 +127,14 @@ def project_env(project: Project) -> dict[str, str]:
     ).stdout
     pairs = (item.split("=", 1) for item in out.decode().split("\0") if "=" in item)
     return dict(pairs)
+
+
+@cache
+def project_versions(project: Project) -> dict[str, str]:
+    """Version line of each tool named in [versions] (cached per project and process)."""
+    from .proc import tool_version
+    env = project_env(project)
+    return {name: tool_version(list(cmd), env) for name, cmd in project.versions.items()}
 
 
 _VAR = re.compile(r"\$\{(\w+)\}|\$(\w+)")
