@@ -17,7 +17,7 @@ from pathlib import Path
 # allowed_commands; an executable script inside the project root is always allowed.
 ALLOWED_COMMANDS = frozenset({
     "verilator", "make", "yosys", "sta", "iverilog", "vvp", "sby", "eqy", "mcy", "wavepeek",
-    "avl-mutation-testing",
+    "avl-mutation-testing", "librelane",
 })
 # Container images a tool may start (repository, any tag). A project adds its own with
 # allowed_images. Inside the container the program must still be in ALLOWED_COMMANDS.
@@ -74,7 +74,8 @@ def image_repo(image: str) -> str:
 
 
 def docker_command(image: str, inner: list[str], mounts: list[tuple[Path, bool]],
-                   extra_images: tuple[str, ...] = ()) -> list[str] | str:
+                   extra_images: tuple[str, ...] = (), env: dict[str, str] | None = None,
+                   workdir: str | None = None) -> list[str] | str:
     """`docker run` of an allowed program in an allowed image, as the calling user and without
     network; else the reason it may not run. mounts: (host path, writable), each at the same path."""
     if image_repo(image) not in ALLOWED_IMAGES | set(extra_images):
@@ -85,6 +86,10 @@ def docker_command(image: str, inner: list[str], mounts: list[tuple[Path, bool]]
     cmd = ["docker", "run", "--rm", "--network", "none", "-u", f"{os.getuid()}:{os.getgid()}"]
     for path, writable in mounts:
         cmd += ["-v", f"{path}:{path}" + ("" if writable else ":ro")]
+    for k, v in (env or {}).items():
+        cmd += ["-e", f"{k}={v}"]
+    if workdir:
+        cmd += ["-w", workdir]
     return [*cmd, image, *inner]
 
 

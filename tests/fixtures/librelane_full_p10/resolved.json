@@ -1,0 +1,38 @@
+{
+ "DESIGN_NAME": "rv32im_ahb_top",
+ "PDK": "ihp-sg13g2",
+ "STD_CELL_LIBRARY": "sg13g2_stdcell",
+ "PDK_ROOT": "/fixture-pdk/ciel/ihp-sg13g2/versions/c4b8b4e5e7a05f375cca3815d51b3a37721fbf5c",
+ "meta": {
+  "version": 3,
+  "flow": "Classic",
+  "substituting_steps": null,
+  "step": null,
+  "librelane_version": "3.0.16"
+ },
+ "CLOCK_PORT": "hclk",
+ "CLOCK_PERIOD": 10,
+ "STA_CORNERS": [
+  "nom_fast_1p32V_m40C",
+  "nom_slow_1p08V_125C",
+  "nom_typ_1p20V_25C"
+ ],
+ "DEFAULT_CORNER": "nom_typ_1p20V_25C",
+ "SIGNOFF_SDC_FILE": "/fixture-design/librelane/constraints.sdc",
+ "PNR_SDC_FILE": "/fixture-design/librelane/constraints.sdc",
+ "MAGIC_TECH": "/fixture-pdk/ciel/ihp-sg13g2/versions/c4b8b4e5e7a05f375cca3815d51b3a37721fbf5c/ihp-sg13g2/libs.tech/magic/ihp-sg13g2.tech",
+ "MAGICRC": "/fixture-pdk/ciel/ihp-sg13g2/versions/c4b8b4e5e7a05f375cca3815d51b3a37721fbf5c/ihp-sg13g2/libs.tech/magic/ihp-sg13g2.magicrc",
+ "KLAYOUT_TECH": "/fixture-pdk/ciel/ihp-sg13g2/versions/c4b8b4e5e7a05f375cca3815d51b3a37721fbf5c/ihp-sg13g2/libs.tech/klayout/tech/sg13g2.lyt",
+ "KLAYOUT_DRC_RUNSET": "/fixture-pdk/ciel/ihp-sg13g2/versions/c4b8b4e5e7a05f375cca3815d51b3a37721fbf5c/ihp-sg13g2/libs.tech/klayout/tech/drc/ihp-sg13g2.drc",
+ "NETGEN_SETUP": "/fixture-pdk/ciel/ihp-sg13g2/versions/c4b8b4e5e7a05f375cca3815d51b3a37721fbf5c/ihp-sg13g2/libs.tech/netgen/ihp-sg13g2_setup.tcl",
+ "MAGIC_DRC_RUNSET": null,
+ "RUN_LVS": true,
+ "RUN_MAGIC_DRC": true,
+ "RUN_KLAYOUT_DRC": true,
+ "SYNTH_MUL_BOOTH": false,
+ "FP_CORE_UTIL": 50,
+ "CELL_LEFS": [
+  "/fixture-pdk/ciel/ihp-sg13g2/versions/c4b8b4e5e7a05f375cca3815d51b3a37721fbf5c/ihp-sg13g2/libs.ref/sg13g2_stdcell/lef/sg13g2_stdcell.lef"
+ ],
+ "MACROS": null
+}

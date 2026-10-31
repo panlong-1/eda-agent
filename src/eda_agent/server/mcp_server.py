@@ -10,6 +10,7 @@ from mcp.server.mcpserver import MCPServer
 
 from ..core.project import Project, load_project
 from ..tools.describe import describe_cases, list_cases
+from ..tools.flow import run_flow, run_flow_report
 from ..tools.lint import run_lint
 from ..tools.mutate import run_mutate
 from ..tools.perf import run_perf
@@ -116,6 +117,35 @@ def build_server(project: Project) -> MCPServer:
                seed: int = 1, confirm_full: bool = False) -> dict:
         return run_mutate(project, file, count=count, types=types, cases=cases, seed=seed,
                           confirm_full=confirm_full).to_dict()
+
+    pnr = project.pnr
+    pnr_what = (f"LibreLane config {pnr.config}, default baseline run '{pnr.baseline or 'none'}'" if pnr else
+                "not configured for this project: the tool will refuse")
+
+    @server.tool(description=(
+        f"Read a finished LibreLane RTL-to-GDS run ({pnr_what}): post-route timing per corner, DRC (Magic, "
+        "KLayout), LVS (Netgen), antenna, area, power, wirelength, versions and the SDC it used, judged by fixed "
+        "signoff rules; compared with a baseline run, with the run's own pre-PnR timing, and with synth when "
+        "with_synth is true (about a minute more). `run` is a run name under the design's runs directory. "
+        "Evidence level E4 with signoff_level E5-partial at best: no gate-level simulation, vectorless power. "
+        "Any 'DRC/LVS clean', 'post-route timing met', 'signoff' or 'tapeout-ready' statement must cite this result."
+    ))
+    def flow_report(run: str, baseline: str | None = None, with_synth: bool = False) -> dict:
+        synth_res = run_synth(project).to_dict() if with_synth and project.flow else None
+        return run_flow_report(project, run, baseline=baseline, synth_result=synth_res).to_dict()
+
+    @server.tool(description=(
+        "Run the LibreLane RTL-to-GDS flow on a copy of the design (never in the checkout), then report it "
+        "like flow_report. Takes about one to one and a half hours; one flow at a time. Refuses unless the "
+        "project's [pnr] agent_may_run is true (a person runs it with `eda-agent flow-run` otherwise)."
+    ))
+    def flow_run(tag: str | None = None) -> dict:
+        if not (pnr and pnr.agent_may_run):
+            return {"tool": "flow_run", "status": "error", "evidence_level": "E4", "error_class": "not_allowed",
+                    "claim_scope": "Nothing was run.",
+                    "summary": "flow_run is not enabled for the agent ([pnr] agent_may_run = false); use flow_report "
+                               "on an existing run, or ask the person to run `eda-agent flow-run`"}
+        return run_flow(project, tag=tag).to_dict()
 
     return server
 

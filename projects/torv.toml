@@ -81,3 +81,11 @@ abc_load = 6.0
 typ = "${PDK_ROOT}/ihp-sg13g2/libs.ref/sg13g2_stdcell/lib/sg13g2_stdcell_typ_1p20V_25C.lib"
 slow = "${PDK_ROOT}/ihp-sg13g2/libs.ref/sg13g2_stdcell/lib/sg13g2_stdcell_slow_1p08V_125C.lib"
 fast = "${PDK_ROOT}/ihp-sg13g2/libs.ref/sg13g2_stdcell/lib/sg13g2_stdcell_fast_1p32V_m40C.lib"
+
+# RTL-to-GDS (flow_report, flow_run): LibreLane with the team's own config. flow_report reads the
+# design's runs (librelane/runs); flow_run runs on a copy of the root under work_dir, never in it.
+[pnr]
+config = "librelane/config.yaml"
+baseline = "full_p10"
+copy_exclude = [".git", "build", "regress/results", ".torv_last_case_build_dir", "docs"]
+timeout_s = 10800

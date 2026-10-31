@@ -15,6 +15,7 @@ from functools import cache
 from pathlib import Path
 
 from .flow_sources import resolve_flow
+from .pnr import PnrConfig, load_pnr
 
 
 DEFAULT_LINT_FLAGS = ("-Wall", "-Wno-fatal")
@@ -189,6 +190,7 @@ class Project:
     flow: FlowConfig | None = None   # None: synth and check_sdc refuse (no [flow] section)
     mutation: MutationConfig | None = None  # None: mutate refuses (no [mutation] section)
     perf: PerfConfig | None = None          # None: perf refuses (no [perf] section)
+    pnr: PnrConfig | None = None            # None: flow_report and flow_run refuse (no [pnr] section)
 
 
 def _perf(data: dict | None, config: Path) -> PerfConfig | None:
@@ -246,6 +248,7 @@ def load_project(path: str | Path) -> Project:
         flow=_flow(data.get("flow"), root),
         mutation=_mutation(data.get("mutation")),
         perf=_perf(data.get("perf"), Path(path)),
+        pnr=load_pnr(data.get("pnr")),
         lint=LintConfig(
             top=lint["top"],
             filelists=tuple(lint.get("filelists", ())),

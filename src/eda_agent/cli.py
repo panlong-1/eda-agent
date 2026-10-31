@@ -6,6 +6,8 @@
     eda-agent mutate --project projects/torv.toml --file rtl/x.sv       (mutation run, no model)
     eda-agent perf --project projects/torv.toml                         (cycle counts, no model)
     eda-agent perf-baseline runs/perf/<result>.json                     (a person approves a baseline)
+    eda-agent flow-report full_p10 [--baseline X] [--with-synth]        (read a LibreLane run, no model)
+    eda-agent flow-run [--tag T] [--dry-run]                            (LibreLane on a copy, ~1 h)
     eda-agent run --project projects/torv.toml "Lint the design and run the smoke case"
     eda-agent run --provider deepseek --review I2 --project projects/torv.toml "..."
     eda-agent review <run_id> --review I3 --project projects/torv.toml   (review a finished run)
@@ -27,6 +29,7 @@ from datetime import datetime
 from importlib.resources import files
 from pathlib import Path
 
+from . import cli_flow
 from .agent import human_gate
 from .agent.loop import Budget, run_agent
 from .agent.mcp_client import mcp_tools
@@ -379,6 +382,8 @@ def main() -> None:
     pb.add_argument("--allow-loosen", action="store_true",
                     help="accept a baseline that is slower, has a larger tolerance or drops cases (needs --reason)")
 
+    cli_flow.add_parsers(sub)
+
     rev = sub.add_parser("review", help="review a finished run (writes into its receipt)")
     rev.add_argument("run_id")
     rev.add_argument("--project", help=f"project config (default: {PROJECT_FILE} here or in a parent)")
@@ -416,6 +421,8 @@ def main() -> None:
         sys.exit(_perf(args))
     if args.cmd == "perf-baseline":
         sys.exit(_perf_baseline(args))
+    if (code := cli_flow.dispatch(args, resolve_project)) is not None:
+        sys.exit(code)
     if args.cmd == "check":
         args.preset = "full" if args.full else "check"
         args.task = load_preset(args.preset)
