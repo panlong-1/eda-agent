@@ -117,7 +117,9 @@ results of this run. All rules are in that one file:
   works, bug-free, … and Chinese equivalents such as 正确, 已验证) need a passing result at
   E3 or higher, and the same sentence must name that result (its tool or a case it passed),
   so E3 on one check cannot vouch for another. With E2 the report may only say which cases passed. A negation earlier in
-  the same clause ("does not show … correct") makes it a stated limit, not a claim.
+  the same clause ("does not show … correct") makes it a stated limit, not a claim, and so
+  are the list items that follow it ("not … handled, correct, or bug-free"); a clause with
+  more than a list connector before the word ("…, but the design is correct") is a new claim.
 - **R3 residual risk.** The report must have a section headed "Residual risk" with content.
 - **R4 skipped cases.** A case the agent read with `describe_case` but did not run must be
   named in that section, so that leaving out a relevant test is stated, not silent.

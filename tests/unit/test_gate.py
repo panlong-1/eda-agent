@@ -42,6 +42,25 @@ def test_negated_strong_word_is_a_limit_not_a_claim():
     assert check_report(report, RESULTS).passed
 
 
+def test_negation_carries_over_the_items_of_a_list():
+    # Rejected by mistake in a live DeepSeek run (fix_torv_hazard): the comma cut off the "not".
+    limit = SCOPED.replace("These three directed cases passed under the testbench's own self-check.",
+                           "That supports only that these cases passed; it does **not** establish that "
+                           "pipeline hazards are generally handled, correct, or bug-free.")
+    assert check_report(limit, RESULTS).passed, check_report(limit, RESULTS).reasons
+    zh = SCOPED.replace("These three", "这不能说明冒险处理正确，或无 bug。These three")
+    assert check_report(zh, RESULTS).passed, check_report(zh, RESULTS).reasons
+
+
+def test_a_new_claim_after_a_limit_is_still_rejected():
+    for sentence in ("This is not E3 evidence, but the pipeline is correct.",
+                     "Lint does not cover timing, and the forwarding logic works.",
+                     "It does not show coverage, correct hazard handling is shown by the cases."):
+        report = SCOPED.replace("These three directed cases passed under the testbench's own self-check.",
+                                sentence)
+        assert not check_report(report, RESULTS).passed, sentence
+
+
 def test_strong_words_allowed_with_e3_evidence_the_sentence_names():
     named = SCOPED.replace("These three directed cases passed", "mutate: pass (E3); the forwarding logic is verified")
     e3 = [*RESULTS, {"tool": "mutate", "status": "pass", "evidence_level": "E3", "metrics": {}}]

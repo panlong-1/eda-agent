@@ -46,6 +46,9 @@ _STATUS = re.compile(r"\b(pass|fail|error|timeout)(?:ed|es|ing)?\b", re.I)
 _COUNT = re.compile(r"\b(\d+)\s*(?:/\s*\d+\s*)?(?:cases?\s+|tests?\s+)?(passed|failed)\b", re.I)
 _CLAUSE = re.compile(r"[^.!?;,。！？；，\n]+")
 _SENTENCE = re.compile(r"[^.!?。！？\n]+")
+# What may stand before the strong word in a later item of a list: "correct", "or bug-free",
+# "fully correct", "或无 bug". Anything more ("but the design is correct") starts a new claim.
+_LIST_ITEM = re.compile(r"\s*(?:(?:or|and|nor)\s+|或者?|和|以及|及)?\s*(?:[A-Za-z]+ly\s+)?", re.I)
 
 
 @dataclass
@@ -121,10 +124,18 @@ def check_strength(claims: str, envelopes: list[dict]) -> list[str]:
     for sentence in _SENTENCE.findall(claims):
         if any(_names(sentence, s) for s in subjects):
             continue
+        limit = False  # the previous clause stated a limit ("does not show ... handled")
         for clause in _CLAUSE.findall(sentence):
             m = _STRONG.search(clause)
-            if not m or _NEG.search(clause[:m.start()]):
+            if not m:
+                limit = False
                 continue
+            # The items of a list after a stated limit stay limits: "does not establish that
+            # hazards are handled, correct, or bug-free" claims none of the three.
+            if _NEG.search(clause[:m.start()]) or (limit and _LIST_ITEM.fullmatch(clause[:m.start()])):
+                limit = True
+                continue
+            limit = False
             if subjects:
                 reasons.append(
                     f"'{m.group(0)}' claims functional correctness, but its sentence does not name the "
