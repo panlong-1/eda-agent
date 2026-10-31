@@ -1,4 +1,5 @@
-"""Read one LibreLane run directory (runs/<tag>/) into plain facts. Nothing is run here.
+"""Read one LibreLane run directory (runs/<tag>/) into the neutral result (tools/backends/base.py).
+Nothing is run here.
 
 Where each fact comes from, most trusted first:
 - the metrics LibreLane recorded after a step (`<NN>-<step>/state_out.json`, and
@@ -252,7 +253,7 @@ def read_run(run: Path, violators: int = 10) -> dict:
         "design": resolved.get("DESIGN_NAME"),
         "pdk": resolved.get("PDK"), "std_cell_library": resolved.get("STD_CELL_LIBRARY"),
         "pdk_root": resolved.get("PDK_ROOT"), "pdk_version": pdk_version(resolved),
-        "librelane_version": (resolved.get("meta") or {}).get("librelane_version"),
+        "backend": "librelane", "backend_version": (resolved.get("meta") or {}).get("librelane_version"),
         "flow_type": (resolved.get("meta") or {}).get("flow"),
         "clock_port": resolved.get("CLOCK_PORT"), "clock_period": resolved.get("CLOCK_PERIOD"),
         "sta_corners": resolved.get("STA_CORNERS") or names,
@@ -277,7 +278,13 @@ def read_run(run: Path, violators: int = 10) -> dict:
             "io": m.get("design__io"),
         },
         "timing": timing,
-        "pre_pnr_timing": {c: corner_timing(pre, c) for c in corners(pre)} if pre else {},
+        "pre_pnr": {"cell_area_um2": (pre or {}).get("design__instance__area"),
+                    "cells": (pre or {}).get("design__instance__count"),
+                    "power_w": (pre or {}).get("power__total"), "setup_tns": (pre or {}).get("timing__setup__tns"),
+                    "setup_violations": (pre or {}).get("timing__setup_vio__count"),
+                    "max_fanout_violations": (pre or {}).get("design__max_fanout_violation__count"),
+                    "corners": {c: {k: v for k, v in corner_timing(pre, c).items()
+                                    if k in ("setup_wns", "setup_tns", "hold_wns")} for c in corners(pre or {})}},
         "violators": viol,
         "clock": clock_by_corner,
         "clock_skew": {"setup": m.get("clock__skew__worst_setup"), "hold": m.get("clock__skew__worst_hold")},
@@ -288,25 +295,27 @@ def read_run(run: Path, violators: int = 10) -> dict:
                        # nets without parasitics after LibreLane drops those that need none (e.g. constants)
                        "unannotated_nets_filtered": m.get("timing__unannotated_net_filtered__count"),
                        "floating_nets": m.get("timing__drv__floating__nets")},
-        "drc": {"magic": m.get("magic__drc_error__count"), "klayout": m.get("klayout__drc_error__count"),
+        "drc": {"by_tool": {"Magic": m.get("magic__drc_error__count"), "KLayout": m.get("klayout__drc_error__count")},
                 "detailed_router": m.get("route__drc_errors"),
-                "magic_illegal_overlap": m.get("magic__illegal_overlap__count"),
+                "illegal_overlap": m.get("magic__illegal_overlap__count"),
                 "xor_differences": m.get("design__xor_difference__count"),
-                "magic_report_count": parse_magic_drc(_text(magic_rpt)) if magic_rpt else None,
-                "klayout_report_count": kl_total, "klayout_rules_violated": kl_rules},
-        "lvs": {"errors": m.get("design__lvs_error__count"),
+                "report_counts": {"Magic": parse_magic_drc(_text(magic_rpt)) if magic_rpt else None,
+                                  "KLayout": kl_total},
+                "rules_violated": kl_rules},
+        "lvs": {"tool": "Netgen", "errors": m.get("design__lvs_error__count"),
                 "unmatched_nets": m.get("design__lvs_unmatched_net__count"),
                 "unmatched_devices": m.get("design__lvs_unmatched_device__count"),
                 "unmatched_pins": m.get("design__lvs_unmatched_pin__count"),
                 "property_fails": m.get("design__lvs_property_fail__count"),
                 "report_final": lvs["final"], "report_match": lvs["match"]},
-        "antenna": {"violating_nets": m.get("antenna__violating__nets"),
+        "antenna": {"tool": "OpenROAD", "violating_nets": m.get("antenna__violating__nets"),
                     "violating_pins": m.get("antenna__violating__pins"),
                     "router_violations": m.get("route__antenna_violation__count"),
                     "diodes": m.get("antenna_diodes_count"),
                     "report_nets": ant["nets"], "report_pins": ant["pins"]},
         "manufacturability": parse_manufacturability(_text(manuf_rpt)) if manuf_rpt else {},
-        "power": {"total_w": m.get("power__total"), "internal_w": m.get("power__internal__total"),
+        "power": {"method": "vectorless (OpenSTA default switching activity, default corner)",
+                  "total_w": m.get("power__total"), "internal_w": m.get("power__internal__total"),
                   "switching_w": m.get("power__switching__total"), "leakage_w": m.get("power__leakage__total"),
                   "by_corner": power_by_corner},
         "ir_drop": {"worst_v": m.get("ir__drop__worst"), "average_v": m.get("ir__drop__avg")},
@@ -321,14 +330,25 @@ def read_run(run: Path, violators: int = 10) -> dict:
         "reports": {k: str(v) for k, v in reports.items()},
     }
     facts["cross_checks"] = _cross_checks(facts)
+    eqy = [n for n in log["skipped"] + log["steps_run"] if "eqy" in n.lower() or "equivalence" in n.lower()]
+    facts["equivalence_checked"] = (False if any(n in log["skipped"] for n in eqy) else True) if eqy else None
+    facts["rtl_files"] = [p for p in resolved.get("VERILOG_FILES") or [] if isinstance(p, str)]
+    facts["signoff_tools"] = {"drc": {"Magic": resolved.get("MAGIC_TECH"), "KLayout": resolved.get("KLAYOUT_DRC_RUNSET")},
+                              "lvs": {"Netgen": resolved.get("NETGEN_SETUP")}, "antenna": "OpenROAD"}
+    if post_step and post:
+        facts["stage"] = "full" if facts["complete"] else "partial (stopped after post-route STA)"
+    elif facts["complete"] and facts["last_step"] and facts["last_step"].startswith(STEP_PRE_STA):
+        facts["stage"] = "synth_sta"
+    else:
+        facts["stage"] = "partial"
     return facts
 
 
 def _cross_checks(f: dict) -> list[dict]:
     """Metric counts against the counts in the report files they come from."""
     pairs = [
-        ("Magic DRC count", f["drc"]["magic"], f["drc"]["magic_report_count"]),
-        ("KLayout DRC count", f["drc"]["klayout"], f["drc"]["klayout_report_count"]),
+        ("Magic DRC count", f["drc"]["by_tool"]["Magic"], f["drc"]["report_counts"]["Magic"]),
+        ("KLayout DRC count", f["drc"]["by_tool"]["KLayout"], f["drc"]["report_counts"]["KLayout"]),
         ("antenna violating nets", f["antenna"]["violating_nets"], f["antenna"]["report_nets"]),
         ("LVS clean", None if f["lvs"]["errors"] is None else f["lvs"]["errors"] == 0, f["lvs"]["report_match"]),
     ]

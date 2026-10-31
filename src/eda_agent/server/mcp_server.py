@@ -124,8 +124,9 @@ def build_server(project: Project) -> MCPServer:
                 "not configured for this project: the tool will refuse")
 
     @server.tool(description=(
-        f"Read a finished LibreLane RTL-to-GDS run ({pnr_what}): post-route timing per corner, DRC (Magic, "
-        "KLayout), LVS (Netgen), antenna, area, power, wirelength, versions and the SDC it used, judged by fixed "
+        f"Read a finished RTL-to-GDS run of the project's flow ({pnr.backend if pnr else 'none'}; {pnr_what}): "
+        "post-route timing per corner, DRC per tool, LVS, antenna, area, power, wirelength, versions, the SDC it "
+        "used and which experience table the run belongs to (imported or eda_agent), judged by fixed "
         "signoff rules; compared with a baseline run, with the run's own pre-PnR timing, and with synth when "
         "with_synth is true (about a minute more). `run` is a run name under the design's runs directory. "
         "Evidence level E4 with signoff_level E5-partial at best: no gate-level simulation, vectorless power. "
@@ -136,11 +137,14 @@ def build_server(project: Project) -> MCPServer:
         return run_flow_report(project, run, baseline=baseline, synth_result=synth_res).to_dict()
 
     @server.tool(description=(
-        "Every LibreLane run of the design in one table (stage reached, config differences from the baseline, "
-        "synthesis, pre-PnR and post-route numbers, runtime, source files with sha256), what each config knob "
-        "did (only from two runs that differ in that key alone and read the same RTL; otherwise 'confounded'), "
-        "and whether the lessons written as comments in the LibreLane config are confirmed, contradicted, "
-        "confounded or untestable. Reads files only, a few seconds. Evidence level E0 (facts)."
+        "The design's flow runs in two experience tables: 'imported' (runs found in the design's runs directory, "
+        "made outside eda-agent) and 'eda_agent' (runs flow_run made for this design). Per run: stage reached, "
+        "config differences from the baseline (the flow's own keys), synthesis, pre-PnR and post-route numbers, "
+        "runtime, provenance and source files with sha256. Per table: what each config knob did (only from two "
+        "runs that differ in that key alone and read the same RTL; otherwise 'confounded'). Lessons written in the "
+        "flow's config are checked; a verdict from the imported table is a hypothesis until an eda-agent run "
+        "confirms it. Lessons of other designs are listed as hypotheses only. Reads files only, a few seconds. "
+        "Evidence level E0 (facts)."
     ))
     def flow_history(baseline: str | None = None) -> dict:
         return run_flow_history(project, baseline=baseline).to_dict()

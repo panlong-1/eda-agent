@@ -13,7 +13,8 @@ from eda_agent.core.pnr import PnrConfig
 from eda_agent.core.project import load_project
 from eda_agent.tools import flow as flow_mod
 from eda_agent.tools.flow import (compare_synth, evaluate_signoff, flow_command, resolve_run, run_flow_report,
-                                  sdc_body, setup_issues, signoff_status)
+                                  sdc_body, signoff_status)
+from eda_agent.tools.backends.librelane import setup_issues
 from eda_agent.tools.reports import librelane as ll
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "librelane_full_p10"
@@ -84,15 +85,16 @@ def test_report_parsers_on_failures():
 
 def test_read_run_key_numbers():
     f = ll.read_run(FIXTURE)
-    assert f["complete"] and f["design"] == "rv32im_ahb_top" and f["librelane_version"] == "3.0.16"
+    assert f["complete"] and f["design"] == "rv32im_ahb_top" and f["backend"] == "librelane" and f["backend_version"] == "3.0.16"
     assert f["pdk_version"] == "c4b8b4e5e7a05f375cca3815d51b3a37721fbf5c" and f["clock_period"] == 10
     assert f["area"]["die_area_um2"] == 559132 and f["area"]["utilization"] == 0.566466
     assert f["area"]["stdcell_count"] == 23130
     assert set(f["timing"]) == {SLOW, TYP, FAST}
     assert f["timing"][SLOW]["setup_wns"] == pytest.approx(-4.3499, abs=1e-4)
     assert f["timing"][SLOW]["setup_violations"] == 508 and f["timing"][FAST]["hold_wns"] == pytest.approx(0.10125, abs=1e-5)
-    assert f["pre_pnr_timing"][SLOW]["setup_wns"] == pytest.approx(-1.7862, abs=1e-4)
-    assert (f["drc"]["magic"], f["drc"]["klayout"], f["lvs"]["errors"], f["lvs"]["report_match"]) == (0, 0, 0, True)
+    assert f["pre_pnr"]["corners"][SLOW]["setup_wns"] == pytest.approx(-1.7862, abs=1e-4)
+    assert (f["drc"]["by_tool"], f["lvs"]["errors"], f["lvs"]["report_match"]) == ({"Magic": 0, "KLayout": 0}, 0, True)
+    assert f["stage"] == "full" and f["equivalence_checked"] is False and f["lvs"]["tool"] == "Netgen"
     assert f["antenna"]["violating_nets"] == 0 and f["electrical"]["max_fanout_violations"] == 141
     assert f["power"]["total_w"] == pytest.approx(0.01473, abs=1e-5) and f["routing"]["wirelength_um"] == 1246192
     assert all(x["agree"] for x in f["cross_checks"]) and len(f["cross_checks"]) == 4
@@ -257,7 +259,7 @@ def test_compare_with_baseline_reports_deltas_and_config_differences(tmp_path):
 def test_missing_baseline_is_reported_not_fatal(tmp_path):
     cfg, _ = _project(tmp_path)
     res = run_flow_report(load_project(cfg), "full_p10", baseline="nope")
-    assert "no LibreLane run" in res.metrics["comparison"]["baseline_error"] and res.status == "fail"
+    assert "no librelane run" in res.metrics["comparison"]["baseline_error"] and res.status == "fail"
 
 
 def test_compare_synth_matches_corners_by_name():

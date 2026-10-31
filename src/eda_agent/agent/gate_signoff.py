@@ -43,14 +43,14 @@ _CLAIM = {k: re.compile("|".join(f"(?:{p})" for p in v), re.I) for k, v in SIGNO
 _FLOW_CITE = re.compile(r"(?<![\w-])(?:flow_report|flow_run|flow)(?![\w-])", re.I)
 # Counts a sentence may give: "0 DRC errors", "3 KLayout DRC violations", "0 LVS errors", "2 antenna violations"
 _COUNTS = {
-    "drc": re.compile(r"(\d+)\s+(?:(Magic|KLayout)\s+)?DRC\s+(?:errors?|violations?)", re.I),
+    "drc": re.compile(r"(\d+)\s+(?:([A-Za-z][\w-]*)\s+)?DRC\s+(?:errors?|violations?)", re.I),
     "lvs": re.compile(r"(\d+)\s+LVS\s+(?:errors?|mismatch(?:es)?)", re.I),
     "antenna": re.compile(r"(\d+)\s+antenna[- ](?:violations?|violating\s+nets?)", re.I),
 }
 REQUIRES = {
     "tapeout": "every signoff rule passing and evidence level E5 (gate-level simulation and VCD power as well)",
     "signoff": "every signoff rule passing (timing on all signoff corners, DRC, LVS, antenna)",
-    "drc": "Magic and KLayout DRC both at 0 errors",
+    "drc": "every signoff DRC tool of the run (e.g. Magic and KLayout) at 0 errors",
     "lvs": "0 LVS errors and a matching LVS report",
     "antenna": "0 antenna-violating nets and pins",
     "timing_post_route": "post-route setup and hold met on every signoff corner",
@@ -63,8 +63,9 @@ def _shows(r: dict, kind: str) -> bool:
         return r.get("status") == "pass" and m.get("signoff_level") == "E5"
     if kind == "signoff":
         return r.get("status") == "pass" and bool(m.get("signoff_passed"))
-    if kind == "drc":
-        return m.get("drc_magic") == 0 and m.get("drc_klayout") == 0
+    if kind == "drc":  # every signoff DRC tool the run used, whatever the back end
+        by_tool = m.get("drc_by_tool") or {}
+        return bool(by_tool) and all(v == 0 for v in by_tool.values())
     if kind == "lvs":
         return m.get("lvs_errors") == 0 and m.get("lvs_match") is not False
     if kind == "antenna":
@@ -77,10 +78,11 @@ def _known_counts(flows: list[dict], kind: str, tool: str | None) -> set[int]:
     for r in flows:
         m = r.get("metrics") or {}
         if kind == "drc":
-            vals = {"magic": [m.get("drc_magic")], "klayout": [m.get("drc_klayout")]}.get(
-                (tool or "").lower(), [m.get("drc_magic"), m.get("drc_klayout")])
-            if tool is None and isinstance(m.get("drc_magic"), int) and isinstance(m.get("drc_klayout"), int):
-                vals.append(m["drc_magic"] + m["drc_klayout"])
+            by_tool = {k.lower(): v for k, v in (m.get("drc_by_tool") or {}).items()}
+            named = bool(tool) and tool.lower() in by_tool  # "3 KLayout DRC errors"; other words are not tools
+            vals = [by_tool[tool.lower()]] if named else list(by_tool.values())
+            if not named and by_tool and all(isinstance(v, int) for v in by_tool.values()):
+                vals.append(sum(by_tool.values()))
         elif kind == "lvs":
             vals = [m.get("lvs_errors")]
         else:
@@ -127,5 +129,5 @@ def check_signoff(claims: str, results: list[dict]) -> list[str]:
 def _state(r: dict) -> str:
     m = r.get("metrics") or {}
     return (f"latest: {m.get('tag')} {r.get('status')}, {m.get('signoff_level')}, setup WNS {m.get('wns')}, "
-            f"DRC {m.get('drc_magic')}/{m.get('drc_klayout')}, LVS errors {m.get('lvs_errors')}, "
+            f"DRC {m.get('drc_by_tool')}, LVS errors {m.get('lvs_errors')}, "
             f"antenna nets {m.get('antenna_nets')}")

@@ -100,16 +100,24 @@ def _flow(result: dict) -> dict:
     m = result.get("metrics") or {}
     if result.get("tool") in ("flow_report", "flow_run"):
         cmp = (m.get("comparison") or {}).get("baseline") or {}
-        return {"flow": {"run": m.get("tag"), "signoff_level": m.get("signoff_level"), "e5_parts": m.get("e5_parts"),
+        return {"flow": {"run": m.get("tag"), "backend": m.get("backend"), "experience_table": m.get("experience_table"),
+                         "signoff_level": m.get("signoff_level"), "e5_parts": m.get("e5_parts"),
                          "signoff": {k: v.get("outcome") for k, v in (m.get("signoff") or {}).items()},
-                         "baseline": cmp.get("baseline"), "better": cmp.get("better"), "worse": cmp.get("worse")}}
+                         "baseline": cmp.get("baseline"), "baseline_table": cmp.get("baseline_table"),
+                         "better": cmp.get("better"), "worse": cmp.get("worse")}}
     if result.get("tool") == "flow_history":
         return {"flow_history": {
-            "baseline": m.get("baseline"), "stages": m.get("stages"),
-            "runs": [{k: r.get(k) for k in ("run", "stage", "started", "clock_period")} for r in m.get("runs") or []],
-            "knobs": {k: {"verdict": v["verdict"], "pairs": [p.get("summary") or p for p in v["pairs"]]}
-                      for k, v in (m.get("knob_effects") or {}).items()},
-            "lessons": [{k: les.get(k) for k in ("key", "verdict", "why")} for les in m.get("lessons") or []]}}
+            "design": m.get("design"), "backend": m.get("backend"),
+            "tables": {name: {
+                "provenance": t.get("provenance"), "baseline": t.get("baseline"), "stages": t.get("stages"),
+                "runs": [{k: r.get(k) for k in ("run", "table", "stage", "started", "clock_period")}
+                         for r in t.get("runs") or []],
+                "knobs": {k: {"verdict": v["verdict"], "pairs": [p.get("summary") or p for p in v["pairs"]]}
+                          for k, v in (t.get("knob_effects") or {}).items()}}
+                for name, t in (m.get("tables") or {}).items()},
+            "lessons": [{k: les.get(k) for k in ("key", "verdict", "why", "source_table", "status")}
+                        for les in m.get("lessons") or []],
+            "hypotheses_from_other_designs": m.get("hypotheses_from_other_designs") or []}}
     return {}
 
 

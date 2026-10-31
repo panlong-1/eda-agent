@@ -9,7 +9,8 @@ from pathlib import Path
 
 from eda_agent.agent.receipt import _flow
 from eda_agent.core.project import load_project
-from eda_agent.tools.flow_history import config_lessons, run_flow_history
+from eda_agent.tools.backends.librelane import config_lessons
+from eda_agent.tools.flow_history import run_flow_history
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "librelane_history"
 SLOW = "nom_slow_1p08V_125C"
@@ -36,9 +37,9 @@ def test_table_has_every_run_with_its_stage_and_sources(tmp_path):
     cfg, _ = _project(tmp_path)
     r = run_flow_history(load_project(cfg))
     assert r.status == "pass" and r.evidence_level == "E0"
-    runs = {x["run"]: x for x in r.metrics["runs"]}
+    runs = {x["run"]: x for x in r.metrics["tables"]["imported"]["runs"]}
     assert set(runs) == {"p10", "synth", "hier", "p7_booth", "p7_nobooth", "full_p10", "full_p10_booth"}
-    assert r.metrics["stages"] == {"full": 2, "synth_sta": 5}
+    assert r.metrics["tables"]["imported"]["stages"] == {"full": 2, "synth_sta": 5}
     assert runs["p7_booth"]["synth"]["cell_area_um2"] == 245313.7218 and runs["p7_booth"]["post_route"] is None
     assert runs["full_p10"]["post_route"]["corners"][SLOW]["setup_wns"] < -4.3
     assert [d["key"] for d in runs["p7_booth"]["config_vs_baseline"]] == ["CLOCK_PERIOD", "SYNTH_MUL_BOOTH",
@@ -49,7 +50,7 @@ def test_table_has_every_run_with_its_stage_and_sources(tmp_path):
 def test_booth_isolated_by_runs_started_together_and_lesson_confirmed(tmp_path):
     cfg, _ = _project(tmp_path)
     r = run_flow_history(load_project(cfg))
-    booth = r.metrics["knob_effects"]["SYNTH_MUL_BOOTH"]
+    booth = r.metrics["tables"]["imported"]["knob_effects"]["SYNTH_MUL_BOOTH"]
     assert booth["verdict"] == "isolated"
     pair = booth["pairs"][0]
     assert (pair["off"], pair["on"]) == ("p7_nobooth", "p7_booth") and "apart" in pair["same_rtl"]
@@ -65,14 +66,14 @@ def test_untested_and_confounded_lessons(tmp_path):
     grt = _lesson(r, "RUN_POST_GRT_RESIZER_TIMING")
     assert grt["verdict"] == "confounded" and set(grt["indirect"]) == {"False", "True"}
     assert grt["indirect"]["False"]["full_p10"][SLOW] < grt["indirect"]["True"]["full_p10_booth"][SLOW]
-    conf = r.metrics["knob_effects"]["RUN_POST_GRT_RESIZER_TIMING"]
+    conf = r.metrics["tables"]["imported"]["knob_effects"]["RUN_POST_GRT_RESIZER_TIMING"]
     assert conf["verdict"] == "confounded" and "SYNTH_MUL_BOOTH" in conf["pairs"][0]["also_changed"]
 
 
 def test_identical_netlist_isolates_a_period_change(tmp_path):
     cfg, _ = _project(tmp_path)
     r = run_flow_history(load_project(cfg))
-    pairs = r.metrics["knob_effects"]["CLOCK_PERIOD"]["pairs"]
+    pairs = r.metrics["tables"]["imported"]["knob_effects"]["CLOCK_PERIOD"]["pairs"]
     p = next(x for x in pairs if {x["off"], x["on"]} == {"synth", "p10"})
     assert p["same_rtl"].startswith("identical synthesized netlist")
     assert p["effect"]["synth_setup_wns"][SLOW]["delta"] == 5.0  # 5 ns -> 10 ns, same netlist: slack +5 ns
@@ -83,7 +84,7 @@ def test_runs_far_apart_with_different_netlists_are_confounded(tmp_path):
     t = json.loads((FIXTURE / "started.json").read_text())["p7_nobooth"] + 2 * 86400
     os.utime(runs / "p7_nobooth" / "resolved.json", (t, t))
     r = run_flow_history(load_project(cfg))
-    booth = r.metrics["knob_effects"]["SYNTH_MUL_BOOTH"]
+    booth = r.metrics["tables"]["imported"]["knob_effects"]["SYNTH_MUL_BOOTH"]
     assert booth["verdict"] == "confounded"
     assert any("RTL" in c for p in booth["pairs"] for c in p["also_changed"])
     assert _lesson(r, "SYNTH_MUL_BOOTH")["verdict"] == "confounded"
@@ -104,7 +105,7 @@ def test_non_synthesis_knob_with_a_different_netlist_is_not_attributed(tmp_path)
     s["metrics"]["design__instance__area"] = 1.0
     (step / "state_out.json").write_text(json.dumps(s))
     r = run_flow_history(load_project(cfg))
-    util = r.metrics["knob_effects"]["FP_CORE_UTIL"]
+    util = r.metrics["tables"]["imported"]["knob_effects"]["FP_CORE_UTIL"]
     assert util["verdict"] == "confounded" and "netlists differ" in util["pairs"][-1]["also_changed"][0]
 
 
@@ -123,9 +124,12 @@ def test_config_lessons_takes_the_comment_block_above_a_key():
 def test_receipt_keeps_the_history_summary(tmp_path):
     cfg, _ = _project(tmp_path)
     d = _flow(run_flow_history(load_project(cfg)).to_dict())["flow_history"]
-    assert d["baseline"] == "p10" and len(d["runs"]) == 7
-    assert any(x["key"] == "SYNTH_MUL_BOOTH" and x["verdict"] == "confirmed" for x in d["lessons"])
-    assert any("-8.43%" in s for s in d["knobs"]["SYNTH_MUL_BOOTH"]["pairs"])
+    imp = d["tables"]["imported"]
+    assert imp["baseline"] == "p10" and len(imp["runs"]) == 7 and all(r["table"] == "imported" for r in imp["runs"])
+    assert d["tables"]["eda_agent"]["runs"] == []
+    les = next(x for x in d["lessons"] if x["key"] == "SYNTH_MUL_BOOTH")
+    assert les["verdict"] == "confirmed" and les["source_table"] == "imported" and les["status"].startswith("hypothesis")
+    assert any("-8.43%" in s for s in imp["knobs"]["SYNTH_MUL_BOOTH"]["pairs"])
 
 
 def test_no_runs_is_an_error(tmp_path):

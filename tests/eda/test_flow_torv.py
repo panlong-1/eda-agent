@@ -26,6 +26,7 @@ def test_flow_report_full_p10():
     m = r.metrics
     assert r.status == "fail" and m["signoff"]["setup"]["outcome"] == "fail"
     assert all(m["signoff"][k]["outcome"] == "pass" for k in ("hold", "clock_propagated", "drc_magic", "drc_klayout", "lvs", "antenna"))
+    assert m["drc_by_tool"] == {"Magic": 0, "KLayout": 0} and m["experience_table"] == "imported"
     assert m["signoff_level"] == "E5-partial" and r.evidence_level == "E4"
     assert m["worst_corner"] == "nom_slow_1p08V_125C" and m["wns"] == pytest.approx(-4.3499, abs=1e-3)
     assert m["area"]["die_area_um2"] == 559132 and m["area"]["stdcell_count"] == 23130
@@ -39,7 +40,7 @@ def test_flow_history_over_all_torv_runs():
     import json
     from eda_agent.tools.flow_history import run_flow_history
     r = run_flow_history(load_project(PROJECTS / "torv.toml"), baseline="p10")
-    runs = {x["run"]: x for x in r.metrics["runs"]}
+    runs = {x["run"]: x for x in r.metrics["tables"]["imported"]["runs"]}
     names = {d.name for d in (TORV / "librelane" / "runs").iterdir() if (d / "resolved.json").is_file()}
     assert set(runs) == names and r.status == "pass" and r.evidence_level == "E0"
     for name, row in runs.items():  # the numbers are the runs' own metrics

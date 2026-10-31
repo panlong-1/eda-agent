@@ -44,8 +44,11 @@ src/eda_agent/
                          against regression cases: kill matrix, survivors, perf_killed (E0)
     perf.py              cycle counts and other testbench counters per case, against the
                          person-approved baseline (E2); recording that baseline (CLI only)
-    flow.py              flow_report: a LibreLane run judged by fixed signoff rules, compared with a
+    flow.py              flow_report: a flow run judged by fixed signoff rules, compared with a
                          baseline run and synth (E4, signoff_level E5-partial); flow_run (copy, no network)
+    flow_history.py      flow_history: the design's runs in two experience tables, knob effects, lessons (E0)
+    experience.py        the imported and eda_agent experience tables of each design
+    backends/            flow adapters: base.py (the neutral result), librelane.py (default)
     reports/librelane.py reads one LibreLane run directory: metrics, STA, DRC, LVS, antenna, logs
   server/mcp_server.py   MCP server (stdio): lint / list_regress_cases / describe_case / regress /
                          rtl_rules / synth / check_sdc / perf / mutate
@@ -312,8 +315,8 @@ eda-agent flow-run --project projects/torv.toml --tag mytag [--dry-run]
 **Signoff rules** (one table, `SIGNOFF_RULES` in `tools/flow.py`): post-route setup and hold
 worst slack ≥ 0 on every signoff corner, the post-route path reports time a propagated clock (no
 ideal clock left; a non-zero clock source latency is flagged, since one applied to one side only
-shifts every slack), Magic DRC = 0, KLayout DRC = 0, Netgen LVS errors = 0 with a matching
-report, antenna-violating nets and pins = 0. Any rule failing → `fail`; a
+shifts every slack), DRC = 0 for every signoff DRC tool of the run (LibreLane: Magic and
+KLayout), LVS errors = 0 with a matching report, antenna-violating nets and pins = 0. Any rule failing → `fail`; a
 check that did not run → `error` (incomplete); else `pass`. Max slew/cap/fanout, IR drop and
 detailed-router DRC are reported as warnings. Metric counts are cross-checked against the
 report files they come from.
@@ -341,9 +344,30 @@ makes the two not comparable), against the same run's own pre-PnR STA, and again
 that are missing, signoff steps switched off, and floorplan/PDN/macro/image errors in the logs
 (`setup_issues`, plan §0.11).
 
-**Run history** (`flow_history`, `eda-agent flow-history`, E0, plan §0.15 step 1): every run under
-the design's runs directory in one table (stage reached, config differences from the baseline,
-synthesis/pre-PnR and post-route numbers, runtime, source files with sha256). A knob's effect is
+**Back ends.** `[pnr] backend` picks a flow adapter (`tools/backends/`); `librelane` is the
+default and the only one so far. The adapter says how to run the flow (here in a container; a
+`remote` mode, e.g. a licensed server over SSH, or an `import` mode that only reads reports made
+elsewhere, fit the same interface), where its reports are, and how to read them into a
+back-end-neutral result. The signoff rules, E5 checklist, comparisons, run history, gate R8 and
+receipts read only that neutral result; a unit test drives all of them with a tiny fake
+adapter and no LibreLane file. Knob names stay the flow's own; runs of different back ends are
+compared on neutral numbers only and labelled "different backend". A second open-source adapter
+would most likely be OpenROAD-flow-scripts (both use OpenROAD; its `metrics.json` and reports
+look alike; LVS is not a default ORFS step, so it would show as missing). Currently open-source
+only; commercial adapters (place-and-route, STA, DRC/LVS, synthesis) are planned.
+
+**Experience tables** (per design, never mixed): **imported** = runs found in the design's own
+runs directory, made outside eda-agent (provenance "imported, maker unknown", files with
+sha256); **eda_agent** = runs `flow_run` made for this design, one line each in
+`<[pnr] experience_dir>/<project>/eda_agent_runs.jsonl` (run id, config patch, image digest, SDC
+hash, source commit, the agent run that asked). A new design starts with an empty eda_agent
+table. A lesson from the imported table, or from another design, is a hypothesis ("from
+<design>, not verified here") until an eda-agent run of this design confirms it. `flow_report`
+says which table its run belongs to.
+
+**Run history** (`flow_history`, `eda-agent flow-history`, E0, plan §0.15 step 1): each table's
+runs (stage reached, config differences from the baseline,
+synthesis/pre-PnR and post-route numbers, runtime, provenance, source files with sha256). A knob's effect is
 reported only from two runs that differ in that key alone **and** read the same RTL, shown by an
 identical synthesized netlist or, for a synthesis knob, by the two runs starting within 15
 minutes; git alone cannot see uncommitted edits between runs. Anything else is "confounded",

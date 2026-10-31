@@ -59,6 +59,7 @@ def print_result(res: dict) -> None:
           f"vias {_fmt(r.get('vias'))}, flow runtime {_fmt(m.get('runtime_s'))} s")
     print(f"SDC {m.get('sdc')} ({m.get('sdc_basis')}), sha256 {m.get('sdc_sha256', 'not known for the run')}")
     print(f"versions: {res.get('tool_versions')}")
+    print(f"experience table: {m.get('experience_table')} ({m.get('provenance')})")
     cmp = m.get("comparison") or {}
     if b := cmp.get("baseline"):
         print(f"\nagainst baseline {b['baseline']} (run - baseline):")
@@ -110,30 +111,38 @@ def _wns(corners: dict) -> str:
 def print_history(res: dict) -> None:
     m = res.get("metrics") or {}
     print(f"flow_history: {res['status'].upper()} — {res.get('summary', '')}")
-    if not m.get("runs"):
+    if not m.get("tables"):
         return
-    print(f"\nruns (config against {m['baseline']}; setup WNS per corner in ns):")
-    for r in m["runs"]:
-        s, p = r["synth"], r["post_route"]
-        knobs = ", ".join(f"{d['key']}={d['run']}" for d in r["config_vs_baseline"]) or "same config"
-        post = (f" | post-route {_wns(p['corners'])}, die {p['die_area_um2']} um2, DRC {p['drc_magic']}/"
-                f"{p['drc_klayout']}, LVS {p['lvs_errors']}" if p else "")
-        print(f"  {r['run']:15} {r['stage'][:24]:24} {str(r['started'])[:16]} {r['clock_period']} ns  "
-              f"synth area {s['cell_area_um2']:.0f}, pre-PnR {_wns(s['corners'])}{post}")
-        print(f"  {'':15} knobs: {knobs}")
-    print("\nwhat each knob did:")
-    for k, v in m["knob_effects"].items():
-        print(f"  {k}: {v['verdict']}")
-        for p in v["pairs"]:
-            if "summary" in p:
-                print(f"    {p['summary']}  [{p['same_rtl']}]")
-            else:
-                print(f"    {' vs '.join(p['runs'])}: also changed {', '.join(p['also_changed']) or '-'}")
-    print("\nlessons in the LibreLane config:")
+    for name, t in m["tables"].items():
+        print(f"\n== {name} table ({len(t['runs'])} run(s)): {t['provenance']}")
+        if not t["runs"]:
+            continue
+        print(f"runs (config against {t['baseline']}; setup WNS per corner in ns):")
+        for r in t["runs"]:
+            s, p = r["synth"], r["post_route"]
+            knobs = ", ".join(f"{d['key']}={d['run']}" for d in r["config_vs_baseline"]) or "same config"
+            post = (f" | post-route {_wns(p['corners'])}, die {p['die_area_um2']} um2, DRC "
+                    f"{'/'.join(str(v) for v in p['drc_by_tool'].values())}, LVS {p['lvs_errors']}" if p else "")
+            area = f"{s['cell_area_um2']:.0f}" if isinstance(s["cell_area_um2"], (int, float)) else "-"
+            print(f"  {r['run']:15} {r['stage'][:24]:24} {str(r['started'])[:16]} {r['clock_period']} ns  "
+                  f"synth area {area}, pre-PnR {_wns(s['corners'])}{post}")
+            print(f"  {'':15} knobs: {knobs}")
+        print("what each knob did:")
+        for k, v in t["knob_effects"].items():
+            print(f"  {k}: {v['verdict']}")
+            for p in v["pairs"]:
+                if "summary" in p:
+                    print(f"    {p['summary']}  [{p['same_rtl']}]")
+                else:
+                    print(f"    {' vs '.join(p['runs'])}: also changed {', '.join(p['also_changed']) or '-'}")
+    print("\nlessons in the flow's config:")
     for les in m["lessons"]:
         print(f"  {les['verdict'].upper():14} {les['key']}: {les['why']}")
+        print(f"  {'':14}   status: {les['status']}")
         for run, d in ((r, x) for v in (les.get("indirect") or {}).values() for r, x in v.items()):
             print(f"  {'':14}   indirect: {run} post-route minus pre-PnR setup WNS {d}")
+    for h in m.get("hypotheses_from_other_designs") or []:
+        print(f"  HYPOTHESIS     {h['knob']} ({h['status']}): {h['effect']}")
     print("\nnot covered:")
     for r in res.get("residual_risk") or []:
         print(f"  - {r}")

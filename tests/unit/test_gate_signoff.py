@@ -6,7 +6,7 @@ SHA = "c" * 64
 
 
 def flow(status="fail", drc=(0, 0), lvs=0, ant=0, timing_met=False, level="E5-partial", sha=None, wns=-4.35):
-    m = {"tag": "full_p10", "drc_magic": drc[0], "drc_klayout": drc[1], "lvs_errors": lvs, "lvs_match": lvs == 0,
+    m = {"tag": "full_p10", "drc_by_tool": {"Magic": drc[0], "KLayout": drc[1]}, "lvs_errors": lvs, "lvs_match": lvs == 0,
          "antenna_nets": ant, "antenna_pins": 0, "timing_met": timing_met, "signoff_level": level,
          "signoff_passed": status == "pass", "wns": wns, "hold_wns": 0.101, "clock_period": 10,
          "corners": {"nom_slow_1p08V_125C": {"setup_wns": wns, "hold_wns": 0.251}}}
@@ -35,7 +35,7 @@ def test_signoff_word_must_name_the_flow_result():
 
 def test_drc_clean_rejected_when_klayout_reports_errors():
     d = check_report("flow_report: the layout is DRC clean." + RISK, [flow(drc=(0, 3))])
-    assert not d.passed and any("Magic and KLayout DRC both at 0" in r for r in d.reasons)
+    assert not d.passed and any("every signoff DRC tool" in r for r in d.reasons)
 
 
 def test_wrong_drc_count_is_rejected():

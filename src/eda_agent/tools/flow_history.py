@@ -1,104 +1,107 @@
-"""flow_history: every LibreLane run of the design in one table, and what each config knob did.
+"""flow_history: a design's flow runs in two experience tables, and what each config knob did.
 
-Facts only (evidence level E0): it reads the run directories, never runs a flow (plan §0.15 step 1).
+Facts only (evidence level E0): it reads run directories through the project's flow adapter and
+never runs a flow (plan §0.15 step 1). Back-end neutral: numbers come from the neutral result;
+knob names and values are the flow's own and are only compared between runs of the same back end.
 
-- One row per run: stage reached (synth+STA only, full, or stopped early), when it ran, runtime,
-  the LibreLane keys that differ from the baseline run, the synthesis/pre-PnR numbers every run
-  has, the post-route numbers of full runs, and the files (with sha256) the numbers came from.
-- Knob effects: a knob's effect is reported only from a pair of runs whose configs differ in that
-  key alone and that read the same RTL. Same RTL is shown by an identical synthesized netlist (cell
-  count and area: the same RTL and synthesis settings give the same netlist, and a different RTL
-  practically never gives exactly the same one), or, for a knob that changes synthesis, by the two
-  runs starting within 15 minutes with no RTL commit between. A git check alone is not enough:
-  uncommitted edits between runs are invisible to it. Otherwise the knob is "confounded" and every
-  other difference of its closest pairs is listed; nothing is attributed to it.
-- Lessons: the comments above keys in the LibreLane config are checked against those pairs:
-  confirmed / contradicted (only for a stated "N% area" figure, checked numerically), "testable"
-  (numbers given, nothing in the comment to check them against automatically), confounded, or
-  cannot be tested (the knob never changed between runs).
+Two tables per design (tools/experience.py), never mixed:
+- imported: runs in the design's own runs directory, made before or outside eda-agent;
+- eda_agent: runs eda-agent's flow_run made for this design (starts empty).
+Each row says which table it is in and where it came from (files with sha256, or the flow_run record).
+
+Within each table:
+- Knob effects: reported only from a pair of runs whose configs differ in that key alone and that
+  read the same RTL. Same RTL is shown by an identical synthesized netlist (cell count and area:
+  the same RTL and synthesis settings give the same netlist, and a different RTL practically never
+  gives exactly the same one), or, for a knob that changes synthesis, by the two runs starting
+  within 15 minutes. A git check alone is not enough: uncommitted edits between runs are invisible
+  to it. Otherwise the knob is "confounded" and every other difference of its closest pairs is listed.
+- Lessons: comments the adapter finds in the flow's config (LibreLane: the comment above a key) are
+  checked against those pairs: confirmed / contradicted (only a stated "N% area", numerically),
+  testable, confounded (with indirect per-run numbers), or cannot_test. A verdict from the imported
+  table is a hypothesis; only the eda_agent table can verify it for this design.
+Lessons another design verified with its own eda-agent runs are listed as hypotheses,
+"from <design>, not verified here".
 """
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from itertools import combinations
 from pathlib import Path
 
 from ..core.envelope import Diagnostic, ToolResult, artifact
 from ..core.project import Project
-from .flow import _config_diff, _delta, _git, _refuse, _resolved, runs_dir
-from .reports.librelane import STEP_PRE_STA, corners, corner_timing, find_step, read_run, sha256_file, step_metrics
+from . import experience
+from .backends import Backend
+from .backends.base import sha256_file
+from .flow import _config_diff, _delta, _git, _refuse, _root_path, backend_of, runs_dir
 
-# Keys that are not knobs: RTL inputs are tracked by git instead (a changed file list is still listed).
-NOT_KNOBS = re.compile(r"^(?:meta|DESIGN_DIR|PDK_ROOT)$")
 # A comment states an area effect: "-8.4% cell area", "for +3.6% area"
 _AREA_CLAIM = re.compile(r"([+\-−]\d+(?:\.\d+)?)\s*%\s*(?:of\s+)?(?:cell\s+|total\s+)?area", re.I)
 _PERIOD = re.compile(r"(\d+(?:\.\d+)?)\s*ns\b")
-_KEY_LINE = re.compile(r"^([A-Z][A-Z0-9_]*)\s*:\s*(.*)$")
-# Keys that can change the synthesized netlist; for any other key, two runs with the same RTL must
-# synthesize to the same netlist.
-SYNTH_KEYS = re.compile(r"^(?:SYNTH_|VERILOG_|USE_SLANG$|CLOCK_PERIOD$|LINTER_)")
-TOGETHER_S = 15 * 60       # runs started this close, with no RTL commit between, are taken to share the RTL
+TOGETHER_S = 15 * 60       # runs started this close are taken to share the RTL (for synthesis knobs)
 AREA_TOLERANCE_PTS = 1.0   # a stated "N% area" is confirmed within this many points (or 25% of N)
 
 HISTORY_SCOPE = (
-    "Facts read from {n} LibreLane run directories under {runs}: configuration (resolved.json), the "
-    "metrics LibreLane recorded per step, and git history of the RTL files. A knob's effect is reported "
-    "only from two runs that differ in that key alone, with no RTL commit between them. Each effect rests "
-    "on single runs (no repeats, so run-to-run noise is unknown) and proves nothing about other designs, "
-    "PDKs or clock periods. Evidence level E0: it says what happened in these runs, not what will happen."
+    "Facts read from the runs of design '{design}' through the {backend} adapter: {imported} imported run(s) "
+    "under {runs} and {eda} run(s) made by eda-agent flow_run. A knob's effect is reported only from two runs "
+    "of the same table that differ in that key alone and read the same RTL. Each effect rests on single runs "
+    "(no repeats, so run-to-run noise is unknown) and says nothing about other designs, PDKs or clock periods. "
+    "Verdicts from the imported table are hypotheses until an eda-agent run of this design confirms them. "
+    "Evidence level E0: what happened in these runs, not what will happen."
 )
 HISTORY_RISK = [
     "single runs: no run was repeated, so the size of run-to-run noise is unknown",
     "uncommitted RTL edits between runs cannot be seen; git only shows committed changes",
     "pre-PnR numbers are estimates (ideal clock, no wires); only full runs have post-route numbers",
+    "imported runs were made outside eda-agent: who made them, with what exactly, is not known",
     "effects hold for this design, PDK and clock period; they are not general rules",
 ]
 
 
-def _stage(f: dict, run: Path) -> str:
-    if f["post_route_sta_step"]:
-        return "full" if f["complete"] else "partial (stopped after post-route STA)"
-    if f["complete"] and f["last_step"] and f["last_step"].startswith(STEP_PRE_STA):
-        return "synth_sta"
-    return "partial"
+def _short(v):
+    return f"<list of {len(v)}>" if isinstance(v, list) and len(v) > 3 else v
 
 
-def _row(run: Path, base_resolved: dict, base_run: str) -> dict:
-    f = read_run(run, violators=0)
-    resolved = _resolved(run)
-    pre = step_metrics(find_step(run, STEP_PRE_STA)) or {}
-    pre_step = find_step(run, STEP_PRE_STA)
-    stage = _stage(f, run)
-    full = stage == "full" or stage.startswith("partial (stopped after")
-    sources = {"resolved.json": sha256_file(run / "resolved.json")}
-    if pre_step:
-        sources[f"{pre_step.name}/state_out.json"] = sha256_file(pre_step / "state_out.json")
-    if (run / "final" / "metrics.json").is_file():
-        sources["final/metrics.json"] = sha256_file(run / "final" / "metrics.json")
+def _row(be: Backend, run: Path, base: tuple[dict, str] | None, table: str, record: dict | None) -> dict:
+    f = be.read_run(run, violators=0)
+    config = be.config(run)
+    full = f["post_route_sta_step"] is not None
+    diff = _config_diff(base[0], config, base[1], str(run), limit=50, skip=be.not_knobs) if base else []
+    prov = {"table": table, "provenance": experience.PROVENANCE[table], "made_by": "unknown (made outside eda-agent)"}
+    if record:
+        prov.update(made_by=record.get("made_by"), run_id=record.get("run_id"), image=record.get("image"),
+                    config_patch=record.get("config_patch"), agent_run_id=record.get("agent_run_id"),
+                    source_commit=record.get("source_commit"), recorded_at=record.get("recorded_at"))
     return {
-        "run": run.name, "stage": stage, "complete": f["complete"], "started": f["started"],
+        "run": run.name, "table": table, "stage": f["stage"], "complete": f["complete"], "started": f["started"],
         "finished": f["finished"], "runtime_s": f["runtime_s"], "design": f["design"],
-        "clock_period": f["clock_period"], "librelane_version": f["librelane_version"],
-        "pdk_version": f["pdk_version"],
-        "config_vs_baseline": [d for d in _config_diff(base_resolved, resolved, base_run, str(run), limit=50)
-                               if not NOT_KNOBS.match(d["key"])],
-        "synth": {"cell_area_um2": pre.get("design__instance__area"), "cells": pre.get("design__instance__count"),
-                  "power_w": pre.get("power__total"), "setup_tns": pre.get("timing__setup__tns"),
-                  "setup_violations": pre.get("timing__setup_vio__count"),
-                  "max_fanout_violations": pre.get("design__max_fanout_violation__count"),
-                  "corners": {c: {k: v for k, v in corner_timing(pre, c).items()
-                                  if k in ("setup_wns", "setup_tns", "hold_wns")} for c in corners(pre)}},
+        "backend": f["backend"] or be.name, "backend_version": f["backend_version"],
+        "clock_period": f["clock_period"], "pdk_version": f["pdk_version"],
+        "config_vs_baseline": [{"key": d["key"], "baseline": _short(d["baseline"]), "run": _short(d["run"])}
+                               for d in diff],
+        "synth": f["pre_pnr"],
         "post_route": None if not full else {
             "corners": {c: {k: t.get(k) for k in ("setup_wns", "setup_tns", "setup_violations", "hold_wns")}
                         for c, t in f["timing"].items()},
             "die_area_um2": f["area"]["die_area_um2"], "utilization": f["area"]["utilization"],
             "stdcell_area_um2": f["area"]["stdcell_area_um2"], "stdcell_count": f["area"]["stdcell_count"],
             "power_w": f["power"]["total_w"], "wirelength_um": f["routing"]["wirelength_um"],
-            "drc_magic": f["drc"]["magic"], "drc_klayout": f["drc"]["klayout"], "lvs_errors": f["lvs"]["errors"],
+            "drc_by_tool": f["drc"]["by_tool"], "lvs_errors": f["lvs"]["errors"],
             "antenna_nets": f["antenna"]["violating_nets"]},
-        "sources": sources,
-        "_resolved": resolved, "_verilog": [p for p in resolved.get("VERILOG_FILES") or [] if isinstance(p, str)],
+        "provenance": prov,
+        "sources": {k: sha256_file(p) for k, p in {"config": _config_file(run), **f["reports"]}.items()
+                    if p and not k.startswith(("violators_", "paths_"))},
+        "_config": config, "_rtl": f["rtl_files"],
     }
+
+
+def _config_file(run: Path) -> Path | None:
+    for name in ("resolved.json", "config.json", "run.json"):
+        if (run / name).is_file():
+            return run / name
+    return None
 
 
 def rtl_commits_between(files: list[str], t1: str | None, t2: str | None) -> list[str] | None:
@@ -117,18 +120,17 @@ def rtl_commits_between(files: list[str], t1: str | None, t2: str | None) -> lis
 
 
 def _seconds(t: str | None) -> float | None:
-    from datetime import datetime
     return datetime.fromisoformat(t).timestamp() if t else None
 
 
-def same_rtl(a: dict, b: dict, key: str, commits: list[str] | None) -> tuple[bool, str]:
+def same_rtl(a: dict, b: dict, key: str, commits: list[str] | None, be: Backend) -> tuple[bool, str]:
     """Whether two runs read the same RTL, and how we know (or why not)."""
     sa, sb = a["synth"], b["synth"]
     if commits:
         return False, f"{len(commits)} RTL commit(s) between the runs"
     if sa["cells"] is not None and (sa["cells"], sa["cell_area_um2"]) == (sb["cells"], sb["cell_area_um2"]):
         return True, "identical synthesized netlist (cells and area)"
-    if not SYNTH_KEYS.match(key):
+    if not be.synthesis_keys.match(key):
         return False, ("synthesized netlists differ although only a non-synthesis key changed: the RTL or "
                        "the tool differed (uncommitted edits)")
     ta, tb = _seconds(a["started"]), _seconds(b["started"])
@@ -154,28 +156,53 @@ def pair_effect(a: dict, b: dict) -> dict:
     return eff
 
 
-def _diff_keys(a: dict, b: dict) -> list[str]:
-    return [d["key"] for d in _config_diff(a["_resolved"], b["_resolved"], a["run"], b["run"], limit=200)
-            if not NOT_KNOBS.match(d["key"])]
+def _summary(eff: dict) -> str:
+    """One line a person reads: synthesis area, slack per corner, post-route when present."""
+    def pct(row):
+        return f"{row['delta_pct']:+.2f}%" if "delta_pct" in row else f"{row.get('delta', 0):+g}"
+
+    def wns(rows):
+        return ", ".join(f"{c.split('_')[1] if '_' in c else c} {r['delta']:+.3f} ns" for c, r in rows.items()
+                         if "delta" in r)
+    parts = [f"synthesis cell area {pct(eff['synth']['cell_area_um2'])}", f"pre-PnR setup WNS {wns(eff['synth_setup_wns'])}"]
+    if "post_route" in eff:
+        parts.append(f"die area {pct(eff['post_route']['die_area_um2'])}, power {pct(eff['post_route']['power_w'])}")
+        parts.append(f"post-route setup WNS {wns(eff['post_route_setup_wns'])}")
+    return "; ".join(parts)
 
 
-def knob_effects(rows: list[dict]) -> dict[str, dict]:
-    """For each key that differs between any two runs: isolated pairs (only that key differs, no RTL
-    commit between them) with their effect, or the closest confounded pairs with all their differences."""
+def _diff_keys(a: dict, b: dict, be: Backend) -> list[str]:
+    if a["backend"] != b["backend"]:
+        return [f"(backend: {a['backend']} vs {b['backend']})"]  # different flows: their knobs are not comparable
+    return [d["key"] for d in _config_diff(a["_config"], b["_config"], a["run"], b["run"], limit=200, skip=be.not_knobs)]
+
+
+def _val(row: dict, key: str) -> tuple:
+    """Sort key so that False/absent/smaller comes first ('off')."""
+    v = row["_config"].get(key)
+    if v in (False, None):
+        return (0, 0.0, "")
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return (1, float(v), "")
+    return (1, 0.0, str(v))
+
+
+def knob_effects(rows: list[dict], be: Backend) -> dict[str, dict]:
+    """For each key that differs between two runs: isolated pairs (only that key differs, same RTL)
+    with their effect, or the closest confounded pairs with all their differences."""
     pairs = []
     for a, b in combinations(rows, 2):
-        keys = _diff_keys(a, b)
+        keys = _diff_keys(a, b, be)
         if keys:
-            commits = rtl_commits_between(sorted(set(a["_verilog"]) | set(b["_verilog"])), a["started"], b["started"])
+            commits = rtl_commits_between(sorted(set(a["_rtl"]) | set(b["_rtl"])), a["started"], b["started"])
             pairs.append((a, b, keys, commits))
-    knobs = sorted({k for *_, keys, _ in pairs for k in keys})
     out = {}
-    for k in knobs:
+    for k in sorted({k for *_, keys, _ in pairs for k in keys}):
         mine = [(a, b, keys, c) for a, b, keys, c in pairs if k in keys]
         clean, rtl_doubt = [], []
         for a, b, keys, c in mine:
-            if keys == [k]:
-                ok, why = same_rtl(a, b, k, c)
+            if keys == [k] and not k.startswith("(backend"):
+                ok, why = same_rtl(a, b, k, c, be)
                 (clean if ok else rtl_doubt).append((a, b, why))
         if clean:
             out[k] = {"verdict": "isolated", "pairs": []}
@@ -184,9 +211,9 @@ def knob_effects(rows: list[dict]) -> dict[str, dict]:
                 eff = pair_effect(lo, hi)
                 out[k]["pairs"].append({
                     "off": lo["run"], "on": hi["run"],
-                    "values": {lo["run"]: lo["_resolved"].get(k), hi["run"]: hi["_resolved"].get(k)},
+                    "values": {lo["run"]: lo["_config"].get(k), hi["run"]: hi["_config"].get(k)},
                     "clock_period": lo["clock_period"], "effect": eff, "same_rtl": why,
-                    "summary": f"{k} {_short(lo['_resolved'].get(k))} -> {_short(hi['_resolved'].get(k))} "
+                    "summary": f"{k} {_short(lo['_config'].get(k))} -> {_short(hi['_config'].get(k))} "
                                f"({lo['run']} -> {hi['run']}): {_summary(eff)}"})
         else:
             others = [p for p in mine if p[2] != [k]]  # pairs differing in k alone are listed below, with why
@@ -198,67 +225,52 @@ def knob_effects(rows: list[dict]) -> dict[str, dict]:
     return out
 
 
-def _val(row: dict, key: str) -> tuple:
-    """Sort key so that False/absent/smaller comes first ('off')."""
-    v = row["_resolved"].get(key)
-    if v in (False, None):
-        return (0, 0.0, "")
-    if isinstance(v, (int, float)) and not isinstance(v, bool):
-        return (1, float(v), "")
-    return (1, 0.0, str(v))
-
-
-def _summary(eff: dict) -> str:
-    """One line a person reads: synthesis area and cells, slack per corner, post-route when present."""
-    def pct(row):
-        return f"{row['delta_pct']:+.2f}%" if "delta_pct" in row else f"{row.get('delta', 0):+g}"
-    parts = [f"synthesis cell area {pct(eff['synth']['cell_area_um2'])}",
-             "pre-PnR setup WNS " + ", ".join(f"{c.split('_')[1]} {r['delta']:+.3f} ns"
-                                              for c, r in eff["synth_setup_wns"].items() if "delta" in r)]
-    if "post_route" in eff:
-        parts.append(f"die area {pct(eff['post_route']['die_area_um2'])}, power {pct(eff['post_route']['power_w'])}")
-        parts.append("post-route setup WNS " + ", ".join(f"{c.split('_')[1]} {r['delta']:+.3f} ns"
-                                                         for c, r in eff["post_route_setup_wns"].items() if "delta" in r))
-    return "; ".join(parts)
-
-
-def config_lessons(text: str) -> dict[str, dict]:
-    """Comment block written directly above each top-level key of a LibreLane YAML config."""
-    out, block = {}, []
-    for line in text.splitlines():
-        s = line.strip()
-        if s.startswith("#"):
-            block.append(s.lstrip("#").strip())
-            continue
-        if m := _KEY_LINE.match(line):
-            if block:
-                out[m[1]] = {"comment": " ".join(block), "value": m[2].strip()}
-        block = []
-    return out
-
-
 def check_lessons(lessons: dict[str, dict], effects: dict[str, dict], rows: list[dict]) -> list[dict]:
-    varied = {k for k in effects}
     result = []
     for key, les in lessons.items():
         entry = {"key": key, "comment": les["comment"], "value": les["value"]}
-        if key not in varied:
-            values = sorted({str(r["_resolved"].get(key)) for r in rows})
-            entry.update(verdict="cannot_test", why=f"{key} has the same value in every run ({', '.join(values)})")
+        if key not in effects:
+            values = sorted({str(r["_config"].get(key)) for r in rows})
+            entry.update(verdict="cannot_test", why=f"{key} has the same value in every run ({', '.join(values)})"
+                         if rows else "no runs in this table")
         elif effects[key]["verdict"] == "confounded":
             entry.update(verdict="confounded", why="no two runs differ in this key alone with the same RTL "
                                                    "(see knob_effects)", indirect=_by_value(key, rows))
         else:
-            entry.update(_area_check(les["comment"], effects[key]["pairs"]))
+            entry.update(_area_check(les["comment"], effects[key]["pairs"], les["value"]))
         result.append(entry)
     return result
 
 
-def _area_check(comment: str, pairs: list[dict]) -> dict:
+def _same_value(config_value, written: str) -> bool:
+    """A recorded config value against the value written in the config file (YAML text)."""
+    w = written.strip().strip("'\"").lower()
+    if isinstance(config_value, bool):
+        return w in (("true", "yes", "on") if config_value else ("false", "no", "off"))
+    if isinstance(config_value, (int, float)):
+        try:
+            return float(w) == float(config_value)
+        except ValueError:
+            return False
+    return str(config_value).lower() == w
+
+
+def _oriented(p: dict, value: str) -> tuple[str, str, float | None]:
+    """(run with the value the comment recommends, the other run, area % of the first against the
+    second); the pair's own off -> on order when neither run has that value."""
+    pct = p["effect"]["synth"]["cell_area_um2"].get("delta_pct")
+    on, off = p["on"], p["off"]
+    if _same_value(p["values"][off], value) and not _same_value(p["values"][on], value):
+        a_on, a_off = p["effect"]["synth"]["cell_area_um2"]["run"], p["effect"]["synth"]["cell_area_um2"]["baseline"]
+        pct = round(100.0 * (a_off - a_on) / abs(a_on), 2) if a_on else None
+        on, off = off, on
+    return on, off, pct
+
+
+def _area_check(comment: str, pairs: list[dict], value: str = "") -> dict:
     claim = _AREA_CLAIM.search(comment)
     periods = {float(p) for p in _PERIOD.findall(comment)}
-    measured = [(p["on"], p["off"], p["clock_period"], p["effect"]["synth"]["cell_area_um2"].get("delta_pct"))
-                for p in pairs]
+    measured = [(*_oriented(p, value)[:2], p["clock_period"], _oriented(p, value)[2]) for p in pairs]
     evidence = [f"{on} vs {off} at {per} ns: synthesis cell area {pct:+.2f}%" for on, off, per, pct in measured
                 if pct is not None]
     if not claim:
@@ -282,33 +294,50 @@ def _area_check(comment: str, pairs: list[dict]) -> dict:
             "evidence": evidence}
 
 
-def _by_value(key: str, rows: list[dict]) -> dict:
-    """Indirect evidence for a confounded knob: post-route minus pre-PnR setup slack of each full run,
-    grouped by the knob's value. Other things differ between these runs too."""
-    out: dict[str, dict] = {}
-    for d in routing_degradation(rows):
-        row = next(r for r in rows if r["run"] == d["run"])
-        out.setdefault(str(row["_resolved"].get(key)), {})[d["run"]] = d["setup_wns_post_minus_pre"]
-    return out if len(out) > 1 else {}
-
-
-def _short(v):
-    return f"<list of {len(v)}>" if isinstance(v, list) and len(v) > 3 else v
-
-
 def routing_degradation(rows: list[dict]) -> list[dict]:
-    """Per full run: post-route minus pre-PnR setup slack per corner (how much placement, CTS and
-    routing cost). Indirect evidence for repair knobs: runs differ in more than one thing."""
+    """Per full run: post-route minus pre-PnR setup slack per corner (what placement, CTS and routing
+    cost). Indirect evidence for repair knobs: these runs differ in more than one thing."""
     out = []
     for r in rows:
         if not r["post_route"]:
             continue
-        d = {c: round(r["post_route"]["corners"][c]["setup_wns"] - r["synth"]["corners"][c]["setup_wns"], 3)
-             for c in r["post_route"]["corners"] if c in r["synth"]["corners"]
-             and isinstance(r["post_route"]["corners"][c]["setup_wns"], (int, float))
-             and isinstance(r["synth"]["corners"][c]["setup_wns"], (int, float))}
-        out.append({"run": r["run"], "setup_wns_post_minus_pre": d,
-                    "knobs": {x["key"]: _short(x["run"]) for x in r["config_vs_baseline"]}})
+        pre = r["synth"]["corners"]
+        d = {c: round(t["setup_wns"] - pre[c]["setup_wns"], 3) for c, t in r["post_route"]["corners"].items()
+             if c in pre and isinstance(t["setup_wns"], (int, float)) and isinstance(pre[c]["setup_wns"], (int, float))}
+        out.append({"run": r["run"], "table": r["table"], "setup_wns_post_minus_pre": d,
+                    "knobs": {x["key"]: x["run"] for x in r["config_vs_baseline"]}})
+    return out
+
+
+def _by_value(key: str, rows: list[dict]) -> dict:
+    out: dict[str, dict] = {}
+    for d in routing_degradation(rows):
+        row = next(r for r in rows if r["run"] == d["run"])
+        out.setdefault(str(row["_config"].get(key)), {})[d["run"]] = d["setup_wns_post_minus_pre"]
+    return out if len(out) > 1 else {}
+
+
+def _table(rows: list[dict], be: Backend, lessons: dict, baseline: str | None, table: str) -> dict:
+    effects = knob_effects(rows, be)
+    stages = {s: sum(r["stage"] == s for r in rows) for s in sorted({r["stage"] for r in rows})}
+    return {"table": table, "provenance": experience.PROVENANCE[table], "baseline": baseline, "stages": stages,
+            "runs": [{k: v for k, v in r.items() if not k.startswith("_")} for r in rows],
+            "knob_effects": effects, "lessons": check_lessons(lessons, effects, rows) if lessons else [],
+            "routing_degradation": routing_degradation(rows)}
+
+
+def _combine_lessons(imported: list[dict], here: list[dict], design: str) -> list[dict]:
+    """One line per lesson: the imported table's verdict (a hypothesis) and whether eda-agent runs of
+    this design verified it."""
+    mine = {x["key"]: x for x in here}
+    out = []
+    for les in imported:
+        h = mine.get(les["key"])
+        verified = h and h["verdict"] in ("confirmed", "contradicted", "direction_only", "testable")
+        out.append({**les, "source_table": experience.IMPORTED,
+                    "status": (f"verified here by eda-agent runs ({h['verdict']})" if verified else
+                               f"hypothesis: from imported runs of {design}, not verified by an eda-agent run"),
+                    "eda_agent_verdict": h["verdict"] if h else None})
     return out
 
 
@@ -317,42 +346,57 @@ def run_flow_history(project: Project, baseline: str | None = None) -> ToolResul
     if refused := _refuse(tool, project):
         refused.evidence_level = "E0"
         return refused
+    be = backend_of(project)
     base_dir = runs_dir(project)
-    run_dirs = sorted(d for d in base_dir.iterdir() if (d / "resolved.json").is_file()) if base_dir.is_dir() else []
-    if not run_dirs:
-        return ToolResult(tool, "error", "E0", "Nothing was read.", summary=f"no LibreLane runs under {base_dir}",
-                          error_class="no_runs")
-    base_name = baseline or project.pnr.baseline or run_dirs[0].name
-    base_path = base_dir / base_name
-    if not (base_path / "resolved.json").is_file():
+    imported_dirs = sorted(d for d in base_dir.iterdir() if be.is_run(d)) if base_dir.is_dir() else []
+    records = [r for r in experience.eda_records(project) if be.is_run(Path(r["run_dir"]))]
+    if not imported_dirs and not records:
+        return ToolResult(tool, "error", "E0", "Nothing was read.", error_class="no_runs",
+                          summary=f"no {be.name} runs under {base_dir} and none recorded by flow_run for "
+                                  f"'{project.name}'")
+    base_name = baseline or project.pnr.baseline or (imported_dirs[0].name if imported_dirs else None)
+    base_path = base_dir / base_name if base_name else None
+    if imported_dirs and not (base_path and be.is_run(base_path)):
         return ToolResult(tool, "error", "E0", "Nothing was read.", error_class="bad_config",
                           summary=f"baseline {base_name!r} is not a run under {base_dir}")
-    base_resolved = _resolved(base_path)
-    rows = [_row(d, base_resolved, str(base_path)) for d in run_dirs]
-    effects = knob_effects(rows)
-    cfg = Path(project.root) / project.pnr.config
-    lessons = check_lessons(config_lessons(cfg.read_text(errors="replace")), effects, rows) \
-        if cfg.is_file() and cfg.suffix in (".yaml", ".yml") else []
-    degradation = routing_degradation(rows)
-    diags = [Diagnostic("info", "LESSON_" + les["verdict"].upper(), f"{les['key']}: {les['why']}") for les in lessons]
-    diags += [Diagnostic("info", "KNOB_CONFOUNDED", f"{k}: no isolated pair") for k, v in effects.items()
-              if v["verdict"] == "confounded"]
-    table = [{k: v for k, v in r.items() if not k.startswith("_")} for r in rows]
-    for r in table:
-        r["config_vs_baseline"] = [{"key": d["key"], "baseline": _short(d["baseline"]), "run": _short(d["run"])}
-                                   for d in r["config_vs_baseline"]]
-    stages = {s: sum(r["stage"] == s for r in rows) for s in sorted({r["stage"] for r in rows})}
-    summary = (f"{len(rows)} runs ({', '.join(f'{n} {s}' for s, n in stages.items())}); baseline {base_name}; "
-               f"{sum(v['verdict'] == 'isolated' for v in effects.values())} knob(s) with an isolated pair, "
-               f"{sum(v['verdict'] == 'confounded' for v in effects.values())} confounded; lessons: "
-               + (", ".join(f"{x['key']} {x['verdict']}" for x in lessons) or "none in the config"))
+    cfg = _root_path(project, project.pnr.config)
+    lessons = be.lessons(cfg)
+    imp_base = (be.config(base_path), str(base_path)) if imported_dirs else None
+    imp_rows = [_row(be, d, imp_base, experience.IMPORTED, None) for d in imported_dirs]
+    eda_base = (be.config(Path(records[0]["run_dir"])), records[0]["run_dir"]) if records else None
+    eda_rows = [_row(be, Path(r["run_dir"]), eda_base, experience.EDA_AGENT, r) for r in records]
+    tables = {experience.IMPORTED: _table(imp_rows, be, lessons, base_name, experience.IMPORTED),
+              experience.EDA_AGENT: _table(eda_rows, be, lessons, records[0]["run_id"] if records else None,
+                                           experience.EDA_AGENT)}
+    combined = _combine_lessons(tables[experience.IMPORTED]["lessons"], tables[experience.EDA_AGENT]["lessons"],
+                                project.name)
+    others = experience.other_designs(project)
+    verified = [{"knob": k, "summary": p["summary"]} for k, v in tables[experience.EDA_AGENT]["knob_effects"].items()
+                if v["verdict"] == "isolated" for p in v["pairs"]]
+    experience.write_summary(project, {"design": project.name, "backend": be.name, "verified_knobs": verified,
+                                       "written_at": datetime.now().astimezone().isoformat(timespec="seconds")})
+    diags = [Diagnostic("info", "LESSON_" + les["verdict"].upper(), f"{les['key']}: {les['why']} [{les['status']}]")
+             for les in combined]
+    for name, t in tables.items():
+        diags += [Diagnostic("info", "KNOB_CONFOUNDED", f"{name} table, {k}: no isolated pair")
+                  for k, v in t["knob_effects"].items() if v["verdict"] == "confounded"]
+    imp = tables[experience.IMPORTED]
+    summary = (f"design {project.name} ({be.name}): imported table {len(imp_rows)} run(s) "
+               f"({', '.join(f'{n} {s}' for s, n in imp['stages'].items()) or 'none'}), baseline {base_name}; "
+               f"eda_agent table {len(eda_rows)} run(s); "
+               f"{sum(v['verdict'] == 'isolated' for v in imp['knob_effects'].values())} knob(s) with an isolated "
+               f"pair in the imported table; lessons (hypotheses unless verified here): "
+               + (", ".join(f"{x['key']} {x['verdict']}" for x in combined) or "none in the config"))
     return ToolResult(
         tool=tool, status="pass", evidence_level="E0",
-        claim_scope=HISTORY_SCOPE.format(n=len(rows), runs=base_dir), summary=summary,
-        metrics={"baseline": base_name, "runs": table, "knob_effects": effects, "lessons": lessons,
-                 "routing_degradation": degradation, "stages": stages},
+        claim_scope=HISTORY_SCOPE.format(design=project.name, backend=be.name, imported=len(imp_rows), runs=base_dir,
+                                         eda=len(eda_rows)),
+        summary=summary,
+        metrics={"design": project.name, "backend": be.name, "tables": tables, "lessons": combined,
+                 "hypotheses_from_other_designs": others,
+                 "experience_dir": str(experience.experience_dir(project))},
         diagnostics=diags[:30], diagnostics_total=len(diags),
-        artifacts=[artifact(d / "resolved.json") for d in run_dirs] + ([artifact(cfg)] if cfg.is_file() else []),
-        tool_versions={"librelane": ", ".join(sorted({str(r["librelane_version"]) for r in rows}))},
+        artifacts=[artifact(p) for p in (_config_file(d) for d in imported_dirs) if p] + ([artifact(cfg)] if cfg.is_file() else []),
+        tool_versions={be.name: ", ".join(sorted({str(r["backend_version"]) for r in imp_rows + eda_rows}))},
         residual_risk=list(HISTORY_RISK),
     )
