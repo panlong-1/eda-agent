@@ -36,6 +36,14 @@ copy_exclude = [".git", "build", "librelane/runs", "regress/results", ".torv_las
 jobs = 4
 timeout_s = 1500   # per mutant; the whole case list (survivor re-check) takes about 7 min
 
+# New tests (write_case, score_tests): how ONE test file runs; pass/fail as for the regression.
+# The detailed output (with [PASS]/[PERF]) is the case's sim log; register is the case-list line
+# the patch adds. New tests are written only to generated/<run_id>/ and run only in copies.
+[tests]
+run = ["scripts/run_case.sh", "--max-cycles", "50000", "{file}"]
+log = "build/sim/soc/{name}/{name}.sim.log"
+register = "{name}  asm  {path}  50000"
+
 # Performance (perf): the testbench prints these [PERF] lines at the end of every case
 # (scripts/perf_summary.py reads the same lines). The baseline, projects/torv.perf-baseline.json,
 # is written only by a person with `eda-agent perf-baseline`.

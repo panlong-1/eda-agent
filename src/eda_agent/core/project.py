@@ -120,6 +120,9 @@ class FlowConfig:
     # corner name -> Liberty file; STA runs on each, the worst one decides. Default: liberty only.
     corners: dict = field(default_factory=dict, hash=False, compare=False)
     timeout_s: int = 1800
+    # Where the SDC came from when it is not the design's own (e.g. "hand translation of the
+    # course DC constraints"); copied into each receipt and shown to the approver.
+    sdc_origin: str = ""
 
     def __post_init__(self) -> None:
         if self.frontend not in ("slang", "verilog"):
@@ -145,6 +148,21 @@ class MutationConfig:
     def __post_init__(self) -> None:
         if self.jobs < 1 or self.timeout_s < 1 or self.equiv_cycles < 1:
             raise ValueError("mutation jobs, timeout_s and equiv_cycles must be positive")
+
+
+@dataclass(frozen=True)
+class NewTestsConfig:
+    """How one new test file is run ([tests]); used by write_case and score_tests. Pass/fail is
+    judged as for the regression: exit status plus [regress] pass/fail/summary regexes."""
+    run: tuple[str, ...]        # runs ONE test file: {file} (absolute path), {name} (its stem)
+    log: str = ""               # the test's detailed output, relative to the root ({name}); default:
+                                # the command's own output
+    register: str = ""          # line the patch adds to [regress] case_list ({name}, {path})
+    examples: tuple[str, ...] = ()  # cases to imitate; default: those that kill most mutants of the file
+
+    def __post_init__(self) -> None:
+        if not any("{file}" in a for a in self.run):
+            raise ValueError("[tests] run must contain {file}, e.g. [\"scripts/run_case.sh\", \"{file}\"]")
 
 
 @dataclass(frozen=True)
@@ -191,6 +209,16 @@ class Project:
     mutation: MutationConfig | None = None  # None: mutate refuses (no [mutation] section)
     perf: PerfConfig | None = None          # None: perf refuses (no [perf] section)
     pnr: PnrConfig | None = None            # None: flow_report and flow_run refuse (no [pnr] section)
+    tests: NewTestsConfig | None = None     # None: write_case / score_tests refuse (no [tests])
+
+
+def _tests(data: dict | None) -> NewTestsConfig | None:
+    if data is None:
+        return None
+    unknown = set(data) - set(NewTestsConfig.__dataclass_fields__)
+    if unknown:
+        raise ValueError(f"unknown [tests] key(s) {sorted(unknown)}")
+    return NewTestsConfig(**{k: tuple(v) if k in ("run", "examples") else v for k, v in data.items()})
 
 
 def _perf(data: dict | None, config: Path) -> PerfConfig | None:
@@ -249,6 +277,7 @@ def load_project(path: str | Path) -> Project:
         mutation=_mutation(data.get("mutation")),
         perf=_perf(data.get("perf"), Path(path)),
         pnr=load_pnr(data.get("pnr")),
+        tests=_tests(data.get("tests")),
         lint=LintConfig(
             top=lint["top"],
             filelists=tuple(lint.get("filelists", ())),

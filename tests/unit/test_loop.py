@@ -30,7 +30,9 @@ async def test_tool_round_trip_and_usage(tmp_path):
     assert seen == ["lint"] and model.received[0][0].call_id == "c1"
     kinds = [json.loads(line)["kind"] for line in trace.read_text().splitlines()]
     assert kinds == ["start", "turn", "tool", "turn", "gate", "end"]
-    assert report.checks == [{"tool": "lint", "args": {}, "result": {"status": "pass", "evidence_level": "E0"}}]
+    (check,) = report.checks
+    assert check.pop("duration_s") >= 0
+    assert check == {"tool": "lint", "args": {}, "result": {"status": "pass", "evidence_level": "E0"}}
 
 
 async def test_retry_budget_stops_after_two_consecutive_errors():

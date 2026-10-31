@@ -138,6 +138,89 @@ def test_doctor_and_mcp(tmp_path):
     assert not any("baseline" in name for name in tools)  # no tool writes the baseline
 
 
+def _receipt(res: ToolResult) -> dict:
+    """The smallest agent-run receipt that levels.assess and the human gate accept, around one perf result."""
+    d = res.to_dict()
+    return {"run_id": "r", "status": "done", "stop_reason": "end", "tool_errors": 0,
+            "gate": {"status": "passed", "rewrites": 0, "decisions": []},
+            "checks_run": [{"tool": "perf", "args": {}, "status": d["status"], "evidence_level": "E2",
+                            "summary": d["summary"], "metrics": d["metrics"], "tool_versions": {"sh": "1"}}],
+            "not_run": {"described_but_not_run": [], "cases_not_run": [], "lint_run": True}}
+
+
+def test_intentional_slowdown_is_an_error_then_an_approved_baseline(tmp_path):
+    """change -> +30 cycles -> Error (not Fatal) -> approve with a reason -> baseline loosened -> next run clean."""
+    from eda_agent.agent.human_gate import ApprovalError, decide, request_approval
+    from eda_agent.agent.levels import assess
+    toml = _toy(tmp_path, {"a": 100, "b": 200})
+    p = load_project(toml)
+    record_baseline(p, _save(run_perf(p, log_dir=tmp_path / "l"), tmp_path / "r0.json"), by="Pan", reason="first")
+
+    _toy(tmp_path, {"a": 100, "b": 230})  # a functional fix that costs 30 cycles on b
+    slow = run_perf(p, log_dir=tmp_path / "l")
+    assert slow.status == "fail" and slow.metrics["slower"] == ["b"] and not slow.metrics["failed_cases"]
+    issues = assess(_receipt(slow))
+    assert not [i for i in issues if i.level == "fatal"], [i.text for i in issues]
+    err = [i for i in issues if i.level == "error"]
+    assert len(err) == 1 and err[0].text.startswith("perf: b is slower than the approved baseline (+30 cycles")
+    r = request_approval(_receipt(slow), "final report", "why")
+    with pytest.raises(ApprovalError, match="--reason"):
+        decide(json.loads(json.dumps(r)), "approve", by="Pan")
+    assert decide(r, "approve", by="Pan", reason="intentional: fix X costs +30 cycles on b")["status"] == "approved"
+
+    base, loosened = record_baseline(p, _save(slow, tmp_path / "r1.json"), by="Pan", allow_loosen=True,
+                                     reason="intentional: fix X costs +30 cycles on b", justified_by="run r")
+    assert loosened == ["b: 200 -> 230 cycles"] and base["justified_by"] == "run r"
+    assert base["history"][-1]["cases"]["b"] == 200 and base["history"][-1]["recorded_by"] == "Pan"
+
+    after = run_perf(p, log_dir=tmp_path / "l")
+    assert after.status == "pass" and after.metrics["comparison"]["b"]["verdict"] == "same"
+    assert after.metrics["baseline_loosened"] == ["b: 200 -> 230 cycles"]
+    issues = assess(_receipt(after))
+    assert not [i for i in issues if i.level in ("fatal", "error")]
+    note = next(i for i in issues if "loosened" in i.text)
+    assert note.level == "warning" and "by Pan: intentional: fix X costs +30 cycles on b" in note.text
+
+    # R7: an accepted slowdown names perf and the approved baseline change
+    ok = "perf: b takes 230 cycles, an accepted slowdown recorded in the baseline loosened by Pan."
+    assert check_perf(ok, [after.to_dict()]) == []
+    assert "baseline" in check_perf("perf: b takes 230 cycles, an accepted slowdown.", [after.to_dict()])[0]
+    assert "loosened" in check_perf(ok, [slow.to_dict()])[0]  # before a person loosened it
+
+
+def test_timing_tests_live_in_their_own_list(tmp_path):
+    from eda_agent.tools.perf import timing_cases, timing_list
+    from eda_agent.tools.testcase import make_patch
+    toml = _toy(tmp_path, {"a": 100, "b": 200})
+    root = tmp_path / "design"
+    (root / "cases.list").write_text("a  tests/a.sh\nb  tests/b.sh\n")
+    toml.write_text(toml.read_text().replace('[[regress.cases]]\nname = "a"\nargs = ["tests/a.sh"]\n'
+                                             '[[regress.cases]]\nname = "b"\nargs = ["tests/b.sh"]\n',
+                                             'case_list = "cases.list"\ncase_flag = ""\n')
+                    + '[tests]\nrun = ["sh", "{file}"]\nregister = "{name}  {path}"\n')
+    p = load_project(toml)
+    assert timing_list(p) == "cases_perf.list" and timing_cases(p) == {}
+    test = tmp_path / "t.sh"
+    test.write_text("# kind=perf\necho '[PERF] cycles=77 instr=10 ipc=0.1'\n")
+    patch, dest = make_patch(p, test, "t1", ["a"], kind="perf")
+    assert "+++ b/cases_perf.list" in patch and "--- a/cases.list" not in patch
+    assert "+# eda-agent: implementation-specific timing tests" in patch
+    (root / "tests" / "t1.sh").write_text(test.read_text())  # as if a person applied the patch
+    (root / "cases_perf.list").write_text("t1  tests/t1.sh\n")
+    assert timing_cases(p) == {"t1": "tests/t1.sh"}
+    res = run_perf(p, cases=["t1"], log_dir=tmp_path / "l")
+    assert res.metrics["cases"]["t1"]["cycles"] == 77
+
+
+def test_perf_killed_mutants_are_not_called_bugs():
+    from eda_agent.agent.gate import check_tests
+    mutate = {"tool": "mutate", "status": "pass", "evidence_level": "E0",
+              "metrics": {"mutant_list": [{"id": 7, "status": "perf_killed"}, {"id": 6, "status": "killed"}]}}
+    assert check_tests("mutate: the cases catch the bug in mutant 6.", [mutate]) == []
+    assert "cycle count" in check_tests("mutate: the cases catch the bug in mutant 7.", [mutate])[0]
+    assert check_tests("mutate: the cases catch mutant 7 by its cycle count (slower).", [mutate]) == []
+
+
 def test_no_perf_section_refuses(tmp_path):
     toml = tmp_path / "p.toml"
     toml.write_text(f'name = "p"\nroot = "{tmp_path}"\n[lint]\ntop = "t"\n[regress]\ncmd = ["true"]\n')

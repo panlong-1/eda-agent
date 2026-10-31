@@ -16,11 +16,14 @@ import hashlib
 import json
 import math
 import re
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
 from ..core.envelope import Diagnostic, ToolResult, artifact
-from ..core.project import PerfConfig, Project, case_specs
+from ..core.proc import check_allowed, run
+from ..core.project import PerfConfig, Project, case_specs, project_env
+from .formats.exitcode import judge_exitcode
 from .regress import LOG_DIR, run_regress
 
 CLAIM_SCOPE = (
@@ -95,6 +98,37 @@ def sha256(path: str | Path) -> str | None:
     return hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None
 
 
+def timing_list(project: Project) -> str:
+    """Where approved kind=perf tests are listed: <case list>_perf next to the case list, e.g.
+    regress/cases/soc_perf.list. They always pass on their own (they check results, not cycles), so
+    they stay out of the functional regression; perf measures them against the baseline."""
+    cl = project.regress.case_list
+    return str(Path(cl).with_name(f"{Path(cl).stem}_perf{Path(cl).suffix}")) if cl else ""
+
+
+def timing_cases(project: Project) -> dict[str, str]:
+    """name -> test file of the approved timing tests (empty when there is no such list)."""
+    tl = timing_list(project)
+    if not tl or not (project.root / tl).is_file() or project.tests is None:
+        return {}
+    specs = case_specs(replace(project, regress=replace(project.regress, case_list=tl)))
+    return {s.name: s.source for s in specs if s.source}
+
+
+def run_timing_case(project: Project, name: str, source: str) -> tuple[str, dict]:
+    """One timing test run with [tests] run, in the project root like the regression: (PASS|FAIL, numbers)."""
+    t, cfg = project.tests, project.perf
+    assert t is not None and cfg is not None
+    cmd = [a.format(file=str((project.root / source).resolve()), name=name) for a in t.run]
+    if check_allowed(cmd, project.root, project.allowed_commands):
+        return "FAIL", {}
+    proc = run(cmd, project.root, project_env(project), project.regress.timeout_s)
+    log = project.root / t.log.format(name=name) if t.log else None
+    text = proc.output + ("\n" + log.read_text(errors="replace") if log and log.is_file() else "")
+    status, _ = judge_exitcode(proc.returncode, text, project.regress)
+    return status, parse_perf(text, cfg.patterns)
+
+
 def run_perf(project: Project, cases: list[str] | None = None, log_dir: Path = LOG_DIR) -> ToolResult:
     cfg = project.perf
     if cfg is None:
@@ -102,8 +136,9 @@ def run_perf(project: Project, cases: list[str] | None = None, log_dir: Path = L
                           summary=f"project '{project.name}' has no [perf] section (patterns, key, cases): "
                                   "performance numbers are not set up for it", error_class="not_configured")
     known = [s.name for s in case_specs(project)]
-    chosen = list(cases or cfg.cases or known)
-    if bad := [c for c in chosen if c not in known]:
+    timing = timing_cases(project)  # approved kind=perf tests: measured, never part of the regression
+    chosen = list(cases or [*(cfg.cases or known), *timing])
+    if bad := [c for c in chosen if c not in known and c not in timing]:
         return ToolResult("perf", "error", "E2", "Nothing was measured.", error_class="bad_request",
                           summary=f"unknown case(s) {bad}; call list_regress_cases first")
     baseline = load_baseline(cfg.baseline)
@@ -112,12 +147,20 @@ def run_perf(project: Project, cases: list[str] | None = None, log_dir: Path = L
     scope = CLAIM_SCOPE.format(cases=", ".join(chosen), key=cfg.key,
                                ref=f", against the approved baseline (sha256 {sha256(cfg.baseline)[:12]}…)"
                                if baseline else "; no approved baseline, so nothing is called slower")
-    res = run_regress(project, chosen, log_dir=log_dir)
+    regress_part = [c for c in chosen if c in known]
+    res = run_regress(project, regress_part, log_dir=log_dir) if regress_part else \
+        ToolResult("regress", "pass", "E2", "", metrics={"passed_cases": [], "failed_cases": []})
     if res.status in ("error", "timeout"):
         return ToolResult("perf", res.status, "E2", scope, summary=f"regression {res.status}: {res.summary}",
                           tool_versions=res.tool_versions, error_class=res.error_class)
     values = case_perf(project, res)
     failed = set(res.metrics.get("failed_cases", []))
+    for c in chosen:
+        if c in timing and c not in known:
+            status, numbers = run_timing_case(project, c, timing[c])
+            values[c] = numbers
+            if status != "PASS":
+                failed.add(c)
     good = {c: v for c, v in values.items() if c not in failed}
     no_number = sorted(c for c, v in good.items() if cfg.key not in v)
     comparison = compare(good, baseline["cases"], cfg, baseline.get("tolerance_pct", cfg.tolerance_pct)) \
@@ -153,7 +196,13 @@ def run_perf(project: Project, cases: list[str] | None = None, log_dir: Path = L
                  "comparison": comparison, "slower": slower, "faster": faster,
                  "passed_cases": sorted(good), "failed_cases": sorted(failed),
                  "baseline_sha256": sha256(cfg.baseline) if baseline else None,
-                 "baseline_by": baseline.get("recorded_by") if baseline else None},
+                 "baseline_by": baseline.get("recorded_by") if baseline else None,
+                 "baseline_recorded_at": baseline.get("recorded_at") if baseline else None,
+                 "baseline_reason": baseline.get("reason") if baseline else None,
+                 # what the latest baseline change gave up (old -> new), with its reason, so an accepted
+                 # slowdown stays visible in every later result
+                 "baseline_loosened": baseline.get("loosened") if baseline else None,
+                 "baseline_justified_by": baseline.get("justified_by") if baseline else None},
         diagnostics=diags,
         diagnostics_total=len(diags),
         artifacts=res.artifacts + ([artifact(cfg.baseline)] if baseline else []),
@@ -163,7 +212,7 @@ def run_perf(project: Project, cases: list[str] | None = None, log_dir: Path = L
 
 
 def record_baseline(project: Project, source: Path, by: str, reason: str = "", tolerance_pct: float | None = None,
-                    allow_loosen: bool = False) -> tuple[dict, list[str]]:
+                    allow_loosen: bool = False, justified_by: str = "") -> tuple[dict, list[str]]:
     """A person records a perf result as the baseline. Returns (new baseline, what it loosens).
     Raises ValueError when the source is not a clean perf result, or when it loosens the current
     baseline without allow_loosen and a reason."""
@@ -199,6 +248,7 @@ def record_baseline(project: Project, source: Path, by: str, reason: str = "", t
              "tolerance_pct": tol, "cases": cases, "recorded_by": by,
              "recorded_at": datetime.now().astimezone().isoformat(timespec="seconds"),
              "reason": reason, "loosened": loosened,
+             "justified_by": justified_by,  # e.g. the run/receipt of the functional fix that costs cycles
              "source": {"path": str(source), "sha256": sha256(source)}}
     history = (old or {}).get("history", [])
     if old:

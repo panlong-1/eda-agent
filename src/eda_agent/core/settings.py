@@ -1,9 +1,10 @@
 """Where the CLI finds its inputs when the command line leaves them out.
 
 - The project config: --project, else `eda-agent.toml` in the current directory or a parent.
-- Personal defaults (provider, model, effort, review): ~/.config/eda-agent/config.toml, e.g.
+- Personal defaults (provider, model, effort, review, narrate): ~/.config/eda-agent/config.toml, e.g.
       provider = "deepseek"
       review = "I2"
+      narrate = true       # add a model-written summary to each receipt (needs the API key)
   Command-line options always win.
 """
 from __future__ import annotations
@@ -13,7 +14,7 @@ import tomllib
 from pathlib import Path
 
 PROJECT_FILE = "eda-agent.toml"
-USER_KEYS = ("provider", "model", "effort", "review", "review_provider", "review_model")
+USER_KEYS = ("provider", "model", "effort", "review", "review_provider", "review_model", "narrate")
 
 
 def user_config_path() -> Path:
