@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 
 from ..gate import check_report
 from ..loop import Budget, run_agent
+from ..model_output import results_from_receipt
 
 PROMPT = "receipt_summary.v1"
 # Fields the model does not get: the decision (the summary is not about it), the trace path,
@@ -32,29 +33,13 @@ def model_view(r: dict) -> dict:
     return view
 
 
-def gate_results(r: dict) -> list[dict]:
-    """Tool results as the gate expects them, rebuilt from the receipt's checks."""
-    results = []
-    for c in r["checks_run"]:
-        metrics = dict(c.get("metrics") or {})
-        if c.get("timing"):
-            metrics = {**{k: v for k, v in c["timing"].items() if k != "void"},
-                       "sdc_sha256": c.get("sdc_sha256"), **metrics}
-        results.append({"tool": c["tool"], "status": c["status"], "evidence_level": c["evidence_level"],
-                        "summary": c["summary"], "claim_scope": c["claim_scope"], "metrics": metrics})
-    described = r["not_run"].get("described_but_not_run") or []
-    if described:  # so that R4 asks for them under residual risk, as it did for the author
-        results.append({"tool": "describe_case", "status": "ok", "cases": [{"name": n} for n in described]})
-    return results
-
-
 async def _no_tools(name: str, args: dict) -> tuple[str, bool]:
     return "no tools are available here", True
 
 
 async def write_narrative(r: dict, model, system: str, *, provider: str, prompt: str = PROMPT,
                           max_rewrites: int = 1) -> dict:
-    results = gate_results(r)
+    results = results_from_receipt(r)
     task = ("Write the summary.\n\nReceipt data (JSON):\n```json\n"
             f"{json.dumps(model_view(r), ensure_ascii=False, indent=1)}\n```")
     report = await run_agent(model, [], _no_tools, task, system,

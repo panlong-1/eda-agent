@@ -17,11 +17,12 @@ any level, or alone.
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from .loop import Budget, Executor, run_agent
+from .model_output import VERDICTS  # noqa: F401  (kept importable from here)
+from .model_output import parse_checklist_review as parse_review
 from .models import ModelAdapter, ToolSpec
 
 LEVELS = ("I0", "I1", "I2", "I3")
@@ -36,7 +37,6 @@ CONTEXT = {
 REVIEW_TOOLS = ("lint", "list_regress_cases", "describe_case", "regress", "rtl_rules", "synth", "check_sdc",
                 "flow_report", "flow_history")
 SEVERITIES = ("high", "medium", "low", "info")
-VERDICTS = ("accept_with_findings", "accept", "reject")  # longest first, for matching
 
 CHECKLIST_STEP = (
     "Step 1 of 2. Before judging anything, write the checklist you will review against: the "
@@ -53,11 +53,6 @@ FINDINGS_STEP = (
 )
 TOOLS_NOTE = (" You may call the tools to re-check facts yourself; prefer that over trusting a "
               "result you were shown.")
-
-_HEADING = re.compile(r"^\s*(?:#+\s*|\*\*)?(checklist|findings|verdict)\b", re.I | re.M)
-_ITEM = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+(?:\[[ xX]\]\s*)?(.+?)\s*$", re.M)
-_FINDING = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+\[(high|medium|low|info)\]\s*(.+?)\s*$", re.I | re.M)
-
 
 @dataclass
 class Review:
@@ -155,28 +150,6 @@ def build_context(level: str, run: AuthorRun) -> str:
     if not run.tools:
         lines.append("\n(the author ran no tools)")
     return "\n".join(lines)
-
-
-# ---------------------------------------------------------------- parsing the answer
-
-def _section(text: str, name: str) -> str:
-    heads = list(_HEADING.finditer(text))
-    for i, h in enumerate(heads):
-        if h.group(1).lower() == name:
-            end = heads[i + 1].start() if i + 1 < len(heads) else len(text)
-            return text[h.end():end]
-    return ""
-
-
-def parse_review(checklist_text: str, findings_text: str) -> tuple[list[str], list[dict], str, bool]:
-    checklist = [m.group(1) for m in _ITEM.finditer(_section(checklist_text, "checklist") or checklist_text)]
-    findings_part = _section(findings_text, "findings")
-    findings = [{"severity": m.group(1).lower(), "text": m.group(2)} for m in _FINDING.finditer(findings_part)]
-    verdict_part = _section(findings_text, "verdict").lower()
-    verdict = next((v for v in VERDICTS if v in verdict_part), "")
-    # Checklist first: the first turn must have a checklist and no findings section of its own.
-    ok = bool(checklist) and not _section(checklist_text, "findings") and bool(verdict) and bool(findings_part)
-    return checklist, findings, verdict, ok
 
 
 # ---------------------------------------------------------------- the model reviewer

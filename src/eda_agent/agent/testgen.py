@@ -15,11 +15,12 @@ by that person. A gap that could not be closed is reported as such, with what wa
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 
-from .gate import check_report
+from .model_output import add_usage, gate_decision
+from .model_output import last_code_block as extract_block
+from .model_output import parse_test_review as parse_review
 from .models import ModelAdapter
 
 ATTEMPTS = 3   # new tests per mutant
@@ -31,14 +32,6 @@ PROMPT = "testgen.v3"
 REVIEW_PROMPT = "testgen-review.v1"
 
 Execute = Callable[[str, dict], Awaitable[tuple[str, bool]]]
-_BLOCK = re.compile(r"```[^\n]*\n(.*?)```", re.S)
-_FIELD = re.compile(r"^(architectural_only|expected_values_checked|verdict|notes):\s*(.*)$", re.M | re.I)
-
-
-def extract_block(text: str) -> str | None:
-    """The last fenced code block of a reply."""
-    blocks = _BLOCK.findall(text or "")
-    return blocks[-1] if blocks else None
 
 
 def render_task(ctx: dict) -> str:
@@ -83,12 +76,6 @@ class TargetResult:
     diff: str = ""          # the mutant's own patch, as test_context gave it
 
 
-def _add(usage: dict, turn_usage: dict) -> None:
-    for k, v in (turn_usage or {}).items():
-        if isinstance(v, (int, float)):
-            usage[k] = usage.get(k, 0) + v
-
-
 async def close_gap(model: ModelAdapter, execute: Execute, system: str, *, run_id: str, mutate_run: str,
                     mutant: int, usage: dict, attempts: int = ATTEMPTS, fixes: int = FIXES) -> TargetResult:
     out = TargetResult(mutant)
@@ -104,7 +91,7 @@ async def close_gap(model: ModelAdapter, execute: Execute, system: str, *, run_i
         passed_file = ""
         for f in range(fixes + 1):
             turn = await model.step()
-            _add(usage, turn.usage)
+            add_usage(usage, turn.usage)
             code = extract_block(turn.text)
             t = Try(a, f, reply=(turn.text or "")[-1500:])
             out.tries.append(t)
@@ -167,19 +154,13 @@ async def close_gap(model: ModelAdapter, execute: Execute, system: str, *, run_i
     return out
 
 
-def parse_review(text: str) -> dict:
-    got = {k.lower(): v.strip() for k, v in _FIELD.findall(text or "")}
-    got["format_ok"] = {"architectural_only", "verdict"} <= set(got)
-    return got
-
-
 async def review_test(model: ModelAdapter, system: str, test_text: str, patch: str, score: dict, usage: dict) -> dict:
     facts = {k: (score.get("metrics") or {}).get(k) for k in
              ("original", "targets", "killed", "perf_killed", "kind", "kill_rate_before", "kill_rate_after")}
     model.start(system, [], f"## Mutant diff\n```diff\n{patch}```\n\n## The test\n```\n{test_text}\n```\n\n"
                             f"## Measured facts (score_tests)\n```json\n{json.dumps(facts, indent=2)}\n```")
     turn = await model.step()
-    _add(usage, turn.usage)
+    add_usage(usage, turn.usage)
     return parse_review(turn.text) | {"text": turn.text}
 
 
@@ -213,7 +194,7 @@ def report_text(results: list[TargetResult]) -> str:
 def gate_results(results: list[TargetResult]) -> dict:
     report = report_text(results)
     envelopes = [s for r in results for s in r.scores]
-    return {"report": report, "decision": check_report(report, envelopes).to_dict()}
+    return {"report": report, "decision": gate_decision(report, envelopes)}
 
 
 def to_dict(r: TargetResult) -> dict:
