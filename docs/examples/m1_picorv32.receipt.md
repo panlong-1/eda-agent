@@ -1,17 +1,24 @@
 # Review summary · m1_picorv32
 
-> Written by plain code from the receipt data (no model). Everything else is in the details below; quotes and tool output stay in their original language.
+> Written by plain code from the receipt data (no model). The tables below are the record; the full receipt is at the end.
 
-**In one line:** 2 of 2 check(s) passed; gate passed; 0 serious and 1 warning item(s) to look at.
+**Fatal 0 · Error 1 · Warning 3** — 2 of 2 check(s) passed; gate passed.
 
-- **Task**: Lint the core and run the regression; report what passed
-- **What you decide**: No human decision was requested for this run (status done); nothing to decide.
-- **Status**: done (no approval requested) · picorv32 · deepseek / deepseek-v4-pro
+- **Task:** Lint the core and run the regression; report what passed
+- **What you decide:** No human decision was requested for this run (status done); nothing to decide.
+- **Status:** done (no approval requested) · picorv32 · deepseek / deepseek-v4-pro
 
 ## Look at these before approving
 
-- ⚠️ No tool versions recorded for: lint, regress. The result cannot be tied to a tool release.
-- ℹ️ No independent review was run: only the gate checked the report.
+- 🟥 **Error**: No tool versions recorded for: lint, regress; the result cannot be tied to a tool release
+
+<details><summary>3 warning(s)</summary>
+
+- 🟨 Warning: lint: 34 warning(s)
+- 🟨 Warning: regress: pass/fail comes from the testbench's own self-check or exit status, not from separate results
+- 🟨 Warning: No independent review was run: only the gate checked the report
+
+</details>
 
 ## Checks
 

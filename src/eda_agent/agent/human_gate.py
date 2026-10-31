@@ -3,12 +3,19 @@
 Nothing waits on input(). A run that needs approval ends with its receipt in status
 `awaiting_approval` and an approval record `pending`; a person later runs
 
-    eda-agent approve <run_id> [--by NAME]
+    eda-agent approve <run_id> [--by NAME] [--reason "..."] [--override]
     eda-agent reject  <run_id> --reason "..."
+    eda-agent pending <run_id> --note "..."      (decide later: a note, the run stays open)
 
-which writes the decision, who made it and when, and the sha256 of the receipt content
-they decided on, back into the same receipt. A decision is final: a rejected run is fixed by
-a new run, not by approving the old one.
+(or clicks the same in `eda-agent review-ui`), which writes the decision, who made it and
+when, and the sha256 of the receipt content they decided on, back into the same receipt.
+What `approve` needs depends on the receipt's issue levels (agent/levels.py):
+
+    Fatal > 0    --override and --reason (the override is recorded)
+    Error > 0    --reason (why the errors are acceptable)
+    Warnings     a plain approve
+
+A decision is final: a rejected run is fixed by a new run, not by approving the old one.
 """
 from __future__ import annotations
 
@@ -20,6 +27,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 AWAITING = "awaiting_approval"
+# Fields left out of the decided content: what the decision itself writes, plus derived or
+# advisory data that may be (re)written later (issue levels, the model-written summary).
+NOT_HASHED = ("approval", "status", "agent_status", "levels", "narrative", "narratives")
 
 
 def _now() -> str:
@@ -27,10 +37,9 @@ def _now() -> str:
 
 
 def content_sha256(receipt: dict) -> str:
-    """Hash of what the person decided on: the receipt without the fields the decision itself
-    writes (approval, status, agent_status), so it can be re-checked on the saved receipt.
-    Model-written summaries (narratives) are advisory and may be added later; they are left out."""
-    body = {k: v for k, v in receipt.items() if k not in ("approval", "status", "agent_status", "narratives")}
+    """Hash of what the person decided on: the receipt without NOT_HASHED, so it can be
+    re-checked on the saved receipt."""
+    body = {k: v for k, v in receipt.items() if k not in NOT_HASHED and not k.startswith("_")}
     return hashlib.sha256(json.dumps(body, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
@@ -56,37 +65,71 @@ class ApprovalError(ValueError):
     pass
 
 
-def decide(receipt: dict, decision: str, by: str, reason: str = "", override_gate: bool = False) -> dict:
-    """Record approve/reject. Refuses runs that are not waiting for a person, decisions without
-    a reason where one is needed, and approving a gate-rejected run without override_gate."""
-    if decision not in ("approve", "reject"):
-        raise ApprovalError(f"unknown decision {decision!r}")
+def _open_approval(receipt: dict) -> dict:
+    """The approval record of a run a person may still decide; refuses decided or other runs."""
     approval = receipt.get("approval")
     status = receipt.get("status")
     if approval and approval.get("status") in ("approved", "rejected"):
         raise ApprovalError(f"run {receipt['run_id']} was already {approval['status']} by {approval['by']} "
                             f"at {approval['at']}; decisions are final, start a new run")
+    if status not in (AWAITING, "pending"):
+        raise ApprovalError(f"run {receipt['run_id']} has status {status!r}; only runs awaiting approval "
+                            "(or gate-rejected runs, with --override) can be decided")
+    return approval or {"status": "pending", "step": "final report", "why": "decided without a request",
+                        "requested_at": None}
+
+
+def _items(issues, level: str) -> str:
+    picked = [i.text for i in issues if i.level == level]
+    return "; ".join(picked[:3]) + (f"; … ({len(picked) - 3} more)" if len(picked) > 3 else "")
+
+
+def decide(receipt: dict, decision: str, by: str, reason: str = "", override_gate: bool = False,
+           override: bool = False, via: str = "") -> dict:
+    """Record approve/reject. Refuses runs that are not waiting for a person, a rejection without
+    a reason, and an approval the issue levels do not allow (see the module docstring)."""
+    from .levels import assess, counts  # levels uses content_sha256 from here
+    if decision not in ("approve", "reject"):
+        raise ApprovalError(f"unknown decision {decision!r}")
+    override = override or override_gate
+    approval = _open_approval(receipt)
+    status = receipt.get("status")
     if decision == "reject" and not reason:
         raise ApprovalError("a rejection needs --reason")
-    if status != AWAITING:
-        if status == "pending" and decision == "approve" and not override_gate:
+    issues = assess(receipt)
+    c = counts(issues)
+    if decision == "approve":
+        if status == "pending" and not override:
             raise ApprovalError(f"run {receipt['run_id']} was rejected by the evidence gate (status pending); "
-                                "approving it overrides the gate: pass --override-gate and --reason")
-        if status == "pending" and override_gate and not reason:
-            raise ApprovalError("overriding the evidence gate needs --reason")
-        if status not in ("pending",):
-            raise ApprovalError(f"run {receipt['run_id']} has status {status!r}; only runs awaiting approval "
-                                "(or gate-rejected runs, with --override-gate) can be decided")
-    approval = approval or {"step": "final report", "why": "decided without a request", "requested_at": None}
+                                "approving it overrides the gate: pass --override and --reason")
+        if c["fatal"] and not override:
+            raise ApprovalError(f"run {receipt['run_id']} has {c['fatal']} Fatal item(s) ({_items(issues, 'fatal')}); "
+                                "approving it needs --override and --reason")
+        if override and not reason:
+            raise ApprovalError("an override needs --reason")
+        if c["error"] and not reason:
+            raise ApprovalError(f"run {receipt['run_id']} has {c['error']} Error item(s) ({_items(issues, 'error')}); "
+                                "approving it needs --reason saying why they are acceptable")
     approval.update({
         "status": "approved" if decision == "approve" else "rejected",
-        "by": by, "at": _now(), "reason": reason or None,
+        "by": by + (f" (via {via})" if via else ""), "at": _now(), "reason": reason or None,
         "overrode_gate": status == "pending" and decision == "approve",
+        "override": decision == "approve" and bool(c["fatal"] or status == "pending"),
+        "levels": c,
         "receipt_sha256": content_sha256(receipt),
     })
     receipt.setdefault("agent_status", status)
     receipt["approval"] = approval
     receipt["status"] = approval["status"]
+    return receipt
+
+
+def defer(receipt: dict, by: str, note: str = "", via: str = "") -> dict:
+    """'Pending': decide later. Adds a note to the approval record; the run stays open."""
+    approval = _open_approval(receipt)
+    approval.setdefault("notes", []).append({"by": by + (f" (via {via})" if via else ""), "at": _now(),
+                                            "note": note or None})
+    receipt["approval"] = approval
     return receipt
 
 

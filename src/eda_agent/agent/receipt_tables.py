@@ -12,65 +12,65 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .levels import DIAG_LEVEL, FINDING_LEVEL, TITLE
+
 SEVERITIES = ("high", "medium", "low", "info")
 _LOCATION = re.compile(r"[\w./-]+\.(?:sv|svh|v|vh|vhd|sdc|tcl|S|s|c|h|py|yaml|toml)(?::\d+)?(?![\w])")
 
 TT = {
-    "data": ("Data", "数据"),
-    "from_trace": ("Numbers marked † come from the run's trace {trace} (this receipt predates them); "
+    "data": "Data",
+    "from_trace": "Numbers marked † come from the run's trace {trace} (this receipt predates them); "
                    "the receipt .json is unchanged.",
-                   "带 † 的数字来自本次运行的 trace 文件 {trace}（这份收据早于这些字段）；收据 .json 没有改动。"),
     # regress
-    "regress": ("Simulation (regress)", "仿真回归（regress）"),
-    "cases_asked": ("cases asked", "要求的用例"), "run": ("run", "运行"), "passed": ("passed", "通过"),
-    "failed": ("failed", "失败"), "skipped": ("skipped", "跳过"), "subtests": ("testbench sub-tests", "测试平台子测试"),
-    "failed_cases": ("failed cases", "失败的用例"), "format": ("result format", "结果格式"),
-    "sub_fmt": ("{p} passed, {f} failed of {t}", "{t} 个中通过 {p}、失败 {f}"),
+    "regress": "Simulation (regress)",
+    "cases_asked": "cases asked", "run": "run", "passed": "passed",
+    "failed": "failed", "skipped": "skipped", "subtests": "testbench sub-tests",
+    "failed_cases": "failed cases", "format": "result format",
+    "sub_fmt": "{p} passed, {f} failed of {t}",
     # lint
-    "lint": ("Lint", "Lint 静态检查"), "errors": ("errors", "错误"), "warnings": ("warnings", "警告"),
-    "lint_by_code": ("Lint: by warning code", "Lint：按警告代码"), "code": ("code", "代码"), "count": ("count", "数量"),
-    "lint_by_file": ("Lint: by file (of the {n} of {total} diagnostics kept)",
-                     "Lint：按文件（基于保留的 {total} 条中的 {n} 条）"),
-    "file": ("file", "文件"), "lint_list": ("Lint: diagnostics kept ({n} of {total})", "Lint：保留的诊断（{total} 条中的 {n} 条）"),
-    "severity": ("severity", "严重度"), "location": ("location", "位置"), "message": ("message", "内容"),
+    "lint": "Lint", "errors": "errors", "warnings": "warnings",
+    "lint_by_code": "Lint: by warning code", "code": "code", "count": "count",
+    "lint_by_file": "Lint: by file (of the {n} of {total} diagnostics kept)",
+    "file": "file", "lint_list": "Lint: diagnostics kept ({n} of {total})",
+    "severity": "severity", "level": "level", "location": "location", "message": "message",
     # synth
-    "synth": ("Synthesis and timing estimate (synth, pre-PnR)", "综合与时序估算（synth，布局布线前）"),
-    "item": ("item", "项目"), "value": ("value", "数值"),
-    "cells": ("cells", "单元数"), "area": ("area", "面积"), "seq_area": ("sequential area", "时序单元面积"),
-    "latches": ("latches", "锁存器"), "liberty": ("library", "工艺库"), "clock": ("clock", "时钟"),
-    "timing_met": ("timing met (under this SDC)", "时序满足（在这份 SDC 下）"), "sdc": ("SDC", "SDC"),
-    "yes": ("yes", "是"), "no": ("NO", "否"),
-    "corners": ("Timing per corner (ns; negative = violation)", "各工艺角时序（ns；负数表示违例）"),
-    "corner": ("corner", "工艺角"), "setup_wns": ("setup WNS", "建立 WNS"), "setup_tns": ("setup TNS", "建立 TNS"),
-    "hold_wns": ("hold WNS", "保持 WNS"), "hold_tns": ("hold TNS", "保持 TNS"), "worst": ("worst", "最差"),
-    "worst_path": ("Worst path", "最差路径"), "start": ("startpoint", "起点"), "end": ("endpoint", "终点"),
-    "slack": ("slack", "余量"), "arrival": ("arrival", "到达时间"),
-    "cell_types": ("Most used cells", "用得最多的单元"), "cell": ("cell", "单元"),
-    "void": ("VOID: the SDC changed later in the run", "作废：运行中后来换了 SDC"),
+    "synth": "Synthesis and timing estimate (synth, pre-PnR)",
+    "item": "item", "value": "value",
+    "cells": "cells", "area": "area", "seq_area": "sequential area",
+    "latches": "latches", "liberty": "library", "clock": "clock",
+    "timing_met": "timing met (under this SDC)", "sdc": "SDC",
+    "yes": "yes", "no": "NO",
+    "corners": "Timing per corner (ns; negative = violation)",
+    "corner": "corner", "setup_wns": "setup WNS", "setup_tns": "setup TNS",
+    "hold_wns": "hold WNS", "hold_tns": "hold TNS", "worst": "worst",
+    "worst_path": "Worst path", "start": "startpoint", "end": "endpoint",
+    "slack": "slack", "arrival": "arrival",
+    "cell_types": "Most used cells", "cell": "cell",
+    "void": "VOID: the SDC changed later in the run",
     # check_sdc
-    "check_sdc": ("Constraint check (check_sdc)", "约束检查（check_sdc）"), "clock_name": ("clock", "时钟"),
-    "period": ("period (ns)", "周期（ns）"), "sources": ("sources", "来源端口"),
-    "unconstrained": ("unconstrained endpoints", "未约束端点"),
-    "other_warn": ("other check_setup warnings", "其他 check_setup 警告"),
+    "check_sdc": "Constraint check (check_sdc)", "clock_name": "clock",
+    "period": "period (ns)", "sources": "sources",
+    "unconstrained": "unconstrained endpoints",
+    "other_warn": "other check_setup warnings",
     # generic
-    "other": ("{tool}: numbers", "{tool}：数据"),
+    "other": "{tool}: numbers",
     # findings, gate, cost
-    "findings": ("Reviewer findings", "评审发现"), "reviewer": ("reviewer", "评审"), "finding": ("finding", "发现"),
-    "no_findings": ("no findings", "没有发现"),
-    "gate": ("Evidence gate decisions", "证据门决定"), "attempt": ("attempt", "第几次"), "result": ("result", "结果"),
-    "best_level": ("best passing evidence", "最高通过证据"), "reasons": ("reasons", "原因"),
-    "pass": ("pass", "通过"), "reject": ("reject", "拒绝"),
-    "cost": ("Cost", "成本"), "who": ("who", "谁"), "model": ("model", "模型"), "turns": ("turns", "轮数"),
-    "tool_calls": ("tool calls", "工具调用"), "tok_in": ("tokens in", "输入 token"), "tok_out": ("tokens out", "输出 token"),
-    "tok_cache": ("cached in", "缓存命中"), "wall": ("wall time (s)", "耗时（秒）"),
-    "author": ("author (the agent)", "作者（智能体）"), "summary_writer": ("summary writer ({language})", "摘要撰写（{language}）"),
-    "rules": ("rule-based (no model)", "规则评审（无模型）"), "times": (" ×{n}", " ×{n}"),
-    "total": ("total", "合计"),
+    "findings": "Reviewer findings", "reviewer": "reviewer", "finding": "finding",
+    "no_findings": "no findings",
+    "gate": "Evidence gate decisions", "attempt": "attempt", "result": "result",
+    "best_level": "best passing evidence", "reasons": "reasons",
+    "pass": "pass", "reject": "reject",
+    "cost": "Cost", "who": "who", "model": "model", "turns": "turns",
+    "tool_calls": "tool calls", "tok_in": "tokens in", "tok_out": "tokens out",
+    "tok_cache": "cached in", "wall": "wall time (s)",
+    "author": "author (the agent)", "summary_writer": "summary writer (model)",
+    "rules": "rule-based (no model)", "times": " ×{n}",
+    "total": "total",
 }
 
 
-def tt(lang: str, key: str, **kw) -> str:
-    return TT[key][0 if lang == "en" else 1].format(**kw)
+def tt(key: str, **kw) -> str:
+    return TT[key].format(**kw)
 
 
 @dataclass
@@ -84,6 +84,13 @@ class Table:
 
 def cell(text, cls: str = "") -> dict:
     return {"text": str(text), "cls": cls}
+
+
+LEVEL_CLS = {"fatal": "fatal", "error": "bad", "warning": "warn"}
+
+
+def level_cell(level: str) -> dict:
+    return cell(TITLE[level], LEVEL_CLS[level])
 
 
 def fmt_ns(x) -> str:
@@ -169,17 +176,17 @@ def _mark(c: dict) -> str:
     return " †" if c.get("from_trace") else ""
 
 
-def regress_tables(r: dict, L: str) -> list[Table]:
+def regress_tables(r: dict) -> list[Table]:
     checks = [c for c in r["checks_run"] if c["tool"] == "regress"]
     if not checks:
         return []
-    t = Table(tt(L, "regress"), [tt(L, k) for k in ("cases_asked", "run", "passed", "failed", "skipped",
+    t = Table(tt("regress"), [tt(k) for k in ("cases_asked", "run", "passed", "failed", "skipped",
                                                          "subtests", "failed_cases")])
     for c in checks:
         m = {**_counts_from_summary(c["summary"]), **(c.get("metrics") or {})}
         asked = ", ".join(c["args"].get("cases", [])) or "—"
         ran = (m.get("passed", 0) + m.get("failed", 0)) if "passed" in m else "—"
-        sub = (tt(L, "sub_fmt", p=m["subtests_passed"], f=m["subtests_failed"], t=m["subtests_total"])
+        sub = (tt("sub_fmt", p=m["subtests_passed"], f=m["subtests_failed"], t=m["subtests_total"])
                if "subtests_total" in m else "—")
         t.rows.append([asked + _mark(c), _num(ran), cell(_num(m.get("passed", "—")), "ok" if m.get("passed") else ""),
                        cell(_num(m.get("failed", "—")), "bad" if m.get("failed") else ""),
@@ -189,16 +196,16 @@ def regress_tables(r: dict, L: str) -> list[Table]:
     return [t]
 
 
-def lint_tables(r: dict, L: str) -> list[Table]:
+def lint_tables(r: dict) -> list[Table]:
     out = []
     for c in (c for c in r["checks_run"] if c["tool"] == "lint"):
         m = c.get("metrics") or {}
         diags = c.get("diagnostics") or []
         total = c.get("diagnostics_total") or len(diags)
         if m.get("by_code"):
-            t = Table(tt(L, "lint_by_code") + _mark(c), [tt(L, "code"), tt(L, "count")])
+            t = Table(tt("lint_by_code") + _mark(c), [tt("code"), tt("count")])
             t.rows = [[code, _num(n)] for code, n in sorted(m["by_code"].items(), key=lambda x: -x[1])]
-            t.rows.append([cell(f"{tt(L, 'errors')} / {tt(L, 'warnings')}", "k"),
+            t.rows.append([cell(f"{tt('errors')} / {tt('warnings')}", "k"),
                            f"{_num(m.get('errors', 0))} / {_num(m.get('warnings', 0))}"])
             out.append(t)
         if diags:
@@ -206,85 +213,85 @@ def lint_tables(r: dict, L: str) -> list[Table]:
             for d in diags:
                 f = files.setdefault(d.get("file") or "—", [0, 0])
                 f[0 if d.get("severity") == "error" else 1] += 1
-            t = Table(tt(L, "lint_by_file", n=len(diags), total=total) + _mark(c),
-                      [tt(L, "file"), tt(L, "errors"), tt(L, "warnings")])
+            t = Table(tt("lint_by_file", n=len(diags), total=total) + _mark(c),
+                      [tt("file"), tt("errors"), tt("warnings")])
             t.rows = [[f, cell(_num(e), "bad" if e else ""), _num(w)]
                       for f, (e, w) in sorted(files.items(), key=lambda x: (-x[1][0], -x[1][1], x[0]))]
             out.append(t)
-            t = Table(tt(L, "lint_list", n=len(diags), total=total) + _mark(c),
-                      [tt(L, "severity"), tt(L, "code"), tt(L, "location"), tt(L, "message")], collapsed=True)
-            t.rows = [[cell(d.get("severity", ""), "bad" if d.get("severity") == "error" else "warn"),
+            t = Table(tt("lint_list", n=len(diags), total=total) + _mark(c),
+                      [tt("level"), tt("code"), tt("location"), tt("message")], collapsed=True)
+            t.rows = [[level_cell(DIAG_LEVEL.get(d.get("severity"), "warning")),
                        d.get("code", ""), f"{d.get('file', '')}:{d.get('line', '')}", d.get("msg", "")]
                       for d in diags]
             out.append(t)
     return out
 
 
-def synth_tables(r: dict, L: str) -> list[Table]:
+def synth_tables(r: dict) -> list[Table]:
     out = []
     for c in (c for c in r["checks_run"] if c["tool"] == "synth"):
         m = {**(c.get("timing") or {}), **(c.get("metrics") or {})}
         void = (c.get("timing") or {}).get("void")
-        t = Table(tt(L, "synth") + _mark(c), [tt(L, "item"), tt(L, "value")])
+        t = Table(tt("synth") + _mark(c), [tt("item"), tt("value")])
         rows = [("cells", _num(m.get("cells"))), ("area", _num(m.get("area"))),
                 ("seq_area", _num(m.get("sequential_area"))),
                 ("latches", cell(_num(m.get("latches")), "bad" if m.get("latches") else "")),
                 ("liberty", m.get("liberty") or "—"),
                 ("clock", f"{m.get('clock_port') or ''} {_num(m.get('clock_period'))} ns".strip()),
-                ("timing_met", cell(tt(L, "yes") if m.get("timing_met") else tt(L, "no"),
+                ("timing_met", cell(tt("yes") if m.get("timing_met") else tt("no"),
                                     "ok" if m.get("timing_met") else "bad")),
                 ("sdc", f"{c.get('sdc') or m.get('sdc') or '—'} · sha256 {str(c.get('sdc_sha256') or '')[:16]}…")]
-        t.rows = [[tt(L, k), v] for k, v in rows if v not in ("—", " ns")]
+        t.rows = [[tt(k), v] for k, v in rows if v not in ("—", " ns")]
         if void:
-            t.rows.append([cell(tt(L, "void"), "bad"), ""])
+            t.rows.append([cell(tt("void"), "bad"), ""])
         out.append(t)
         corners = m.get("corners") or {}
         if corners:
             worst = m.get("worst_corner")
-            t = Table(tt(L, "corners") + _mark(c), [tt(L, k) for k in ("corner", "setup_wns", "setup_tns",
+            t = Table(tt("corners") + _mark(c), [tt(k) for k in ("corner", "setup_wns", "setup_tns",
                                                                          "hold_wns", "hold_tns")])
             for name, v in corners.items():
-                t.rows.append([name + (f" ({tt(L, 'worst')})" if name == worst else ""),
+                t.rows.append([name + (f" ({tt('worst')})" if name == worst else ""),
                                cell(fmt_ns(v.get("setup_wns")), _slack_cls(v.get("setup_wns"))),
                                fmt_ns(v.get("setup_tns")),
                                cell(fmt_ns(v.get("hold_wns")), _slack_cls(v.get("hold_wns"))),
                                fmt_ns(v.get("hold_tns"))])
             out.append(t)
         elif "wns" in m:  # receipt timing only: the run's worst values
-            t = Table(tt(L, "corners"), [tt(L, k) for k in ("corner", "setup_wns", "setup_tns", "hold_wns")])
-            t.rows.append([f"{m.get('worst_corner')} ({tt(L, 'worst')})", cell(fmt_ns(m["wns"]), _slack_cls(m["wns"])),
+            t = Table(tt("corners"), [tt(k) for k in ("corner", "setup_wns", "setup_tns", "hold_wns")])
+            t.rows.append([f"{m.get('worst_corner')} ({tt('worst')})", cell(fmt_ns(m["wns"]), _slack_cls(m["wns"])),
                            fmt_ns(m.get("tns")), cell(fmt_ns(m.get("hold_wns")), _slack_cls(m.get("hold_wns")))])
             out.append(t)
         wp = m.get("worst_path")
         if wp:
-            t = Table(tt(L, "worst_path") + _mark(c),
-                      [tt(L, k) for k in ("start", "end", "slack", "arrival", "corner")])
+            t = Table(tt("worst_path") + _mark(c),
+                      [tt(k) for k in ("start", "end", "slack", "arrival", "corner")])
             t.rows.append([wp.get("startpoint", ""), wp.get("endpoint", ""),
                            cell(fmt_ns(wp.get("slack")), _slack_cls(wp.get("slack"))),
                            _num(wp.get("arrival")), wp.get("corner", "")])
             out.append(t)
         if m.get("top_cell_types"):
-            t = Table(tt(L, "cell_types") + _mark(c), [tt(L, "cell"), tt(L, "count")], collapsed=True)
+            t = Table(tt("cell_types") + _mark(c), [tt("cell"), tt("count")], collapsed=True)
             t.rows = [[k, _num(v)] for k, v in m["top_cell_types"].items()]
             out.append(t)
     return out
 
 
-def sdc_tables(r: dict, L: str) -> list[Table]:
+def sdc_tables(r: dict) -> list[Table]:
     out = []
     for c in (c for c in r["checks_run"] if c["tool"] == "check_sdc"):
         m = c.get("metrics") or {}
         if not m:
             continue
-        t = Table(tt(L, "check_sdc") + _mark(c), [tt(L, "clock_name"), tt(L, "period"), tt(L, "sources")])
+        t = Table(tt("check_sdc") + _mark(c), [tt("clock_name"), tt("period"), tt("sources")])
         t.rows = [[k.get("name", ""), _num(k.get("period")), ", ".join(k.get("sources", []))]
                   for k in m.get("clocks", [])]
         n = m.get("unconstrained_endpoints")
-        t.rows.append([cell(tt(L, "unconstrained"), "k"), cell(_num(n), "bad" if n else "ok"), ""])
+        t.rows.append([cell(tt("unconstrained"), "k"), cell(_num(n), "bad" if n else "ok"), ""])
         others = m.get("other_warnings") or []
-        t.rows.append([cell(tt(L, "other_warn"), "k"), cell(_num(len(others)), "warn" if others else "ok"),
+        t.rows.append([cell(tt("other_warn"), "k"), cell(_num(len(others)), "warn" if others else "ok"),
                        "; ".join(map(str, others[:5]))])
-        t.rows.append([cell(tt(L, "sdc"), "k"), m.get("sdc") or "", str(m.get("sdc_sha256") or "")[:16] + "…"])
+        t.rows.append([cell(tt("sdc"), "k"), m.get("sdc") or "", str(m.get("sdc_sha256") or "")[:16] + "…"])
         out.append(t)
     return out
 
@@ -292,16 +299,16 @@ def sdc_tables(r: dict, L: str) -> list[Table]:
 KNOWN = ("regress", "lint", "synth", "check_sdc")
 
 
-def other_tables(r: dict, L: str) -> list[Table]:
+def other_tables(r: dict) -> list[Table]:
     """Any other tool (mutate, rtl_rules, ...): its plain numbers and short values."""
     out = []
     for c in (c for c in r["checks_run"] if c["tool"] not in KNOWN):
         m = c.get("metrics") or {}
         rows = [[k, _num(v) if not isinstance(v, list) else ", ".join(map(str, v[:12])) + (" …" if len(v) > 12 else "")]
                 for k, v in m.items() if isinstance(v, (int, float, str, list)) and not isinstance(v, bool)]
-        rows += [[k, tt(L, "yes") if v else tt(L, "no")] for k, v in m.items() if isinstance(v, bool)]
+        rows += [[k, tt("yes") if v else tt("no")] for k, v in m.items() if isinstance(v, bool)]
         if rows:
-            out.append(Table(tt(L, "other", tool=c["tool"]) + _mark(c), [tt(L, "item"), tt(L, "value")], rows))
+            out.append(Table(tt("other", tool=c["tool"]) + _mark(c), [tt("item"), tt("value")], rows))
     return out
 
 
@@ -309,11 +316,11 @@ def _rank(severity: str) -> int:
     return SEVERITIES.index(severity) if severity in SEVERITIES else len(SEVERITIES)
 
 
-def _who(v: dict, L: str) -> str:
-    return tt(L, "rules") if v["reviewer"] == "rules" else f"{v['reviewer']} ({v.get('model') or '?'})"
+def _who(v: dict) -> str:
+    return tt("rules") if v["reviewer"] == "rules" else f"{v['reviewer']} ({v.get('model') or '?'})"
 
 
-def findings_table(r: dict, L: str) -> list[Table]:
+def findings_table(r: dict) -> list[Table]:
     rows: dict[str, list] = {}
     for v in r.get("reviews", []):
         for f in v.get("findings", []):
@@ -321,35 +328,35 @@ def findings_table(r: dict, L: str) -> list[Table]:
             entry = rows.setdefault(key, [f["severity"], [], f["text"]])
             if _rank(f["severity"]) < _rank(entry[0]):
                 entry[0] = f["severity"]
-            if _who(v, L) not in entry[1]:
-                entry[1].append(_who(v, L))
+            if _who(v) not in entry[1]:
+                entry[1].append(_who(v))
     if not r.get("reviews"):
         return []
-    t = Table(tt(L, "findings"), [tt(L, k) for k in ("severity", "reviewer", "finding", "location")])
+    t = Table(tt("findings"), [tt(k) for k in ("level", "severity", "reviewer", "finding", "location")])
     order = sorted(rows.values(), key=lambda e: _rank(e[0]))
     for sev, who, text in order:
         found = list(dict.fromkeys(_LOCATION.findall(text)))
         locs = [x for x in found if not any(y != x and y.endswith("/" + x) for y in found)]
-        t.rows.append([cell(sev, {"high": "bad", "medium": "warn", "low": "info"}.get(sev, "lvl")),
-                       ", ".join(who), text, ", ".join(locs) or "—"])
+        t.rows.append([level_cell(FINDING_LEVEL.get(sev, "warning")), sev, ", ".join(who), text,
+                       ", ".join(locs) or "—"])
     if not t.rows:
-        t.rows.append(["—", "—", tt(L, "no_findings"), "—"])
+        t.rows.append(["—", "—", "—", tt("no_findings"), "—"])
     return [t]
 
 
-def gate_table(r: dict, L: str) -> list[Table]:
+def gate_table(r: dict) -> list[Table]:
     decisions = r["gate"]["decisions"]
     if not decisions:
         return []
-    t = Table(tt(L, "gate"), [tt(L, k) for k in ("attempt", "result", "best_level", "reasons")])
+    t = Table(tt("gate"), [tt(k) for k in ("attempt", "result", "best_level", "reasons")])
     for i, d in enumerate(decisions, 1):
-        t.rows.append([str(i), cell(tt(L, "pass") if d["passed"] else tt(L, "reject"), "ok" if d["passed"] else "bad"),
+        t.rows.append([str(i), cell(tt("pass") if d["passed"] else tt("reject"), "ok" if d["passed"] else "bad"),
                        d.get("max_level") or "—", "\n".join(d["reasons"]) or "—"])
     return [t]
 
 
-def cost_table(r: dict, L: str) -> list[Table]:
-    t = Table(tt(L, "cost"), [tt(L, k) for k in ("who", "model", "turns", "tool_calls", "tok_in", "tok_out",
+def cost_table(r: dict) -> list[Table]:
+    t = Table(tt("cost"), [tt(k) for k in ("who", "model", "turns", "tool_calls", "tok_in", "tok_out",
                                                   "tok_cache", "wall")])
     tot = [0, 0, 0, 0, 0, 0.0]
 
@@ -361,7 +368,7 @@ def cost_table(r: dict, L: str) -> list[Table]:
             tot[i] += x if isinstance(x, (int, float)) else 0
         t.rows.append([who, model or "—", *(_num(x) if x != "" else "—" for x in vals[:5]), _num(round(vals[5], 2))])
 
-    add(tt(L, "author"), f"{r['provider']} / {r['model']}", r["turns"], r["tool_calls"], r.get("usage"),
+    add(tt("author"), f"{r['provider']} / {r['model']}", r["turns"], r["tool_calls"], r.get("usage"),
         r.get("wall_s"))
     seen: dict[str, int] = {}
     for v in r.get("reviews", []):
@@ -369,19 +376,19 @@ def cost_table(r: dict, L: str) -> list[Table]:
         seen[key] = seen.get(key, 0) + 1
         if seen[key] > 1 and v["reviewer"] == "rules":
             continue  # the same deterministic review written twice: one row
-        add(_who(v, L), v.get("model") or "—", "", len(v.get("tool_calls", [])), v.get("usage"), v.get("wall_s"))
-    for lang, n in (r.get("narratives") or {}).items():
-        add(tt(L, "summary_writer", language=lang), n.get("model"), n.get("turns", 1), 0, n.get("usage"),
-            n.get("wall_s"))
-    t.rows.append([cell(tt(L, "total"), "k"), "", _num(tot[0]), _num(tot[1]), _num(tot[2]), _num(tot[3]),
+        add(_who(v), v.get("model") or "—", "", len(v.get("tool_calls", [])), v.get("usage"), v.get("wall_s"))
+    n = r.get("narrative")
+    if n:
+        add(tt("summary_writer"), n.get("model"), n.get("turns", 1), 0, n.get("usage"), n.get("wall_s"))
+    t.rows.append([cell(tt("total"), "k"), "", _num(tot[0]), _num(tot[1]), _num(tot[2]), _num(tot[3]),
                    _num(tot[4]), _num(round(tot[5], 2))])
     return [t]
 
 
-def data_tables(r: dict, L: str) -> list[Table]:
-    return (regress_tables(r, L) + lint_tables(r, L) + synth_tables(r, L) + sdc_tables(r, L) + other_tables(r, L)
-            + findings_table(r, L) + gate_table(r, L) + cost_table(r, L))
+def data_tables(r: dict) -> list[Table]:
+    return (regress_tables(r) + lint_tables(r) + synth_tables(r) + sdc_tables(r) + other_tables(r)
+            + findings_table(r) + gate_table(r) + cost_table(r))
 
 
-def trace_note(r: dict, L: str) -> str:
-    return tt(L, "from_trace", trace=r["_trace_used"]) if r.get("_trace_used") else ""
+def trace_note(r: dict) -> str:
+    return tt("from_trace", trace=r["_trace_used"]) if r.get("_trace_used") else ""

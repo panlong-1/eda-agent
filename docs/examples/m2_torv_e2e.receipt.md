@@ -1,29 +1,57 @@
 # Review summary · m2_torv_e2e
 
-> Written by plain code from the receipt data (no model). Everything else is in the details below; quotes and tool output stay in their original language.
+> Written by plain code from the receipt data (no model). The tables below are the record; the full receipt is at the end.
 
-**In one line:** 4 of 4 check(s) passed; gate passed; reviewers: 1× REJECT, 2× accept with findings; 1 serious and 5 warning item(s) to look at.
+**Fatal 1 · Error 15 · Warning 12** — 4 of 4 check(s) passed; gate passed; reviewers: 1× REJECT, 2× accept with findings.
 
-- **Task**: Check the TORV core end to end: lint it, run the smoke regression case, synthesize it and estimate timing at the project clock, and check that the SDC constrains every endpoint. Report what passed, and whether the timing estimate meets the project clock target.
-- **What you decide**: Approve or reject step 'final report': accept the agent's final report below as the result of this task? (requested because: the evidence gate passed; a person accepts the result)
-- **Status**: awaiting approval · torv · deepseek / deepseek-v4-pro · prompt system.v2
+- **Task:** Check the TORV core end to end: lint it, run the smoke regression case, synthesize it and estimate timing at the project clock, and check that the SDC constrains every endpoint. Report what passed, and whether the timing estimate meets the project clock target.
+- **What you decide:** Approve or reject step 'final report': accept the agent's final report below as the result of this task? (requested because: the evidence gate passed; a person accepts the result)
+- **Status:** awaiting approval · torv · deepseek / deepseek-v4-pro · prompt system.v2
+- **To approve:** 1 Fatal item(s): approving needs --override and a --reason (the decision records the override)
 
 ```bash
-eda-agent approve m2_torv_e2e
+eda-agent approve m2_torv_e2e --override --reason "..."
 eda-agent reject m2_torv_e2e --reason "..."
+eda-agent pending m2_torv_e2e --note "..."
 ```
+
+Or click the decision in the local review page: `eda-agent review-ui`.
 
 ## Look at these before approving
 
-- 🛑 Reviewer rule-based (no model) said REJECT.
-- ⚠️ [high] from rule-based (no model): multi_driven x1: signal driven from more than one block: Bits [0:0] of signal 'torv_soc.apb_presetn' have multiple combinational drivers (at rtl/torv_soc.sv:179)
-- ⚠️ [high] from I3 (deepseek-v4-flash): A real rule error was never surfaced: `rtl_rules` (E0) **fails** with `MULTI_DRIVEN` on `torv_soc.apb_presetn` bits[0:0], "driven from more than one block" — the author reported only `lint` status=pass and did not triag…
-- ⚠️ [high] from I3 (deepseek-v4-flash): The synthesized/STA'd top is `torv_cpu`, but lint was run on `torv_soc`; the SoC-level logic (AHB/APB bridge, `apb_uart_sv`, `torv_ahb_sram`, AHB dport) is never synthesized, timed, or covered by the SDC — so "timing me…
-- ⚠️ synth: small setup slack, +0.698 ns = 7% of the 10.0 ns clock (pre-PnR; usually worse after routing).
-- ⚠️ synth: small hold slack, +0.068 ns (corner slow); real clock skew after layout can eat it.
-- ℹ️ 10 more medium finding(s) from the reviewers (see Reviewers and the details).
-- ℹ️ Only part of the regression ran: 32 listed case(s) were not run.
-- ℹ️ Note on reviewer I3 (deepseek-v4-flash): I3 here is the author's provider with a different model (deepseek-v4-pro -> deepseek-v4-flash); a different vendor would be more independent (shared training data and blind spots).
+- ⛔ **Fatal**: Rule-based reviewer said reject
+- 🟥 **Error**: synth: small setup slack, +0.698 ns = 7% of the 10 ns clock (pre-PnR; usually worse after routing)
+- 🟥 **Error**: synth: small hold slack, +0.068 ns; real clock skew after layout can eat it
+- 🟥 **Error**: [high] from rule-based reviewer: multi_driven x1: signal driven from more than one block: Bits [0:0] of signal 'torv_soc.apb_presetn' have multiple combinational drivers (at rtl/torv_soc.sv:179)
+- 🟥 **Error**: [medium] from rule-based reviewer: width_truncation x1: value truncated to a narrower width: Operator ASSIGN expects 8 bits on the Assign RHS, but Assign RHS's SHIFTR generates 32 bits. (at rtl/torv_core.sv:602)
+- 🟥 **Error**: [medium] from rule-based reviewer: latch x1: latch inferred: Latch inferred for signal 'torv_soc.u_apb_uart.fifo_tx_data' (not all control paths of combinational always assign a value) (at ip/third_party/apb_uart_sv/apb_uart.sv:195)
+- 🟥 **Error**: [medium] from I2 (deepseek-v4-pro): Lint is not clean: 43 warnings include a LATCH at `ip/third_party/apb_uart_sv/apb_uart.sv:195`, MULTIDRIVEN on `torv_soc.apb_presetn` at `rtl/torv_soc.sv:179`, WIDTHTRUNC at `rtl/torv_core.sv:602`, and SYNCASYNCNET on `…
+- 🟥 **Error**: [medium] from I2 (deepseek-v4-pro): Independent RTL rule check fails on a MULTI_DRIVEN error for `torv_soc.apb_presetn` and also flags the UART latch and core width truncation — evidence: `rtl_rules` status fail.
+- 🟥 **Error**: [high] from I3 (deepseek-v4-flash): A real rule error was never surfaced: `rtl_rules` (E0) **fails** with `MULTI_DRIVEN` on `torv_soc.apb_presetn` bits[0:0], "driven from more than one block" — the author reported only `lint` status=pass and did not triag…
+- 🟥 **Error**: [high] from I3 (deepseek-v4-flash): The synthesized/STA'd top is `torv_cpu`, but lint was run on `torv_soc`; the SoC-level logic (AHB/APB bridge, `apb_uart_sv`, `torv_ahb_sram`, AHB dport) is never synthesized, timed, or covered by the SDC — so "timing me…
+- 🟥 **Error**: [medium] from I3 (deepseek-v4-flash): Latch warning unexamined and not reconcilable with the E4 report: lint/rtl_rules infer a latch on `torv_soc.u_apb_uart.fifo_tx_data`, while synth reports "0 latch(es)" — because synth excludes the UART. Reporting both w…
+- 🟥 **Error**: [medium] from I3 (deepseek-v4-flash): `WIDTHTRUNC` on `rtl/torv_core.sv:602` ("ASSIGN expects 8 bits, RHS SHIFTR generates 32 bits") is in the core RTL and was neither investigated nor declared benign. Evidence: lint warning torv_core.sv:602; rtl_rules WIDT…
+- 🟥 **Error**: [medium] from I3 (deepseek-v4-flash): Reset handling risk unaddressed: `hresetn` is flopped as both synchronous and asynchronous (`SYNCASYNCNET`), a common source of simulation/synthesis divergence. Evidence: lint warning, rtl/torv_soc.sv:33.
+- 🟥 **Error**: [medium] from I3 (deepseek-v4-flash): The "SDC constrains every endpoint" claim is narrower than it sounds: `check_setup` reports 0 unconstrained endpoints, but the tool itself states inputs without `set_input_delay` are not endpoints and are not listed, an…
+- 🟥 **Error**: [medium] from I3 (deepseek-v4-flash): The reported critical path ends at an output port (`d_htrans[1]`, slow corner, slack +0.698, arrival 7.002); no evidence was shown that its required time comes from a real `set_output_delay` in the SDC rather than a def…
+- 🟥 **Error**: [medium] from I3 (deepseek-v4-flash): Evidence base for "core works" is one directed case: `smoke` covers only ALU deps/MUL/shift/JAL/tohost — no load-store, branch, hazard, or bus traffic. My wider run of 10 cases (smoke, branch, jump, flush, x0, muldiv, h…
+
+<details><summary>12 warning(s)</summary>
+
+- 🟨 Warning: lint: 43 warning(s): UNUSEDSIGNAL 30, EOFNEWLINE 3, PINCONNECTEMPTY 2, GENUNNAMED 2, DECLFILENAME 1, WIDTHTRUNC 1, UNUSEDPARAM 1, MULTIDRIVEN 1, LATCH 1, SYNCASYNCNET 1
+- 🟨 Warning: regress: pass/fail comes from the testbench's own self-check or exit status, not from separate results
+- 🟨 Warning: synth: timing is a pre-PnR estimate (no wire parasitics, ideal clocks), not signoff
+- 🟨 Warning: Only part of the regression ran: 32 listed case(s) not run
+- 🟨 Warning: [info] from I2 (deepseek-v4-pro): All requested checks ran with pass status in their tool sense: lint E0 (0 errors, 43 warnings), smoke regression E2 (1/1 passed), synthesis/STA E4 (timing_met true), check_sdc E0 (0 unconstrained endpoints) — evidence:…
+- 🟨 Warning: [low] from I2 (deepseek-v4-pro): The E4 synthesis/STA and SDC check cover top `torv_cpu` only, while the lint top is `torv_soc`; the UART latch and `apb_presetn` multiple-driver findings are outside the synthesis/SDC evidence — evidence: synth/check_sd…
+- 🟨 Warning: [info] from I2 (deepseek-v4-pro): `check_sdc` reports 0 unconstrained endpoints, but inputs without `set_input_delay` are not endpoints and are not listed — evidence: check_sdc residual_risk.
+- 🟨 Warning: [info] from I2 (deepseek-v4-pro): Timing estimate meets the 10 ns project clock under `librelane/constraints.sdc` (slow-corner setup WNS +0.698 ns, hold WNS +0.068 ns), and is explicitly a pre-PnR estimate, not signoff — evidence: synth E4.
+- 🟨 Warning: [low] from I3 (deepseek-v4-flash): Timing conclusion must remain labelled pre-PnR, single-SDC, no parasitics, no gate-level sim / no RTL-vs-netlist equivalence — the E4 tool states post-route slack is usually worse, so +0.698 ns at slow is not a signoff…
+- 🟨 Warning: [low] from I3 (deepseek-v4-flash): Numbers reproduce exactly on re-run (14766 cells, area 236630.87, setup WNS +0.698 slow / hold +0.068 fast, same SDC sha256 `00c08cf2…`), so the E4 figures themselves are not in doubt — only what they cover. Evidence: m…
+- 🟨 Warning: [info] from I3 (deepseek-v4-flash): Pure-noise warnings (EOFNEWLINE, GENUNNAMED, DECLFILENAME, 30 UNUSEDSIGNAL) are correctly non-blocking; the concerning ones are the four listed above, not the count of 43.
+- 🟨 Warning: Note on reviewer I3 (deepseek-v4-flash): I3 here is the author's provider with a different model (deepseek-v4-pro -> deepseek-v4-flash); a different vendor would be more independent (shared training data and blind spots).
+
+</details>
 
 ## Checks
 
@@ -60,9 +88,9 @@ eda-agent reject m2_torv_e2e --reason "..."
 
 ## Reviewers
 
-- **rule-based (no model) (×2, identical)**: REJECT (high 1 · medium 2); most serious: [high] multi_driven x1: signal driven from more than one block: Bits [0:0] of signal 'torv_soc.apb_presetn' have multiple combinational drivers (at rtl/torv_soc.sv:17…
-- **I3 (deepseek-v4-flash)**: accept with findings (high 2 · medium 6 · low 2 · info 1); most serious: [high] A real rule error was never surfaced: `rtl_rules` (E0) **fails** with `MULTI_DRIVEN` on `torv_soc.apb_presetn` bits[0:0], "driven from more than one block" — t…
-- **I2 (deepseek-v4-pro)**: accept with findings (medium 2 · low 1 · info 3); most serious: [medium] Lint is not clean: 43 warnings include a LATCH at `ip/third_party/apb_uart_sv/apb_uart.sv:195`, MULTIDRIVEN on `torv_soc.apb_presetn` at `rtl/torv_soc.sv:179`,…
+- **rule-based reviewer (×2, identical)**: REJECT (Error 3); most serious: [high] multi_driven x1: signal driven from more than one block: Bits [0:0] of signal 'torv_soc.apb_presetn' have multiple combinational drivers (at rtl/torv_soc.sv:17…
+- **I3 (deepseek-v4-flash)**: accept with findings (Error 8 · Warning 3); most serious: [high] A real rule error was never surfaced: `rtl_rules` (E0) **fails** with `MULTI_DRIVEN` on `torv_soc.apb_presetn` bits[0:0], "driven from more than one block" — t…
+- **I2 (deepseek-v4-pro)**: accept with findings (Error 2 · Warning 4); most serious: [medium] Lint is not clean: 43 warnings include a LATCH at `ip/third_party/apb_uart_sv/apb_uart.sv:195`, MULTIDRIVEN on `torv_soc.apb_presetn` at `rtl/torv_soc.sv:179`,…
 
 ## Approval
 
@@ -144,28 +172,28 @@ Numbers marked † come from the run's trace runs/m2_torv_e2e.jsonl (this receip
 
 ### Reviewer findings
 
-| severity | reviewer | finding | location |
-|---|---|---|---|
-| high | rule-based (no model) | multi_driven x1: signal driven from more than one block: Bits [0:0] of signal 'torv_soc.apb_presetn' have multiple combinational drivers (at rtl/torv_soc.sv:179) | rtl/torv_soc.sv:179 |
-| high | I3 (deepseek-v4-flash) | A real rule error was never surfaced: `rtl_rules` (E0) **fails** with `MULTI_DRIVEN` on `torv_soc.apb_presetn` bits[0:0], "driven from more than one block" — the author reported only `lint` status=pass and did not triage the matching `MULTIDRIVEN` warning in the lint output. Evidence: rtl_rules status=fail, rtl/torv_soc.sv:179; lint diagnostics code=MULTIDRIVEN, torv_soc.sv:179. | rtl/torv_soc.sv:179 |
-| high | I3 (deepseek-v4-flash) | The synthesized/STA'd top is `torv_cpu`, but lint was run on `torv_soc`; the SoC-level logic (AHB/APB bridge, `apb_uart_sv`, `torv_ahb_sram`, AHB dport) is never synthesized, timed, or covered by the SDC — so "timing meets the project clock" says nothing about the SoC half of the design. Evidence: synth/check_sdc claim_scope "top 'torv_cpu'"; lint summary "top=torv_soc". | — |
-| medium | rule-based (no model) | width_truncation x1: value truncated to a narrower width: Operator ASSIGN expects 8 bits on the Assign RHS, but Assign RHS's SHIFTR generates 32 bits. (at rtl/torv_core.sv:602) | rtl/torv_core.sv:602 |
-| medium | rule-based (no model) | latch x1: latch inferred: Latch inferred for signal 'torv_soc.u_apb_uart.fifo_tx_data' (not all control paths of combinational always assign a value) (at ip/third_party/apb_uart_sv/apb_uart.sv:195) | ip/third_party/apb_uart_sv/apb_uart.sv:195 |
-| medium | I2 (deepseek-v4-pro) | Lint is not clean: 43 warnings include a LATCH at `ip/third_party/apb_uart_sv/apb_uart.sv:195`, MULTIDRIVEN on `torv_soc.apb_presetn` at `rtl/torv_soc.sv:179`, WIDTHTRUNC at `rtl/torv_core.sv:602`, and SYNCASYNCNET on `hresetn` at `rtl/torv_soc.sv:33` — evidence: lint rerun with full diagnostics. | ip/third_party/apb_uart_sv/apb_uart.sv:195, rtl/torv_soc.sv:179, rtl/torv_core.sv:602, rtl/torv_soc.sv:33 |
-| medium | I2 (deepseek-v4-pro) | Independent RTL rule check fails on a MULTI_DRIVEN error for `torv_soc.apb_presetn` and also flags the UART latch and core width truncation — evidence: `rtl_rules` status fail. | — |
-| medium | I3 (deepseek-v4-flash) | Latch warning unexamined and not reconcilable with the E4 report: lint/rtl_rules infer a latch on `torv_soc.u_apb_uart.fifo_tx_data`, while synth reports "0 latch(es)" — because synth excludes the UART. Reporting both without noting they cover different tops is misleading. Evidence: lint LATCH apb_uart.sv:195; rtl_rules LATCH apb_uart.sv:195; synth metrics latches=0, top torv_cpu. | apb_uart.sv:195 |
-| medium | I3 (deepseek-v4-flash) | `WIDTHTRUNC` on `rtl/torv_core.sv:602` ("ASSIGN expects 8 bits, RHS SHIFTR generates 32 bits") is in the core RTL and was neither investigated nor declared benign. Evidence: lint warning torv_core.sv:602; rtl_rules WIDTH_TRUNCATION torv_core.sv:602. | rtl/torv_core.sv:602 |
-| medium | I3 (deepseek-v4-flash) | Reset handling risk unaddressed: `hresetn` is flopped as both synchronous and asynchronous (`SYNCASYNCNET`), a common source of simulation/synthesis divergence. Evidence: lint warning, rtl/torv_soc.sv:33. | rtl/torv_soc.sv:33 |
-| medium | I3 (deepseek-v4-flash) | The "SDC constrains every endpoint" claim is narrower than it sounds: `check_setup` reports 0 unconstrained endpoints, but the tool itself states inputs without `set_input_delay` are not endpoints and are not listed, and SDC values (I/O budgets, uncertainty) are not judged. Evidence: check_sdc claim_scope/residual_risk. | — |
-| medium | I3 (deepseek-v4-flash) | The reported critical path ends at an output port (`d_htrans[1]`, slow corner, slack +0.698, arrival 7.002); no evidence was shown that its required time comes from a real `set_output_delay` in the SDC rather than a default, so the "met" result hinges on an unverified I/O assumption. Evidence: synth worst_path; check_sdc diagnostics list empty (no I/O delay content shown). | — |
-| medium | I3 (deepseek-v4-flash) | Evidence base for "core works" is one directed case: `smoke` covers only ALU deps/MUL/shift/JAL/tohost — no load-store, branch, hazard, or bus traffic. My wider run of 10 cases (smoke, branch, jump, flush, x0, muldiv, hazard, loadstore, mem_offsets, sbus) also passes, but 24 further listed cases (bus mix, sram_wbuf, uart, replay/dup hazards, perf) remain unrun and no coverage/mutation score exists. Evidence: describe_case smoke; regress 10 passed 0 failed; regress residual_risk "test adequacy unknown". | — |
-| low | I2 (deepseek-v4-pro) | The E4 synthesis/STA and SDC check cover top `torv_cpu` only, while the lint top is `torv_soc`; the UART latch and `apb_presetn` multiple-driver findings are outside the synthesis/SDC evidence — evidence: synth/check_sdc top `torv_cpu`, lint top `torv_soc`. | — |
-| low | I3 (deepseek-v4-flash) | Timing conclusion must remain labelled pre-PnR, single-SDC, no parasitics, no gate-level sim / no RTL-vs-netlist equivalence — the E4 tool states post-route slack is usually worse, so +0.698 ns at slow is not a signoff margin. Evidence: synth residual_risk and claim_scope. | — |
-| low | I3 (deepseek-v4-flash) | Numbers reproduce exactly on re-run (14766 cells, area 236630.87, setup WNS +0.698 slow / hold +0.068 fast, same SDC sha256 `00c08cf2…`), so the E4 figures themselves are not in doubt — only what they cover. Evidence: my synth run vs the author's, identical metrics and netlist.v sha256. | netlist.v |
-| info | I2 (deepseek-v4-pro) | All requested checks ran with pass status in their tool sense: lint E0 (0 errors, 43 warnings), smoke regression E2 (1/1 passed), synthesis/STA E4 (timing_met true), check_sdc E0 (0 unconstrained endpoints) — evidence: rerun tool results. | — |
-| info | I2 (deepseek-v4-pro) | `check_sdc` reports 0 unconstrained endpoints, but inputs without `set_input_delay` are not endpoints and are not listed — evidence: check_sdc residual_risk. | — |
-| info | I2 (deepseek-v4-pro) | Timing estimate meets the 10 ns project clock under `librelane/constraints.sdc` (slow-corner setup WNS +0.698 ns, hold WNS +0.068 ns), and is explicitly a pre-PnR estimate, not signoff — evidence: synth E4. | librelane/constraints.sdc |
-| info | I3 (deepseek-v4-flash) | Pure-noise warnings (EOFNEWLINE, GENUNNAMED, DECLFILENAME, 30 UNUSEDSIGNAL) are correctly non-blocking; the concerning ones are the four listed above, not the count of 43. | — |
+| level | severity | reviewer | finding | location |
+|---|---|---|---|---|
+| Error | high | rule-based (no model) | multi_driven x1: signal driven from more than one block: Bits [0:0] of signal 'torv_soc.apb_presetn' have multiple combinational drivers (at rtl/torv_soc.sv:179) | rtl/torv_soc.sv:179 |
+| Error | high | I3 (deepseek-v4-flash) | A real rule error was never surfaced: `rtl_rules` (E0) **fails** with `MULTI_DRIVEN` on `torv_soc.apb_presetn` bits[0:0], "driven from more than one block" — the author reported only `lint` status=pass and did not triage the matching `MULTIDRIVEN` warning in the lint output. Evidence: rtl_rules status=fail, rtl/torv_soc.sv:179; lint diagnostics code=MULTIDRIVEN, torv_soc.sv:179. | rtl/torv_soc.sv:179 |
+| Error | high | I3 (deepseek-v4-flash) | The synthesized/STA'd top is `torv_cpu`, but lint was run on `torv_soc`; the SoC-level logic (AHB/APB bridge, `apb_uart_sv`, `torv_ahb_sram`, AHB dport) is never synthesized, timed, or covered by the SDC — so "timing meets the project clock" says nothing about the SoC half of the design. Evidence: synth/check_sdc claim_scope "top 'torv_cpu'"; lint summary "top=torv_soc". | — |
+| Error | medium | rule-based (no model) | width_truncation x1: value truncated to a narrower width: Operator ASSIGN expects 8 bits on the Assign RHS, but Assign RHS's SHIFTR generates 32 bits. (at rtl/torv_core.sv:602) | rtl/torv_core.sv:602 |
+| Error | medium | rule-based (no model) | latch x1: latch inferred: Latch inferred for signal 'torv_soc.u_apb_uart.fifo_tx_data' (not all control paths of combinational always assign a value) (at ip/third_party/apb_uart_sv/apb_uart.sv:195) | ip/third_party/apb_uart_sv/apb_uart.sv:195 |
+| Error | medium | I2 (deepseek-v4-pro) | Lint is not clean: 43 warnings include a LATCH at `ip/third_party/apb_uart_sv/apb_uart.sv:195`, MULTIDRIVEN on `torv_soc.apb_presetn` at `rtl/torv_soc.sv:179`, WIDTHTRUNC at `rtl/torv_core.sv:602`, and SYNCASYNCNET on `hresetn` at `rtl/torv_soc.sv:33` — evidence: lint rerun with full diagnostics. | ip/third_party/apb_uart_sv/apb_uart.sv:195, rtl/torv_soc.sv:179, rtl/torv_core.sv:602, rtl/torv_soc.sv:33 |
+| Error | medium | I2 (deepseek-v4-pro) | Independent RTL rule check fails on a MULTI_DRIVEN error for `torv_soc.apb_presetn` and also flags the UART latch and core width truncation — evidence: `rtl_rules` status fail. | — |
+| Error | medium | I3 (deepseek-v4-flash) | Latch warning unexamined and not reconcilable with the E4 report: lint/rtl_rules infer a latch on `torv_soc.u_apb_uart.fifo_tx_data`, while synth reports "0 latch(es)" — because synth excludes the UART. Reporting both without noting they cover different tops is misleading. Evidence: lint LATCH apb_uart.sv:195; rtl_rules LATCH apb_uart.sv:195; synth metrics latches=0, top torv_cpu. | apb_uart.sv:195 |
+| Error | medium | I3 (deepseek-v4-flash) | `WIDTHTRUNC` on `rtl/torv_core.sv:602` ("ASSIGN expects 8 bits, RHS SHIFTR generates 32 bits") is in the core RTL and was neither investigated nor declared benign. Evidence: lint warning torv_core.sv:602; rtl_rules WIDTH_TRUNCATION torv_core.sv:602. | rtl/torv_core.sv:602 |
+| Error | medium | I3 (deepseek-v4-flash) | Reset handling risk unaddressed: `hresetn` is flopped as both synchronous and asynchronous (`SYNCASYNCNET`), a common source of simulation/synthesis divergence. Evidence: lint warning, rtl/torv_soc.sv:33. | rtl/torv_soc.sv:33 |
+| Error | medium | I3 (deepseek-v4-flash) | The "SDC constrains every endpoint" claim is narrower than it sounds: `check_setup` reports 0 unconstrained endpoints, but the tool itself states inputs without `set_input_delay` are not endpoints and are not listed, and SDC values (I/O budgets, uncertainty) are not judged. Evidence: check_sdc claim_scope/residual_risk. | — |
+| Error | medium | I3 (deepseek-v4-flash) | The reported critical path ends at an output port (`d_htrans[1]`, slow corner, slack +0.698, arrival 7.002); no evidence was shown that its required time comes from a real `set_output_delay` in the SDC rather than a default, so the "met" result hinges on an unverified I/O assumption. Evidence: synth worst_path; check_sdc diagnostics list empty (no I/O delay content shown). | — |
+| Error | medium | I3 (deepseek-v4-flash) | Evidence base for "core works" is one directed case: `smoke` covers only ALU deps/MUL/shift/JAL/tohost — no load-store, branch, hazard, or bus traffic. My wider run of 10 cases (smoke, branch, jump, flush, x0, muldiv, hazard, loadstore, mem_offsets, sbus) also passes, but 24 further listed cases (bus mix, sram_wbuf, uart, replay/dup hazards, perf) remain unrun and no coverage/mutation score exists. Evidence: describe_case smoke; regress 10 passed 0 failed; regress residual_risk "test adequacy unknown". | — |
+| Warning | low | I2 (deepseek-v4-pro) | The E4 synthesis/STA and SDC check cover top `torv_cpu` only, while the lint top is `torv_soc`; the UART latch and `apb_presetn` multiple-driver findings are outside the synthesis/SDC evidence — evidence: synth/check_sdc top `torv_cpu`, lint top `torv_soc`. | — |
+| Warning | low | I3 (deepseek-v4-flash) | Timing conclusion must remain labelled pre-PnR, single-SDC, no parasitics, no gate-level sim / no RTL-vs-netlist equivalence — the E4 tool states post-route slack is usually worse, so +0.698 ns at slow is not a signoff margin. Evidence: synth residual_risk and claim_scope. | — |
+| Warning | low | I3 (deepseek-v4-flash) | Numbers reproduce exactly on re-run (14766 cells, area 236630.87, setup WNS +0.698 slow / hold +0.068 fast, same SDC sha256 `00c08cf2…`), so the E4 figures themselves are not in doubt — only what they cover. Evidence: my synth run vs the author's, identical metrics and netlist.v sha256. | netlist.v |
+| Warning | info | I2 (deepseek-v4-pro) | All requested checks ran with pass status in their tool sense: lint E0 (0 errors, 43 warnings), smoke regression E2 (1/1 passed), synthesis/STA E4 (timing_met true), check_sdc E0 (0 unconstrained endpoints) — evidence: rerun tool results. | — |
+| Warning | info | I2 (deepseek-v4-pro) | `check_sdc` reports 0 unconstrained endpoints, but inputs without `set_input_delay` are not endpoints and are not listed — evidence: check_sdc residual_risk. | — |
+| Warning | info | I2 (deepseek-v4-pro) | Timing estimate meets the 10 ns project clock under `librelane/constraints.sdc` (slow-corner setup WNS +0.698 ns, hold WNS +0.068 ns), and is explicitly a pre-PnR estimate, not signoff — evidence: synth E4. | librelane/constraints.sdc |
+| Warning | info | I3 (deepseek-v4-flash) | Pure-noise warnings (EOFNEWLINE, GENUNNAMED, DECLFILENAME, 30 UNUSEDSIGNAL) are correctly non-blocking; the concerning ones are the four listed above, not the count of 43. | — |
 
 ### Evidence gate decisions
 
@@ -403,28 +431,28 @@ Trace: `runs/m2_torv_e2e.jsonl`
 
 ### Lint: diagnostics kept (20 of 43) †
 
-| severity | code | location | message |
+| level | code | location | message |
 |---|---|---|---|
-| warning | EOFNEWLINE | ip/third_party/apb_uart_sv/io_generic_fifo.sv:139 | Missing newline at end of file (POSIX 3.206). |
-| warning | EOFNEWLINE | ip/third_party/apb_uart_sv/uart_rx.sv:260 | Missing newline at end of file (POSIX 3.206). |
-| warning | EOFNEWLINE | ip/third_party/apb_uart_sv/uart_tx.sv:213 | Missing newline at end of file (POSIX 3.206). |
-| warning | PINCONNECTEMPTY | rtl/torv_core.sv:516 | Cell pin connected by name with empty reference: 'sbus_wdata' |
-| warning | PINCONNECTEMPTY | rtl/torv_soc.sv:250 | Cell pin connected by name with empty reference: 'event_o' |
-| warning | DECLFILENAME | ip/third_party/apb_uart_sv/apb_uart.sv:11 | Filename 'apb_uart' does not match MODULE name: 'apb_uart_sv' |
-| warning | GENUNNAMED | ip/third_party/socbus/rtl/AHB_APB_BRIDGE.v:73 | Unnamed generate block 'genblk1' (IEEE 1800-2017 27.6) |
-| warning | GENUNNAMED | ip/third_party/socbus/rtl/AHB_APB_BRIDGE.v:75 | Unnamed generate block 'genblk1' (IEEE 1800-2017 27.6) |
-| warning | WIDTHTRUNC | rtl/torv_core.sv:602 | Operator ASSIGN expects 8 bits on the Assign RHS, but Assign RHS's SHIFTR generates 32 bits. |
-| warning | UNUSEDSIGNAL | rtl/torv_soc.sv:50 | Signal is not used: 'i_hburst' |
-| warning | UNUSEDSIGNAL | rtl/torv_soc.sv:51 | Signal is not used: 'i_hprot' |
-| warning | UNUSEDSIGNAL | rtl/torv_soc.sv:61 | Signal is not used: 'd_hburst' |
-| warning | UNUSEDSIGNAL | rtl/torv_soc.sv:62 | Signal is not used: 'd_hprot' |
-| warning | UNUSEDSIGNAL | rtl/torv_soc.sv:72 | Signal is not used: 's_hburst' |
-| warning | UNUSEDSIGNAL | rtl/torv_soc.sv:73 | Signal is not used: 's_hprot' |
-| warning | UNUSEDSIGNAL | rtl/torv_soc.sv:149 | Signal is not used: 's_sram_hresp' |
-| warning | UNUSEDSIGNAL | rtl/torv_soc.sv:151 | Signal is not driven, nor used: 's_periph_hready' |
-| warning | UNUSEDSIGNAL | rtl/torv_soc.sv:152 | Signal is not used: 's_periph_hresp' |
-| warning | UNUSEDSIGNAL | rtl/torv_soc.sv:180 | Bits of signal are not used: 'apb_paddr'[31:12] |
-| warning | UNUSEDSIGNAL | rtl/torv_soc.sv:187 | Signal is not used: 'apb_pslverr' |
+| Warning | EOFNEWLINE | ip/third_party/apb_uart_sv/io_generic_fifo.sv:139 | Missing newline at end of file (POSIX 3.206). |
+| Warning | EOFNEWLINE | ip/third_party/apb_uart_sv/uart_rx.sv:260 | Missing newline at end of file (POSIX 3.206). |
+| Warning | EOFNEWLINE | ip/third_party/apb_uart_sv/uart_tx.sv:213 | Missing newline at end of file (POSIX 3.206). |
+| Warning | PINCONNECTEMPTY | rtl/torv_core.sv:516 | Cell pin connected by name with empty reference: 'sbus_wdata' |
+| Warning | PINCONNECTEMPTY | rtl/torv_soc.sv:250 | Cell pin connected by name with empty reference: 'event_o' |
+| Warning | DECLFILENAME | ip/third_party/apb_uart_sv/apb_uart.sv:11 | Filename 'apb_uart' does not match MODULE name: 'apb_uart_sv' |
+| Warning | GENUNNAMED | ip/third_party/socbus/rtl/AHB_APB_BRIDGE.v:73 | Unnamed generate block 'genblk1' (IEEE 1800-2017 27.6) |
+| Warning | GENUNNAMED | ip/third_party/socbus/rtl/AHB_APB_BRIDGE.v:75 | Unnamed generate block 'genblk1' (IEEE 1800-2017 27.6) |
+| Warning | WIDTHTRUNC | rtl/torv_core.sv:602 | Operator ASSIGN expects 8 bits on the Assign RHS, but Assign RHS's SHIFTR generates 32 bits. |
+| Warning | UNUSEDSIGNAL | rtl/torv_soc.sv:50 | Signal is not used: 'i_hburst' |
+| Warning | UNUSEDSIGNAL | rtl/torv_soc.sv:51 | Signal is not used: 'i_hprot' |
+| Warning | UNUSEDSIGNAL | rtl/torv_soc.sv:61 | Signal is not used: 'd_hburst' |
+| Warning | UNUSEDSIGNAL | rtl/torv_soc.sv:62 | Signal is not used: 'd_hprot' |
+| Warning | UNUSEDSIGNAL | rtl/torv_soc.sv:72 | Signal is not used: 's_hburst' |
+| Warning | UNUSEDSIGNAL | rtl/torv_soc.sv:73 | Signal is not used: 's_hprot' |
+| Warning | UNUSEDSIGNAL | rtl/torv_soc.sv:149 | Signal is not used: 's_sram_hresp' |
+| Warning | UNUSEDSIGNAL | rtl/torv_soc.sv:151 | Signal is not driven, nor used: 's_periph_hready' |
+| Warning | UNUSEDSIGNAL | rtl/torv_soc.sv:152 | Signal is not used: 's_periph_hresp' |
+| Warning | UNUSEDSIGNAL | rtl/torv_soc.sv:180 | Bits of signal are not used: 'apb_paddr'[31:12] |
+| Warning | UNUSEDSIGNAL | rtl/torv_soc.sv:187 | Signal is not used: 'apb_pslverr' |
 
 ### Most used cells †
 

@@ -12,16 +12,16 @@ Rules:
   example "lint: pass (E0)" or "regress: pass (E2)". Never mention an evidence level that no
   check in the data has.
 - Never call the design or the result correct, verified, working, robust, reliable or
-  bug-free (in Chinese: 正确, 已验证, 正常工作, 可靠, 保证). Say which cases or checks passed.
+  bug-free. Say which cases or checks passed.
 - A sentence that says timing is met must also name synth and E4 in that same sentence, say it
   is an estimate before placement and routing, and give WNS/TNS values exactly as in the data.
 - Give the numbers that matter (cases passed/failed, warnings, slack, cells/area) as in the data.
 - Say what the reviewers found, the most serious first, and where they disagree.
 - Say what was not run or not checked.
-- At most about 180 words (or 350 Chinese characters) before the last section. Short paragraphs
+- At most about 180 words before the last section. Short paragraphs
   or a few bullets; no tables, no headings except the last one.
-- End with a section headed "Residual risk" (in Chinese: "残余风险") that lists what the
-  checks did not cover. Name there every case listed in not_run.described_but_not_run.
+- End with a section headed "Residual risk" that lists what the checks did not cover. Name
+  there every case listed in not_run.described_but_not_run.
 
-Write in the language the task asks for. Keep tool names, file names, signal names, codes and
-quotes as they are in the data.
+Write in English. Keep tool names, file names, signal names, codes and quotes as they are in
+the data.

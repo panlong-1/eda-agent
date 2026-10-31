@@ -1,20 +1,26 @@
 # Review summary · m1_torv_hazard3
 
-> Written by plain code from the receipt data (no model). Everything else is in the details below; quotes and tool output stay in their original language.
+> Written by plain code from the receipt data (no model). The tables below are the record; the full receipt is at the end.
 
-**In one line:** 1 of 1 check(s) passed; gate passed; 0 serious and 2 warning item(s) to look at.
+**Fatal 0 · Error 2 · Warning 4** — 1 of 1 check(s) passed; gate passed.
 
-- **Task**: Run the forwarding and load-use hazard cases and tell me if the pipeline hazards are handled
-- **What you decide**: No human decision was requested for this run (status done); nothing to decide.
-- **Status**: done (no approval requested) · torv · deepseek / deepseek-v4-pro
+- **Task:** Run the forwarding and load-use hazard cases and tell me if the pipeline hazards are handled
+- **What you decide:** No human decision was requested for this run (status done); nothing to decide.
+- **Status:** done (no approval requested) · torv · deepseek / deepseek-v4-pro
 
 ## Look at these before approving
 
-- ⚠️ No tool versions recorded for: regress. The result cannot be tied to a tool release.
-- ⚠️ The gate sent the agent's report back 1 time(s) before it passed; reason: 'correctly' claims functional correctness, which needs E3+; the best passing evidence here is E2, which supports only 'these checks/cases passed': 'That supports that the tested forwarding and load-use scenarios run cor…
-- ℹ️ Only part of the regression ran: 30 listed case(s) were not run.
-- ℹ️ lint was not run.
-- ℹ️ No independent review was run: only the gate checked the report.
+- 🟥 **Error**: The gate sent the agent's report back 1 time(s) before it passed: 'correctly' claims functional correctness, which needs E3+; the best passing evidence here is E2, which supports only 'these checks/cases passed': 'That supports that the tested forwarding and load-use scenarios run cor…
+- 🟥 **Error**: No tool versions recorded for: regress; the result cannot be tied to a tool release
+
+<details><summary>4 warning(s)</summary>
+
+- 🟨 Warning: regress: pass/fail comes from the testbench's own self-check or exit status, not from separate results
+- 🟨 Warning: Only part of the regression ran: 30 listed case(s) not run
+- 🟨 Warning: lint was not run
+- 🟨 Warning: No independent review was run: only the gate checked the report
+
+</details>
 
 ## Checks
 

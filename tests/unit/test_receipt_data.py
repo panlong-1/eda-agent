@@ -65,8 +65,8 @@ def receipt(**over) -> dict:
     return r
 
 
-def tables(r, lang="en") -> dict:
-    return {t.title: t for t in data_tables(r, lang)}
+def tables(r) -> dict:
+    return {t.title: t for t in data_tables(r)}
 
 
 def texts(table) -> list[list[str]]:
@@ -86,14 +86,14 @@ def test_data_tables_show_the_numbers():
     assert corners[1] == ["slow (worst)", "+0.698", "+0.000", "+0.291", "+0.000"]
     assert texts(t["Worst path"]) == [["_27317_", "d_htrans[1]", "+0.698", "7.002", "slow"]]
     findings = texts(t["Reviewer findings"])
-    assert findings[0][:2] == ["medium", "I2 (m2)"] and findings[0][3] == "ip/uart.sv:195"  # no bare duplicate
+    assert findings[0][:3] == ["Error", "medium", "I2 (m2)"] and findings[0][4] == "ip/uart.sv:195"  # no bare dup
+    assert findings[1][:2] == ["Warning", "info"]
+    assert texts(t["Lint: diagnostics kept (3 of 3)"])[0][0] == "Warning"
     gate = texts(t["Evidence gate decisions"])
     assert gate[0][:3] == ["1", "reject", "E4"] and "'correct'" in gate[0][3]
     cost = texts(t["Cost"])
     assert cost[0][:6] == ["author (the agent)", "deepseek / m", "3", "3", "1,000", "100"]
     assert cost[-1][0] == "total" and cost[-1][4] == "1,050"
-    zh = tables(receipt(), "zh")
-    assert "各工艺角时序（ns；负数表示违例）" in zh and "评审发现" in zh
 
 
 def test_unknown_tools_get_a_plain_numbers_table():
@@ -111,7 +111,8 @@ def test_old_receipt_gets_numbers_from_its_trace_without_changing_it(tmp_path):
     old = receipt(trace="runs/r1.jsonl", checks_run=[{k: v for k, v in LINT.items()
                                                       if k not in ("metrics", "diagnostics", "diagnostics_total",
                                                                    "duration_s")}])
-    old = human_gate.decide(human_gate.request_approval(old, "final report", "w"), "approve", by="A")
+    old = human_gate.decide(human_gate.request_approval(old, "final report", "w"), "approve", by="A",
+                            reason="known")
     trace = tmp_path / "r1.jsonl"
     trace.write_text("\n".join(json.dumps(x) for x in [
         {"t": 1.0, "kind": "turn"},
@@ -124,7 +125,7 @@ def test_old_receipt_gets_numbers_from_its_trace_without_changing_it(tmp_path):
     c = view["checks_run"][0]
     assert c["metrics"] == LINT["metrics"] and c["duration_s"] == 0.5 and c["from_trace"]
     assert "Lint: by warning code †" in tables(view)
-    assert not any("changed after the decision" in i.text for i in summarize(view).attention)
+    assert not any("changed after its decision" in i.text for i in summarize(view).issues)
     md, _ = render_files(old, tmp_path / "out", base=tmp_path)
     assert "come from the run's trace" in md.read_text()
 
@@ -134,10 +135,10 @@ async def test_narrative_goes_through_the_gate_and_is_recorded():
     overclaim = "The design is correct and verified.\n\nResidual risk\n- none at all, really"
     model = ScriptedAdapter([Turn(stop="end", text=overclaim),
                              Turn(stop="end", text=GOOD, usage={"input_tokens": 10, "output_tokens": 5})], name="m-x")
-    n = await write_narrative(r, model, "en", "sys", provider="scripted")
+    n = await write_narrative(r, model, "sys", provider="scripted")
     assert n["gate"]["passed"] and n["gate"]["rewrites"] == 1 and n["turns"] == 2
     assert "'correct' claims functional correctness" in " ".join(n["gate"]["decisions"][0]["reasons"])
-    assert (n["text"], n["model"], n["prompt"], n["lang"]) == (GOOD, "m-x", "receipt_summary.v1", "en")
+    assert (n["text"], n["model"], n["prompt"]) == (GOOD, "m-x", "receipt_summary.v1")
     # what the model was given: the receipt data only, without the decision or the trace
     assert '"run_id": "r1"' in model.task and '"approval"' not in model.task
     assert "Evidence gate rejected" in model.user_messages[0]
@@ -147,14 +148,13 @@ async def test_rejected_narrative_is_marked_and_flagged(tmp_path):
     r = human_gate.request_approval(receipt(), "final report", "w")
     sha = human_gate.content_sha256(r)
     bad = Turn(stop="end", text="Everything works.\n\nResidual risk\n- nothing worth naming here")
-    r["narratives"] = {"en": await write_narrative(r, ScriptedAdapter([bad, bad]), "en", "sys", provider="s")}
-    assert human_gate.content_sha256(r) == sha  # narratives are outside the decided content
-    assert not r["narratives"]["en"]["gate"]["passed"]
-    assert any("rejected by the evidence gate" in i.text for i in summarize(r, "en").attention)
-    page = render_html(r, "en")
+    r["narrative"] = await write_narrative(r, ScriptedAdapter([bad, bad]), "sys", provider="s")
+    assert human_gate.content_sha256(r) == sha  # the narrative is outside the decided content
+    assert not r["narrative"]["gate"]["passed"]
+    assert any("rejected by the evidence gate" in i.text and i.level == "warning" for i in summarize(r).issues)
+    page = render_html(r)
     assert "REJECTED by the evidence gate" in page and "Everything works." in page
-    md = render_markdown(r, "zh")
-    assert "另有模型撰写的摘要（en）" in md
+    assert "Summary written by a model (AI)" in render_markdown(r)
 
 
 def test_gate_results_rebuild_timing_and_described_cases():
@@ -166,17 +166,14 @@ def test_gate_results_rebuild_timing_and_described_cases():
     assert "approval" not in model_view(human_gate.request_approval(r, "s", "w"))
 
 
-def test_html_has_both_languages_and_stays_self_contained():
-    r = receipt(narratives={"zh": {"text": "**粗体** <script>x</script>\n- 一项", "provider": "p", "model": "m",
-                                   "prompt": "receipt_summary.v1", "at": "2026-11-01T00:00:00+01:00",
-                                   "gate": {"passed": True, "rewrites": 0, "decisions": []}}})
-    page = render_html(r, "zh")
-    assert 'id="lang-zh" class="lang-radio" checked' in page and 'id="lang-en" class="lang-radio">' in page
-    assert 'class="l-en"' in page and 'class="l-zh"' in page
-    assert "Review summary" in page and "审核摘要" in page and "<b>粗体</b>" in page
-    assert "<script" not in page and "&lt;script&gt;" in page
-    for banned in ("src=", "href=", "http://", "https://", "@import"):
-        assert banned not in page, banned
+def test_narrative_box_is_marked_and_escaped():
+    r = receipt(narrative={"text": "**bold** <script>x</script>\n- one item", "provider": "p", "model": "m",
+                           "prompt": "receipt_summary.v1", "at": "2026-11-01T00:00:00+01:00",
+                           "gate": {"passed": True, "rewrites": 0, "decisions": []}})
+    page = render_html(r)
+    assert '<span class="tag">AI</span><b>Summary written by a model</b>' in page and "passed the evidence gate" in page
+    assert "<b>bold</b>" in page and "<script" not in page and "&lt;script&gt;" in page
+    assert "Check it against the tables: they are the record." in page
 
 
 def test_md_light_escapes_everything():
@@ -188,9 +185,8 @@ def test_cli_narrate_without_a_key_still_renders(tmp_path):
     write_receipt(receipt(), tmp_path)
     env = {k: v for k, v in os.environ.items() if k not in ("DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY")}
     res = subprocess.run([sys.executable, "-m", "eda_agent.cli", "receipt", "r1", "--runs-dir", str(tmp_path),
-                          "--narrate", "--all-langs"], capture_output=True, text=True, env=env)
+                          "--narrate"], capture_output=True, text=True, env=env)
     assert res.returncode == 0, res.stderr
-    assert "summary (en) not written" in res.stderr and "summary (zh) not written" in res.stderr
-    assert (tmp_path / "r1.receipt.en.md").read_text().startswith("# Review summary")
-    assert (tmp_path / "r1.receipt.zh.md").read_text().startswith("# 审核摘要")
-    assert "narratives" not in json.loads((tmp_path / "r1.receipt.json").read_text())
+    assert "summary not written" in res.stderr
+    assert (tmp_path / "r1.receipt.md").read_text().startswith("# Review summary")
+    assert "narrative" not in json.loads((tmp_path / "r1.receipt.json").read_text())

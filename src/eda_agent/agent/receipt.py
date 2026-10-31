@@ -2,8 +2,9 @@
 
 Written at the end of every run as runs/<id>.receipt.json (for tools) and, for a human
 reviewer, runs/<id>.receipt.md and runs/<id>.receipt.html: a review summary on top
-(receipt_view.py), the full receipt below. Everything in it is taken from the
-run report and the tool envelopes; nothing is re-derived by a model.
+(receipt_view.py), the data tables, the full receipt below. Everything in it is taken from the
+run report and the tool envelopes; nothing is re-derived by a model. The .json also carries
+`levels`: the Fatal / Error / Warning issues (levels.py), derived from the rest.
 """
 from __future__ import annotations
 
@@ -13,9 +14,9 @@ from pathlib import Path
 from ..core.envelope import EVIDENCE_LEVELS
 from .gate import described_cases, executed_cases, split_residual, timing_results
 from .loop import RunReport
+from .levels import levels_record
 from .receipt_tables import with_trace_data
-from .receipt_view import (LANGS, render_data_md, render_html, render_narrative_md, render_summary_md,
-                           summarize)
+from .receipt_view import render_data_md, render_html, render_narrative_md, render_summary_md, summarize
 
 MAX_DIAGNOSTICS = 50  # per check; the count of all of them is kept in diagnostics_total
 
@@ -99,12 +100,12 @@ def _cell(text: str) -> str:
     return " ".join(str(text).split()).replace("|", "\\|")
 
 
-def render_markdown(r: dict, lang: str = "en") -> str:
-    """In `lang`: the review summary, the model-written summary if there is one, the data tables;
-    then the full receipt (details, in English) and the long lists."""
-    data, more = render_data_md(r, lang)
-    narrative = render_narrative_md(r, lang)
-    return (render_summary_md(summarize(r, lang)) + ("\n" + narrative if narrative else "") + "\n" + data
+def render_markdown(r: dict) -> str:
+    """The review summary, the model-written summary if there is one, the data tables; then the
+    full receipt (details) and the long lists."""
+    data, more = render_data_md(r)
+    narrative = render_narrative_md(r)
+    return (render_summary_md(summarize(r)) + ("\n" + narrative if narrative else "") + "\n" + data
             + "\n---\n\n" + render_details(r) + ("\n" + more if more else ""))
 
 
@@ -201,27 +202,24 @@ def _render_review(v: dict) -> list[str]:
     return out
 
 
-def write_receipt(receipt: dict, out_dir: Path, lang: str = "en") -> tuple[Path, Path]:
-    """runs/<id>.receipt.json, plus the rendered .md and .html next to it."""
+def write_receipt(receipt: dict, out_dir: Path, base: Path | None = None) -> tuple[Path, Path]:
+    """runs/<id>.receipt.json (with its `levels` brought up to date), plus the rendered .md and
+    .html next to it. `base`: where the receipt's trace may be found (default out_dir)."""
     out_dir.mkdir(parents=True, exist_ok=True)
+    receipt["levels"] = levels_record(with_trace_data(receipt, base or out_dir))
     js = out_dir / f"{receipt['run_id']}.receipt.json"
     js.write_text(json.dumps(receipt, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    md, _ = render_files(receipt, out_dir, lang)
+    md, _ = render_files(receipt, out_dir, base=base)
     return js, md
 
 
-def render_files(receipt: dict, out_dir: Path, lang: str = "en", *, base: Path | None = None,
-                 all_langs: bool = False) -> tuple[Path, Path]:
-    """(Re-)write runs/<id>.receipt.md (in `lang`) and .html (both languages, `lang` first) from
-    the receipt data; all_langs also writes <id>.receipt.en.md and .zh.md. The .json is not
+def render_files(receipt: dict, out_dir: Path, *, base: Path | None = None) -> tuple[Path, Path]:
+    """(Re-)write runs/<id>.receipt.md and .html from the receipt data; the .json is not
     touched. `base`: where the receipt's trace may be found (default out_dir)."""
     out_dir.mkdir(parents=True, exist_ok=True)
     view = with_trace_data(receipt, base or out_dir)
     name = f"{receipt['run_id']}.receipt"
     md, page = out_dir / f"{name}.md", out_dir / f"{name}.html"
-    md.write_text(render_markdown(view, lang), encoding="utf-8")
-    page.write_text(render_html(view, lang), encoding="utf-8")
-    if all_langs:
-        for other in LANGS:
-            (out_dir / f"{name}.{other}.md").write_text(render_markdown(view, other), encoding="utf-8")
+    md.write_text(render_markdown(view), encoding="utf-8")
+    page.write_text(render_html(view), encoding="utf-8")
     return md, page

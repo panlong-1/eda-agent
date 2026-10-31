@@ -1,11 +1,9 @@
 """Where the CLI finds its inputs when the command line leaves them out.
 
 - The project config: --project, else `eda-agent.toml` in the current directory or a parent.
-- Personal defaults (provider, model, effort, review, receipt language):
-  ~/.config/eda-agent/config.toml, e.g.
+- Personal defaults (provider, model, effort, review, narrate): ~/.config/eda-agent/config.toml, e.g.
       provider = "deepseek"
       review = "I2"
-      lang = "zh"          # review summary of receipts in Chinese (default "en")
       narrate = true       # add a model-written summary to each receipt (needs the API key)
   Command-line options always win.
 """
@@ -16,8 +14,7 @@ import tomllib
 from pathlib import Path
 
 PROJECT_FILE = "eda-agent.toml"
-USER_KEYS = ("provider", "model", "effort", "review", "review_provider", "review_model", "lang", "narrate")
-LANGS = ("en", "zh")
+USER_KEYS = ("provider", "model", "effort", "review", "review_provider", "review_model", "narrate")
 
 
 def user_config_path() -> Path:
@@ -33,8 +30,6 @@ def user_defaults(path: Path | None = None) -> dict:
     unknown = set(data) - set(USER_KEYS)
     if unknown:
         raise ValueError(f"{path}: unknown key(s) {sorted(unknown)}; known: {', '.join(USER_KEYS)}")
-    if data.get("lang", "en") not in LANGS:
-        raise ValueError(f"{path}: lang must be one of {', '.join(LANGS)}")
     return data
 
 

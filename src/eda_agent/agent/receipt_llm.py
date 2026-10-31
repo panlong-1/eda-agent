@@ -4,9 +4,9 @@ The model sees the receipt data only (no trace, no files, no tools). Its text go
 same evidence gate as the agent's report (agent/gate.py: citations, strength, timing, residual
 risk, skipped cases), against results rebuilt from the receipt, with one rewrite allowed. The
 receipt keeps the text with the provider, model, prompt name, gate decisions and cost under
-`narratives.<lang>`; the rendered receipt marks it as model-written, and the plain-code
-summary and tables above and below it stay the authority. Narratives are left out of the
-sha256 a decision records, so one can be added to a decided receipt without changing it.
+`narrative`; the rendered receipt marks it as model-written, and the plain-code summary and
+tables above and below it stay the authority. The narrative is left out of the sha256 a
+decision records, so one can be added to a decided receipt without changing it.
 """
 from __future__ import annotations
 
@@ -17,11 +17,11 @@ from .gate import check_report
 from .loop import Budget, run_agent
 
 PROMPT = "receipt_summary.v1"
-LANGUAGE = {"en": "English", "zh": "Simplified Chinese (简体中文)"}
 # Fields the model does not get: the decision (the summary is not about it), the trace path,
-# earlier narratives, the reviewers' raw text (their findings and checklists are kept), and
-# display-only data added from the trace.
-_DROP = ("approval", "status", "agent_status", "trace", "narratives", "_trace_used", "_source")
+# an earlier narrative, the derived levels, the reviewers' raw text (their findings and
+# checklists are kept), and display-only data added from the trace.
+_DROP = ("approval", "status", "agent_status", "trace", "narrative", "narratives", "levels", "_trace_used",
+         "_source")
 
 
 def model_view(r: dict) -> dict:
@@ -52,19 +52,17 @@ async def _no_tools(name: str, args: dict) -> tuple[str, bool]:
     return "no tools are available here", True
 
 
-async def write_narrative(r: dict, model, lang: str, system: str, *, provider: str,
-                          prompt: str = PROMPT, max_rewrites: int = 1) -> dict:
-    if lang not in LANGUAGE:
-        raise ValueError(f"unknown language {lang!r}")
+async def write_narrative(r: dict, model, system: str, *, provider: str, prompt: str = PROMPT,
+                          max_rewrites: int = 1) -> dict:
     results = gate_results(r)
-    task = (f"Write the summary in {LANGUAGE[lang]}.\n\nReceipt data (JSON):\n```json\n"
+    task = ("Write the summary.\n\nReceipt data (JSON):\n```json\n"
             f"{json.dumps(model_view(r), ensure_ascii=False, indent=1)}\n```")
     report = await run_agent(model, [], _no_tools, task, system,
                              Budget(max_turns=1 + max_rewrites, max_tool_calls=0, max_gate_rewrites=max_rewrites),
                              gate=lambda text, _: check_report(text, results))
     passed = bool(report.gate) and report.gate[-1]["passed"]
     return {
-        "lang": lang, "text": report.final_text.strip(), "provider": provider, "model": model.name,
+        "text": report.final_text.strip(), "provider": provider, "model": model.name,
         "prompt": prompt, "input": "the receipt data only (no trace, no files, no tools)",
         "gate": {"passed": passed, "rewrites": max(0, len(report.gate) - 1), "decisions": report.gate},
         "at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
