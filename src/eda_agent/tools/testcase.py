@@ -338,7 +338,11 @@ def run_score_tests(project: Project, run_id: str, file: str, mutate_run: str, t
         "test": str(test), "kind": kind, "mutate_run": mutate_run, "file": rel,
         "original": [g["status"] for g in golden], "original_perf": golden[0]["perf"],
         "targets": {str(t): {"runs": [r["status"] for r in results[t]], "verdict": verdict.get(t),
-                             "stable": stable[t], "detail": results[t][0]["detail"]} for t in targets},
+                             "stable": stable[t], "detail": results[t][0]["detail"],
+                             # the [perf] numbers of each run, so a person sees e.g. 16005 -> 18004 cycles
+                             "perf": [r["perf"] for r in results[t]]} for t in targets},
+        # the [perf] key of every mutant whose cycle count this test moved (vs original_perf)
+        "perf_moved": {str(m): results[m][0]["perf"].get(key) for m, v in verdict.items() if v == "perf_killed"},
         "killed": sorted(new_killed), "perf_killed": sorted(new_perf - new_killed),
         "newly_killed": sorted((new_killed - killed_before) & scored),
         "equivalent_killed": sorted(new_killed & equiv),

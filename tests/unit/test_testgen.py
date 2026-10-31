@@ -84,7 +84,8 @@ def test_context_write_and_score(toy_run):
     s = T.run_score_tests(project, "r1", good.metrics["path"], run, [mid])
     m = s.metrics
     assert s.status == "pass" and s.evidence_level == "E3" and m["kind"] == "functional"
-    assert m["targets"][str(mid)] == {"runs": ["FAIL", "FAIL"], "verdict": "killed", "stable": True, "detail": "exit status 1"}
+    assert m["targets"][str(mid)] == {"runs": ["FAIL", "FAIL"], "verdict": "killed", "stable": True,
+                                      "detail": "exit status 1", "perf": [{}, {}]}
     assert mid in m["newly_killed"] and m["kill_rate_before"] == 0.5 and m["kill_rate_after"] == 1.0
     assert "E3 covers exactly those mutants" in s.claim_scope
     patch = Path(m["patch"]).read_text()
@@ -109,6 +110,8 @@ def test_a_timing_test_closes_its_target_by_cycle_count(toy_run):
     m = s.metrics
     assert s.status == "pass" and s.evidence_level == "E3" and m["kind"] == "perf"
     assert m["targets"][str(mid)]["verdict"] == "perf_killed" and mid in m["perf_killed"]
+    assert m["original_perf"]["cycles"] == 10 and m["targets"][str(mid)]["perf"] == [{"cycles": 12}, {"cycles": 12}]
+    assert m["perf_moved"][str(mid)] == 12
     assert m["kill_rate_after"] == m["kill_rate_before"]  # not a functional kill
     assert m["kill_rate_with_perf_after"] > m["kill_rate_with_perf_before"]
     assert "kind=perf" in s.claim_scope

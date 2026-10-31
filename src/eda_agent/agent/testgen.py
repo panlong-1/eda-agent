@@ -242,6 +242,13 @@ def render_markdown(r: dict) -> str:
             lines.append(f"\n- score_tests ({s.get('status')}, {s.get('evidence_level')}): {s.get('summary', '')}")
             if m.get("perf_killed"):
                 lines.append(f"  - perf-killed (passed, cycle count moved): {m['perf_killed']}")
+            base = m.get("original_perf") or {}
+            for tid, tv in (m.get("targets") or {}).items():
+                for k in ("cycles", *[k for k in base if k != "cycles"][:3]):
+                    runs = [p.get(k) for p in tv.get("perf") or []]
+                    if k in base and runs:
+                        lines.append(f"  - mutant {tid}, {k}: unmodified design {base[k]} -> mutant "
+                                     f"{', '.join(map(str, runs))}")
         if t["status"] == "closed":
             v = t.get("review") or {}
             lines += [f"\n- test: `{t['test']}` · patch: `{t['patch']}`",
