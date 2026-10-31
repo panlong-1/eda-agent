@@ -78,3 +78,10 @@ def test_flow_numbers_count_as_timing_evidence_only_with_a_known_sdc():
     assert check_report(text, [flow(sha=SHA)]).passed
     d = check_report(text, [flow()])
     assert not d.passed and any("SDC sha256" in r for r in d.reasons)
+
+
+def test_signoff_level_e5_partial_is_not_a_citation_of_e5():
+    d = check_report("flow_report full_p10: status fail at E4, signoff level E5-partial (the physical parts only)."
+                     + RISK, [flow()])
+    assert d.passed, d.reasons
+    assert not check_report("flow_report full_p10 reached E5." + RISK, [flow()]).passed

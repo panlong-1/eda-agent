@@ -58,7 +58,8 @@ MIN_RESIDUAL_CHARS = 20
 
 _STRONG = re.compile(r"(?<![A-Za-z])(?:" + "|".join(STRONG_CLAIM_WORDS) + r")(?![A-Za-z])", re.I)
 _NEG = re.compile(r"(?<![A-Za-z])(?:" + "|".join(NEGATIONS) + r")(?![A-Za-z])", re.I)
-_LEVEL = re.compile(r"\b(E[0-5])\b")
+# "E5-partial" is a flow result's signoff_level, not a citation of evidence level E5
+_LEVEL = re.compile(r"\b(E[0-5])\b(?!-partial)")
 _STATUS = re.compile(r"\b(pass|fail|error|timeout)(?:ed|es|ing)?\b", re.I)
 _COUNT = re.compile(r"\b(\d+)\s*(?:/\s*\d+\s*)?(?:cases?\s+|tests?\s+)?(passed|failed)\b", re.I)
 _CLAUSE = re.compile(r"[^.!?;,。！？；，\n]+")
