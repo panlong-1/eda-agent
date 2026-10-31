@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 LEVELS = ("fatal", "error", "warning")
 TITLE = {"fatal": "Fatal", "error": "Error", "warning": "Warning"}
@@ -67,20 +67,67 @@ DIAG_LEVEL = {"error": "fatal", "warning": "warning"}
 @dataclass
 class Issue:
     level: str        # fatal | error | warning
-    text: str         # plain words, written here
-    quote: str = ""   # verbatim text from the receipt (a finding, a reason), if any
-    source: str = ""  # which check, reviewer or part of the receipt
+    text: str         # one line in plain words (for a finding: its first sentence)
+    quote: str = ""   # verbatim text from the receipt (a reason, a note), if any
+    source: str = ""  # which check, reviewer(s) or part of the receipt
+    location: str = ""                                  # file:line, when the receipt names one
+    details: list[str] = field(default_factory=list)    # the full texts behind a grouped finding
 
     @property
     def id(self) -> str:
         """Stable within one receipt; the review page uses it for its tick boxes."""
-        return hashlib.sha1(f"{self.level}|{self.text}|{self.quote}".encode()).hexdigest()[:10]
+        return hashlib.sha1(f"{self.level}|{self.text}|{self.quote}|{self.location}".encode()).hexdigest()[:10]
 
     def label(self) -> str:
-        return f"{self.text}: {self.quote}" if self.quote else self.text
+        where = f" ({self.location})" if self.location else ""
+        return (f"{self.text}: {self.quote}" if self.quote else self.text) + where
 
     def to_dict(self) -> dict:
         return {**asdict(self), "id": self.id}
+
+
+_LOCATION = re.compile(r"[\w./-]+\.(?:sv|svh|v|vh|vhd|sdc|tcl|S|s|c|h|py|yaml|toml):\d+(?![\w])")
+_AT = re.compile(r"\s*\(at [^)]*\)")
+_EVIDENCE = re.compile(r"\s*(?:—|--|-)?\s*\b[Ee]vidence:.*$", re.S)
+
+
+def locations(text: str) -> list[str]:
+    """file:line mentions, without a bare name that a longer path already covers."""
+    found = list(dict.fromkeys(_LOCATION.findall(text)))
+    return [x for x in found if not any(y != x and y.endswith("/" + x) for y in found)]
+
+
+def first_sentence(text: str, n: int = 170) -> str:
+    """A finding's first sentence, without its location and evidence tail, as one line."""
+    t = _EVIDENCE.sub("", _AT.sub("", " ".join(text.replace("**", "").split())))
+    m = re.search(r"(?<!e\.g)(?<!i\.e)[.;](\s|$)", t)
+    t = t[: m.start()] if m and m.start() > 30 else t
+    return t if len(t) <= n else t[: t.rfind(" ", 0, n - 1)].rstrip(",;:") + " …"
+
+
+def _group_findings(reviews: list[tuple[dict, int]]) -> list[Issue]:
+    """One issue per finding place: findings that name the same first file:line (or, naming
+    none, have the same text) are one row, at the highest level any reviewer gave it, with
+    every reviewer listed and each full text kept for the details."""
+    groups: dict[str, list[tuple[dict, dict]]] = {}
+    for v, _ in reviews:
+        for f in v.get("findings", []):
+            locs = locations(f["text"])
+            key = locs[0].rsplit("/", 1)[-1] if locs else " ".join(f["text"].split())
+            groups.setdefault(key, []).append((v, f))
+    out = []
+    for members in groups.values():
+        level = min((FINDING_LEVEL.get(f["severity"], "warning") for _, f in members), key=LEVELS.index)
+        # the one-line text: the rule-based reviewer's (terse) if it is there, else the most severe
+        lead = min(members, key=lambda m: (m[0]["reviewer"] != "rules", LEVELS.index(
+            FINDING_LEVEL.get(m[1]["severity"], "warning")), len(m[1]["text"])))[1]
+        who = list(dict.fromkeys(reviewer_name(v) for v, _ in members))
+        locs = next((locations(f["text"])[:1] for _, f in members if locations(f["text"])), [])
+        texts = list(dict.fromkeys(f"[{f['severity']}] {reviewer_name(v)}: {f['text']}" for v, f in members))
+        out.append(Issue(level, first_sentence(lead["text"]), source=", ".join(who),
+                         location=", ".join(locs), details=texts if len(texts) > 1 or
+                         len(" ".join(lead["text"].split())) > len(first_sentence(lead["text"])) + 2 else []))
+    return out
 
 
 def counts(issues: list[Issue]) -> dict:
@@ -235,17 +282,7 @@ def assess(r: dict) -> list[Issue]:
     for v, _ in reviews:
         if v.get("verdict") == "reject":
             add("fatal", f"{reviewer_name(v)[0].upper()}{reviewer_name(v)[1:]} said reject", source=reviewer_name(v))
-    seen: dict[str, Issue] = {}
-    for v, _ in reviews:
-        for f in v.get("findings", []):
-            key = " ".join(f["text"].split())
-            level = FINDING_LEVEL.get(f["severity"], "warning")
-            prev = seen.get(key)
-            if prev and LEVELS.index(prev.level) <= LEVELS.index(level):
-                continue
-            seen[key] = Issue(level, f"[{f['severity']}] from {reviewer_name(v)}", _short(f["text"], 400),
-                              reviewer_name(v))
-    out += list(seen.values())
+    out += _group_findings(reviews)
     for v, _ in reviews:
         if not v.get("format_ok", True):
             add("warning", f"Reviewer {reviewer_name(v)} did not follow the required format", source=reviewer_name(v))

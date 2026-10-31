@@ -220,7 +220,7 @@ def _reviews(s: Summary, r: dict) -> None:
 
 # ---------------------------------------------------------------- Markdown
 
-MARK = {"fatal": "⛔ **Fatal**", "error": "🟥 **Error**", "warning": "🟨 Warning"}
+MARK = {"fatal": "🟥 **Fatal**", "error": "🟧 **Error**", "warning": "🟨 Warning"}
 BADGE_MD = {"pass": "✅", "fail": "❌", "error": "❌", "timeout": "❌"}
 
 
@@ -230,7 +230,9 @@ def _md(text: str) -> str:
 
 
 def _issue_md(i: Issue) -> str:
-    return f"- {MARK[i.level]}: {i.text}" + (f": {_md(_short(i.quote))}" if i.quote else "")
+    where = " · ".join(x for x in (i.source, f"`{i.location}`" if i.location else "") if x)
+    quote = f": {_md(_short(i.quote))}" if i.quote else ""
+    return f"- {MARK[i.level]}: {_md(i.text)}{quote}" + (f" — *{where}*" if where else "")
 
 
 def _cell_text(c) -> str:
@@ -328,80 +330,107 @@ def render_data_md(r: dict) -> tuple[str, str]:
 
 # ---------------------------------------------------------------- HTML
 
+# One type scale (13 / 15 / 18 / 24 px), spacing in steps of 8 px, colours as tokens for light and
+# dark. Level colours: Fatal red, Error orange, Warning yellow, used by one pill component.
 CSS = """
-:root{--bg:#fbfaf7;--fg:#1d1d1f;--muted:#5f6368;--card:#fff;--line:#e3e1dc;--code:#f3f1ec;
---ok:#1e7a3c;--ok-bg:#e3f4e8;--bad:#b3261e;--bad-bg:#fbe5e3;--warn:#8a5a00;--warn-bg:#fdf1d6;
---fatal:#fff;--fatal-bg:#8e1b14;--info:#245a9c;--info-bg:#e5eefa;--accent:#3d5a80;--ai:#6b4fa0;--ai-bg:#f1ecf8}
-@media (prefers-color-scheme:dark){:root{--bg:#17181a;--fg:#e8e6e3;--muted:#a3a7ad;--card:#202225;
---line:#34373b;--code:#2a2c30;--ok:#7fd49a;--ok-bg:#1d3324;--bad:#ff9b92;--bad-bg:#3d1f1d;
---warn:#f2c46b;--warn-bg:#3a2f17;--fatal:#fff;--fatal-bg:#b3261e;--info:#9cc1f2;--info-bg:#1c2a3d;
---accent:#9db6d8;--ai:#c7b2ef;--ai-bg:#2a2236}}
+:root{--bg:#f7f7f5;--fg:#1f2328;--muted:#5f6670;--card:#fff;--line:#dfe1e4;--soft:#f0f1f3;--accent:#2f5d8a;
+--fatal:#b42318;--fatal-bg:#fdecea;--error:#b54708;--error-bg:#fff3e6;--warn:#7a5d00;--warn-bg:#fdf6d8;
+--ok:#1e7a3c;--ok-bg:#e6f4ea;--info:#2f5d8a;--info-bg:#e8f0f8;--ai:#6b4fa0;--ai-bg:#f4f0fa;--on-fatal:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#141619;--fg:#e6e8eb;--muted:#9aa1aa;--card:#1c1f23;--line:#30353b;
+--soft:#24282d;--accent:#8fb6e0;--fatal:#ff8a80;--fatal-bg:#3a1d1b;--error:#ffb070;--error-bg:#3a2a18;
+--warn:#f0d264;--warn-bg:#332c14;--ok:#7fd49a;--ok-bg:#183323;--info:#8fb6e0;--info-bg:#1b2a3a;--ai:#c7b2ef;
+--ai-bg:#251f31;--on-fatal:#1c1f23}}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 -apple-system,"Segoe UI",system-ui,sans-serif}
-main{max-width:1040px;margin:0 auto;padding:20px 16px 64px}
-h1{font-size:1.45rem;margin:0 0 4px}h2{font-size:1.12rem;margin:26px 0 8px;color:var(--accent)}
-h3{font-size:.98rem;margin:18px 0 6px}
-.sub{color:var(--muted);font-size:.88rem;margin:0 0 14px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:14px 0}
-.decide{border-left:5px solid var(--accent)}
-.k{font-weight:600;color:var(--muted);font-size:.82rem;text-transform:uppercase;letter-spacing:.03em}
-.badge{display:inline-block;padding:1px 9px;border-radius:999px;font-size:.8rem;font-weight:600;
-white-space:nowrap;border:1px solid transparent}
-.ok{color:var(--ok);background:var(--ok-bg)}.bad{color:var(--bad);background:var(--bad-bg)}
-.warn{color:var(--warn);background:var(--warn-bg)}.info{color:var(--info);background:var(--info-bg)}
-.fatal{color:var(--fatal);background:var(--fatal-bg)}
-.lvl{color:var(--accent);background:var(--code)}
-.zero{color:var(--muted);background:var(--code)}
-.levels{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 10px}
-.levels .badge{font-size:.95rem;padding:3px 14px}
-.v-ok{color:var(--ok);font-weight:600}.v-bad{color:var(--bad);font-weight:700}.v-warn{color:var(--warn);font-weight:600}
-.v-info{color:var(--info)}.v-k{font-weight:600}
-ul.att{list-style:none;padding:0;margin:0}
-ul.att li{padding:7px 12px;border-radius:8px;margin:5px 0}
-ul.att li.fatal{background:var(--bad-bg);border-left:5px solid var(--fatal-bg);color:var(--fg)}
-ul.att li.error{background:var(--bad-bg)}ul.att li.warning{background:var(--warn-bg)}
-.q{font-family:ui-monospace,Consolas,monospace;font-size:.84rem;overflow-wrap:anywhere}
-table{border-collapse:collapse;width:100%;font-size:.88rem;font-variant-numeric:tabular-nums}
-th,td{text-align:left;vertical-align:top;padding:5px 8px;border-bottom:1px solid var(--line)}
-th{color:var(--muted);font-weight:600;background:var(--code)}
-td.num{text-align:right;white-space:nowrap}
-table.kv td:first-child{color:var(--muted);width:34%}
-code,pre{font-family:ui-monospace,Consolas,monospace;font-size:.84rem;background:var(--code);border-radius:5px}
-code{padding:1px 5px;overflow-wrap:anywhere}
-pre{padding:12px;white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0}
-pre.cmd{border-left:4px solid var(--accent)}
-details{background:var(--card);border:1px solid var(--line);border-radius:10px;margin:10px 0;padding:0 16px}
-details>summary{cursor:pointer;padding:10px 0;font-weight:600}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 -apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+overflow-wrap:break-word}
+main{max-width:980px;margin:0 auto;padding:24px}
+@media (max-width:600px){main{padding:16px}}
+h1{font-size:24px;line-height:32px;margin:0 0 8px}
+h2{font-size:18px;line-height:24px;margin:32px 0 8px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+h3{font-size:15px;line-height:24px;margin:24px 0 8px}
+p{margin:0 0 8px}
+ul{margin:0 0 8px;padding-left:24px}
+li{margin:4px 0}
+a{color:var(--accent)}
+.muted{color:var(--muted)}.small{font-size:13px;line-height:20px}
+code,pre,.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px}
+code{background:var(--soft);border-radius:4px;padding:1px 4px;overflow-wrap:anywhere}
+pre{background:var(--soft);border-radius:8px;padding:8px 16px;margin:0 0 8px;white-space:pre-wrap;
+overflow-wrap:anywhere}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px 24px;margin:16px 0}
+@media (max-width:600px){.card{padding:16px}}
+.decide{border-left:4px solid var(--accent)}
+.k{font-size:13px;line-height:20px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;
+margin-top:8px}
+.title-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.pill{display:inline-block;min-width:72px;padding:2px 8px;border-radius:999px;font-size:12px;line-height:18px;
+font-weight:600;text-align:center;white-space:nowrap;border:1px solid transparent}
+.pill.auto{min-width:0}
+.p-fatal{background:var(--fatal);color:var(--on-fatal)}
+.p-error{background:var(--error-bg);color:var(--error);border-color:var(--error)}
+.p-warning{background:var(--warn-bg);color:var(--warn)}.p-ok{background:var(--ok-bg);color:var(--ok)}
+.p-bad{background:var(--fatal-bg);color:var(--fatal)}.p-info{background:var(--info-bg);color:var(--info)}
+.p-muted{background:var(--soft);color:var(--muted)}
+.counts{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 8px}
+.counts .pill{font-size:14px;line-height:22px;padding:2px 16px;min-width:96px}
+.headline{margin:0 0 8px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+.issues{list-style:none;margin:0;padding:0}
+.issue{display:grid;grid-template-columns:80px minmax(0,1fr);gap:4px 16px;align-items:start;margin:8px 0;
+padding:8px 16px;
+background:var(--card);border:1px solid var(--line);border-left:4px solid var(--line);border-radius:8px}
+.issue.fatal{border-left-color:var(--fatal);background:var(--fatal-bg)}
+.issue.error{border-left-color:var(--error)}.issue.warning{border-left-color:var(--warn)}
+.issue .pill{margin-top:2px;justify-self:start}
+.issue .meta{font-size:13px;line-height:20px;color:var(--muted)}
+.issue details{margin:4px 0 0;padding:0;border:0;background:none}
+.issue details>summary{padding:0;font-size:13px;font-weight:400;color:var(--accent)}
+.issue details[open]>summary{border:0;margin:0 0 4px}
+.issue blockquote{margin:4px 0;padding:4px 8px;border-left:2px solid var(--line);font-size:13px;line-height:20px}
+@media (max-width:600px){.issue{grid-template-columns:minmax(0,1fr)}}
+.tbl{overflow-x:auto;margin:0 0 16px}
+table{border-collapse:collapse;font-size:14px;line-height:20px;font-variant-numeric:tabular-nums}
+table.wide{width:100%}
+th,td{text-align:left;vertical-align:top;padding:4px 12px;border-bottom:1px solid var(--line)}
+th:first-child,td:first-child{padding-left:8px}
+th{font-size:13px;font-weight:600;color:var(--muted);background:var(--soft);white-space:nowrap}
+th.num,td.num{text-align:right;white-space:nowrap}
+td.nowrap{white-space:nowrap}
+table.kv td:first-child{color:var(--muted);padding-right:24px}
+td .pill{min-width:0}
+.v-bad{color:var(--fatal);font-weight:600}.v-warn{color:var(--error);font-weight:600}.v-ok{color:var(--ok)}
+.v-k{font-weight:600}.v-dim{color:var(--muted)}
+details{background:var(--card);border:1px solid var(--line);border-radius:8px;margin:8px 0;padding:0 16px}
+details>summary{cursor:pointer;padding:8px 0;font-weight:600}
 details[open]>summary{border-bottom:1px solid var(--line);margin-bottom:8px}
-.muted{color:var(--muted)}
-.tbl{overflow-x:auto;margin:4px 0 10px}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:0 20px}
-.headline{font-size:1.02rem;margin:0 0 10px;padding-bottom:10px;border-bottom:1px solid var(--line)}
-.narr{background:var(--ai-bg);border:1px dashed var(--ai);border-radius:10px;padding:12px 18px;margin:14px 0}
-.narr .tag{display:inline-block;background:var(--ai);color:var(--ai-bg);border-radius:4px;padding:0 6px;
-font-size:.75rem;font-weight:700;margin-right:6px}
-.narr .meta{font-size:.84rem;color:var(--muted);margin:4px 0 8px}
-.narr p,.narr li{margin:4px 0}
-.panel{background:var(--card);border:2px solid var(--accent);border-radius:10px;padding:14px 18px;margin:14px 0}
-.panel form{margin:10px 0;padding:10px 0;border-top:1px solid var(--line)}
-.panel label{display:block;margin:3px 0}
-.panel textarea{width:100%;min-height:3em;font:inherit;padding:6px;border:1px solid var(--line);border-radius:6px;
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:0 24px}
+.note{font-size:13px;line-height:20px;color:var(--muted);margin:0 0 16px}
+.narr{background:var(--ai-bg);border:1px dashed var(--ai);border-radius:8px;padding:16px 24px;margin:16px 0}
+.narr .tag{display:inline-block;background:var(--ai);color:var(--ai-bg);border-radius:4px;padding:0 8px;font-size:12px;
+font-weight:700;margin-right:8px}
+.narr .meta{font-size:13px;line-height:20px;color:var(--muted);margin:4px 0 8px}
+.panel{background:var(--card);border:2px solid var(--accent);border-radius:8px;padding:16px 24px;margin:16px 0}
+.panel form{margin:8px 0 0;padding:8px 0 0;border-top:1px solid var(--line)}
+.panel label{display:block;margin:4px 0}
+.panel textarea{width:100%;min-height:48px;font:inherit;padding:8px;border:1px solid var(--line);border-radius:8px;
 background:var(--bg);color:var(--fg)}
-.panel button{font:inherit;font-weight:600;padding:6px 18px;border-radius:8px;border:1px solid var(--line);
-cursor:pointer;margin-top:6px}
-.b-approve{background:var(--ok-bg);color:var(--ok)}.b-reject{background:var(--bad-bg);color:var(--bad)}
+.panel button{font:inherit;font-weight:600;padding:4px 24px;border-radius:8px;border:1px solid var(--line);
+cursor:pointer;margin-top:8px}
+.b-approve{background:var(--ok-bg);color:var(--ok)}.b-reject{background:var(--fatal-bg);color:var(--fatal)}
 .b-pending{background:var(--warn-bg);color:var(--warn)}
-.msg{padding:8px 12px;border-radius:8px;margin:8px 0}
+.msg{padding:8px 16px;border-radius:8px;margin:8px 0}
+.msg.ok{background:var(--ok-bg)}.msg.bad{background:var(--fatal-bg)}
 @media print{details{border:0}.panel{display:none}}
 """
 
-ITEM_CLASS = {"fatal": "fatal", "error": "error", "warning": "warning"}
-LEVEL_BADGE = {"fatal": "fatal", "error": "bad", "warning": "warn"}
+PILL = {"fatal": "p-fatal", "error": "p-error", "warning": "p-warning", "ok": "p-ok", "bad": "p-bad",
+        "warn": "p-warning",
+        "info": "p-info", "lvl": "p-muted", "muted": "p-muted"}
+LEVEL_BADGE = {"fatal": "fatal", "error": "error", "warning": "warning"}
 STATUS_CLASS = {"pass": "ok", "fail": "bad", "error": "bad", "timeout": "bad"}
-VERDICT_CLASS = {"accept": "ok", "accept_with_findings": "warn", "reject": "bad"}
-SEV_CLASS = {"high": "bad", "medium": "warn", "low": "info", "info": "lvl"}
-RUN_CLASS = {"approved": "ok", "rejected": "bad", "awaiting_approval": "warn", "pending": "bad", "done": "lvl"}
-ICON = {"fatal": "⛔", "error": "■", "warning": "▲"}
+VERDICT_CLASS = {"accept": "ok", "accept_with_findings": "warning", "reject": "bad"}
+SEV_CLASS = {"high": "error", "medium": "error", "low": "muted", "info": "muted"}
+RUN_CLASS = {"approved": "ok", "rejected": "bad", "awaiting_approval": "warning", "pending": "bad", "done": "muted"}
 _NUMERIC = re.compile(r"^[+-]?[\d,]+(?:\.\d+)?(?: ns)?$|^—$")
 
 
@@ -409,37 +438,48 @@ def e(text) -> str:
     return html.escape(str(text), quote=True)
 
 
-def _badge(text: str, cls: str) -> str:
-    return f'<span class="badge {cls}">{e(text)}</span>'
+def _badge(text: str, cls: str, auto: bool = True) -> str:
+    return f'<span class="pill {PILL.get(cls, "p-muted")}{" auto" if auto else ""}">{e(text)}</span>'
 
 
 def _level_badge(level: str) -> str:
-    return _badge(TITLE[level], LEVEL_BADGE[level])
+    return _badge(TITLE[level], level, auto=False)
 
 
 def levels_html(c: dict) -> str:
-    return '<div class="levels">' + "".join(
-        _badge(f"{TITLE[lvl]} {c[lvl]}", LEVEL_BADGE[lvl] if c[lvl] else "zero") for lvl in LEVELS) + "</div>"
+    return '<div class="counts">' + "".join(
+        _badge(f"{TITLE[lvl]} {c[lvl]}", lvl if c[lvl] else "muted", auto=False) for lvl in LEVELS) + "</div>"
 
 
-def _cell_html(c) -> str:
+def _numeric_columns(tb: Table) -> list[bool]:
+    cols = []
+    for j in range(len(tb.cols)):
+        cells = [_cell_text(row[j]) for row in tb.rows if j < len(row)]
+        cols.append(bool(cells) and all(_NUMERIC.match(x) for x in cells) and any(x != "—" for x in cells))
+    return cols
+
+
+def _cell_html(c, numeric: bool) -> str:
     text = _cell_text(c)
     cls = c.get("cls", "") if isinstance(c, dict) else ""
     inner = e(text).replace("\n", "<br>")
-    if cls in ("ok", "bad", "warn", "info", "lvl", "fatal") and not _NUMERIC.match(text):
+    if cls and not _NUMERIC.match(text) and cls in PILL and cls not in ("muted",):
         inner = _badge(text, cls)
     elif cls:
         inner = f'<span class="v-{cls}">{inner}</span>'
-    return f'<td class="num">{inner}</td>' if _NUMERIC.match(text) else f"<td>{inner}</td>"
+    return f'<td class="num">{inner}</td>' if numeric else f"<td>{inner}</td>"
 
 
 def table_html(tb: Table) -> str:
     kv = len(tb.cols) == 2 and tb.cols[0] == "item"
-    body = (f'<div class="tbl"><table{" class=kv" if kv else ""}><tr>'
-            + "".join(f"<th>{e(c)}</th>" for c in tb.cols) + "</tr>"
-            + "".join("<tr>" + "".join(_cell_html(c) for c in row) + "</tr>" for row in tb.rows)
+    numeric = [False, False] if kv else _numeric_columns(tb)
+    wide = not kv and any(len(_cell_text(c)) > 48 for row in tb.rows for c in row)
+    cls = " ".join(x for x in ("kv" if kv else "", "wide" if wide else "") if x)
+    body = (f'<div class="tbl"><table{f" class={chr(34)}{cls}{chr(34)}" if cls else ""}><tr>'
+            + "".join(f'<th{" class=num" if n else ""}>{e(c)}</th>' for c, n in zip(tb.cols, numeric)) + "</tr>"
+            + "".join("<tr>" + "".join(_cell_html(c, n) for c, n in zip(row, numeric)) + "</tr>" for row in tb.rows)
             + "</table></div>")
-    note = f'<p class="muted">{e(tb.note)}</p>' if tb.note else ""
+    note = f'<p class="note">{e(tb.note)}</p>' if tb.note else ""
     if tb.collapsed:
         return f"<details><summary>{e(tb.title)} ({len(tb.rows)})</summary>{note}{body}</details>"
     return f"<h3>{e(tb.title)}</h3>{note}{body}"
@@ -487,16 +527,36 @@ def _narrative_html(r: dict) -> str:
     body = md_light(n["text"])
     if not n["gate"]["passed"]:
         last = (n["gate"].get("decisions") or [{}])[-1].get("reasons", [])
-        reasons = "<ul>" + "".join(f'<li class="q">{e(x)}</li>' for x in last) + "</ul>"
+        reasons = "<ul>" + "".join(f"<li>{_inline(x)}</li>" for x in last) + "</ul>"
         body = f"<details><summary>{e(gate)}</summary>{body}</details>"
     return (f'<div class="narr"><div><span class="tag">AI</span><b>Summary written by a model</b> '
             f'{_badge(gate, "ok" if n["gate"]["passed"] else "bad")}</div>'
             f'<div class="meta">{e(meta)}</div>{reasons}{body}</div>')
 
 
+def _args_text(args: str) -> str:
+    """Tool arguments as short text: {"cases": ["smoke"]} -> cases: smoke."""
+    try:
+        data = json.loads(args)
+    except ValueError:
+        return args
+    return "; ".join(f"{k}: {', '.join(map(str, v)) if isinstance(v, list) else v}" for k, v in data.items())
+
+
 def _issue_html(i: Issue) -> str:
-    quote = f': <span class="q" title="{e(i.quote)}">{e(_short(i.quote))}</span>' if i.quote else ""
-    return f'<li class="{ITEM_CLASS[i.level]}">{ICON[i.level]} <b>{TITLE[i.level]}</b> · {e(i.text)}{quote}</li>'
+    meta = " · ".join(x for x in (e(i.source), f"<code>{e(i.location)}</code>" if i.location else "") if x)
+    more = ""
+    quote = i.quote
+    if quote and len(quote) <= 160 and not i.details:
+        meta += (" · " if meta else "") + _inline(quote)
+        quote = ""
+    texts = ([quote] if quote else []) + i.details
+    if texts:
+        label = f"show the {len(texts)} full text(s)" if len(texts) > 1 else "show the full text"
+        more = (f"<details><summary>{label}</summary>"
+                + "".join(f"<blockquote>{_inline(t)}</blockquote>" for t in texts) + "</details>")
+    return (f'<li class="issue {i.level}">{_level_badge(i.level)}<div><div>{_inline(i.text)}</div>'
+            f'{f"<div class={chr(34)}meta{chr(34)}>{meta}</div>" if meta else ""}{more}</div></li>')
 
 
 def render_html(r: dict, panel: str = "") -> str:
@@ -506,75 +566,79 @@ def render_html(r: dict, panel: str = "") -> str:
     h = ['<!doctype html><html lang="en"><head><meta charset="utf-8">',
          '<meta name="viewport" content="width=device-width,initial-scale=1">',
          f"<title>Review summary {e(r['run_id'])}</title><style>{CSS}</style></head><body><main>",
-         f"<h1>Review summary · {e(r['run_id'])} {_badge(s.status, RUN_CLASS.get(r['status'], 'lvl'))}</h1>",
-         f'<p class="sub">{e(GENERATED)}</p>',
+         f'<div class="title-row"><h1>Review summary · {e(r["run_id"])}</h1>'
+         f"{_badge(s.status, RUN_CLASS.get(r['status'], 'muted'))}</div>",
+         f'<p class="note">{e(GENERATED)}</p>',
          '<div class="card decide">', levels_html(s.counts),
          f'<p class="headline">{e(s.headline)}</p>',
          f'<div class="k">Task</div><p>{e(r["task"])}</p>',
          f'<div class="k">What you decide</div><p>{e(s.decision)}</p>']
     if s.commands:
         h.append(f'<div class="k">To approve</div><p>{e(s.needs)}</p>')
-        h.append(f'<div class="k">Commands</div><pre class="cmd">{e(chr(10).join(s.commands))}</pre>'
-                 '<p class="muted">Or decide with buttons in the local review page: '
+        h.append(f'<div class="k">Commands</div><pre>{e(chr(10).join(s.commands))}</pre>'
+                 '<p class="small muted">Or decide with buttons in the local review page: '
                  "<code>eda-agent review-ui</code>.</p>")
     elif s.commands_note:
-        h.append(f'<p class="muted">Commands: {e(s.commands_note)}</p>')
-    h.append(f'<p class="muted">{e(s.run_line)}</p></div>')
+        h.append(f'<p class="small muted">Commands: {e(s.commands_note)}</p>')
+    h.append(f'<p class="small muted">{e(s.run_line)}</p></div>')
     h.append(panel)
 
     blocking = [i for i in s.issues if i.level != "warning"]
     warnings = [i for i in s.issues if i.level == "warning"]
     h.append("<h2>Look at these before approving</h2>")
-    h.append('<ul class="att">' + "".join(_issue_html(i) for i in blocking) + "</ul>" if blocking
-             else '<p class="muted">no Fatal or Error items</p>')
-    h.append(f'<details><summary>{len(warnings)} warning(s)</summary><ul class="att">'
-             + "".join(_issue_html(i) for i in warnings) + "</ul></details>")
+    h.append('<ul class="issues">' + "".join(_issue_html(i) for i in blocking) + "</ul>" if blocking
+             else '<p class="muted">No Fatal or Error items.</p>')
+    if warnings:
+        h.append(f'<details><summary>{len(warnings)} warning(s)</summary><ul class="issues">'
+                 + "".join(_issue_html(i) for i in warnings) + "</ul></details>")
     h.append(_narrative_html(r))
 
     h.append("<h2>Checks</h2>")
     if s.checks:
-        h.append('<div class="tbl"><table><tr><th>check</th><th>result</th><th>evidence</th><th>time (s)</th>'
-                 '<th>tool summary</th></tr>')
+        h.append('<div class="tbl"><table class="wide"><tr><th>check</th><th>result</th><th>evidence</th>'
+                 '<th class="num">time (s)</th><th>tool summary</th></tr>')
         for c in s.checks:
-            args = f" <code>{e(c['args'])}</code>" if c["args"] else ""
+            args = f'<div class="small muted mono">{e(_args_text(c["args"]))}</div>' if c["args"] else ""
             h.append(f"<tr><td><b>{e(c['tool'])}</b>{args}</td>"
-                     f"<td>{_badge(c['status_text'], STATUS_CLASS.get(c['status'], 'warn'))}</td>"
-                     f"<td>{_badge(c['level'], 'lvl')} {e(c['level_text'])}</td>"
+                     f"<td>{_badge(c['status_text'], STATUS_CLASS.get(c['status'], 'warning'))}</td>"
+                     f'<td class="nowrap"><span class="mono">{e(c["level"])}</span> '
+                     f'<span class="muted">{e(c["level_text"])}</span></td>'
                      f'<td class="num">{e(_secs(c.get("duration")))}</td><td>{e(c["summary"])}</td></tr>')
         h.append("</table></div>")
     else:
-        h.append('<p class="muted">no check ran</p>')
+        h.append('<p class="muted">No check ran.</p>')
 
     h.append('<div class="grid"><div><h2>What the evidence allows</h2><ul>'
              + "".join(f"<li>{e(x)}</li>" for x in s.evidence) + "</ul></div>")
     h.append("<div><h2>Not checked</h2><ul>" + "".join(f"<li>{e(x)}</li>" for x in s.not_checked)
              + "</ul></div></div>")
-    gate_cls = {"passed": "ok", "rejected": "bad"}.get(r["gate"]["status"], "warn")
+    gate_cls = {"passed": "ok", "rejected": "bad"}.get(r["gate"]["status"], "warning")
     h.append(f"<h2>Evidence gate</h2><p>{_badge(r['gate']['status'], gate_cls)} {e(s.gate)}</p>")
     if s.gate_reasons:
-        h.append("<ul>" + "".join(f'<li class="q">{e(x)}</li>' for x in s.gate_reasons) + "</ul>")
+        h.append("<ul>" + "".join(f"<li>{_inline(x)}</li>" for x in s.gate_reasons) + "</ul>")
     h.append("<h2>Reviewers</h2>")
     if s.reviews:
-        h.append("<ul>")
+        h.append('<div class="tbl"><table class="wide"><tr><th>reviewer</th><th>verdict</th><th>findings</th>'
+                 "<th>most serious</th></tr>")
         for v in s.reviews:
-            counts_html = " ".join(_badge(f"{TITLE[k]} {n}", LEVEL_BADGE[k]) for k, n in v["counts"].items()) \
-                or "no findings"
-            verdict = _badge(v["verdict_text"], VERDICT_CLASS.get(v["verdict"], "warn"))
-            line = f"<li><b>{e(v['who'])}</b>: {verdict} {counts_html}"
+            counts_html = " ".join(_badge(f"{TITLE[k]} {n}", k) for k, n in v["counts"].items()) or "none"
+            worst = ""
             if v["worst"] and v["worst"]["severity"] in ("high", "medium"):
-                line += (f'<br><span class="muted">most serious: </span>'
-                         f'<span class="q">[{e(v["worst"]["severity"])}] {e(_short(v["worst"]["text"]))}</span>')
-            h.append(line + "</li>")
-        h.append("</ul>")
+                from .levels import first_sentence
+                worst = _inline(first_sentence(v["worst"]["text"], 120))
+            h.append(f"<tr><td><b>{e(v['who'])}</b></td>"
+                     f"<td>{_badge(v['verdict_text'], VERDICT_CLASS.get(v['verdict'], 'warning'))}</td>"
+                     f"<td>{counts_html}</td><td>{worst}</td></tr>")
+        h.append("</table></div>")
     else:
-        h.append('<p class="muted">no independent review was run</p>')
+        h.append('<p class="muted">No independent review was run.</p>')
     h.append(f"<h2>Approval</h2><p>{e(s.approval)}</p>")
     if s.notes:
         h.append("<ul>" + "".join(f"<li>note: {e(n)}</li>" for n in s.notes) + "</ul>")
 
     h.append("<h2>Data</h2>")
     if trace_note(r):
-        h.append(f'<p class="muted">{e(trace_note(r))}</p>')
+        h.append(f'<p class="note">{e(trace_note(r))}</p>')
     h += [table_html(tb) for tb in data_tables(r)]
     h.append("<h2>Details (full receipt)</h2>")
     h += _details_html(r)

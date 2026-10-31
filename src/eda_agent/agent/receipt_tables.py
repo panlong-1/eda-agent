@@ -12,15 +12,15 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .levels import DIAG_LEVEL, FINDING_LEVEL, TITLE
+from .levels import DIAG_LEVEL, FINDING_LEVEL, HOLD_MARGIN_NS, SETUP_MARGIN, TITLE
 
 SEVERITIES = ("high", "medium", "low", "info")
 _LOCATION = re.compile(r"[\w./-]+\.(?:sv|svh|v|vh|vhd|sdc|tcl|S|s|c|h|py|yaml|toml)(?::\d+)?(?![\w])")
 
 TT = {
     "data": "Data",
-    "from_trace": "Numbers marked † come from the run's trace {trace} (this receipt predates them); "
-                   "the receipt .json is unchanged.",
+    "from_trace": "† in a table title: its numbers come from the run's trace ({trace}), because this "
+                  "receipt was written before receipts kept them; the receipt .json is unchanged.",
     # regress
     "regress": "Simulation (regress)",
     "cases_asked": "cases asked", "run": "run", "passed": "passed",
@@ -94,7 +94,10 @@ def level_cell(level: str) -> dict:
 
 
 def fmt_ns(x) -> str:
-    return f"{x:+.3f}" if isinstance(x, (int, float)) else "—"
+    """A slack or TNS in ns: signed to the ps, but a plain 0 for zero."""
+    if not isinstance(x, (int, float)):
+        return "—"
+    return "0" if abs(x) < 0.0005 else f"{x:+.3f}"
 
 
 def _num(x) -> str:
@@ -103,8 +106,24 @@ def _num(x) -> str:
     return f"{x:,}" if isinstance(x, int) else ("—" if x is None else str(x))
 
 
-def _slack_cls(x) -> str:
-    return "" if not isinstance(x, (int, float)) else ("bad" if x < 0 else "warn" if x < 0.1 else "ok")
+def _slack_cls(x, small: float | None = HOLD_MARGIN_NS) -> str:
+    """Colour only what means something, by the same rule as levels.py: negative (red), under
+    the small-slack margin (orange); fine values stay plain."""
+    if not isinstance(x, (int, float)):
+        return ""
+    return "bad" if x < 0 else "warn" if small is not None and x < small else ""
+
+
+def _tns_cls(x) -> str:
+    return "bad" if isinstance(x, (int, float)) and x < 0 else ""
+
+
+_NETLIST_NAME = re.compile(r"^_\d+_$")
+
+
+def net(name: str):
+    """A point of a path; Yosys's numbered internal nets are marked as such."""
+    return cell(f"{name} (internal net)", "dim") if _NETLIST_NAME.match(name or "") else (name or "—")
 
 
 # ---------------------------------------------------------------- trace data for older receipts
@@ -205,8 +224,7 @@ def lint_tables(r: dict) -> list[Table]:
         if m.get("by_code"):
             t = Table(tt("lint_by_code") + _mark(c), [tt("code"), tt("count")])
             t.rows = [[code, _num(n)] for code, n in sorted(m["by_code"].items(), key=lambda x: -x[1])]
-            t.rows.append([cell(f"{tt('errors')} / {tt('warnings')}", "k"),
-                           f"{_num(m.get('errors', 0))} / {_num(m.get('warnings', 0))}"])
+            t.note = f"{_num(m.get('errors', 0))} error(s), {_num(m.get('warnings', 0))} warning(s) in all"
             out.append(t)
         if diags:
             files: dict[str, list[int]] = {}
@@ -246,28 +264,32 @@ def synth_tables(r: dict) -> list[Table]:
             t.rows.append([cell(tt("void"), "bad"), ""])
         out.append(t)
         corners = m.get("corners") or {}
+        period = m.get("clock_period")
+        setup_small = SETUP_MARGIN * period if isinstance(period, (int, float)) else None
         if corners:
             worst = m.get("worst_corner")
             t = Table(tt("corners") + _mark(c), [tt(k) for k in ("corner", "setup_wns", "setup_tns",
                                                                          "hold_wns", "hold_tns")])
             for name, v in corners.items():
                 t.rows.append([name + (f" ({tt('worst')})" if name == worst else ""),
-                               cell(fmt_ns(v.get("setup_wns")), _slack_cls(v.get("setup_wns"))),
-                               fmt_ns(v.get("setup_tns")),
+                               cell(fmt_ns(v.get("setup_wns")), _slack_cls(v.get("setup_wns"), setup_small)),
+                               cell(fmt_ns(v.get("setup_tns")), _tns_cls(v.get("setup_tns"))),
                                cell(fmt_ns(v.get("hold_wns")), _slack_cls(v.get("hold_wns"))),
-                               fmt_ns(v.get("hold_tns"))])
+                               cell(fmt_ns(v.get("hold_tns")), _tns_cls(v.get("hold_tns")))])
             out.append(t)
         elif "wns" in m:  # receipt timing only: the run's worst values
             t = Table(tt("corners"), [tt(k) for k in ("corner", "setup_wns", "setup_tns", "hold_wns")])
-            t.rows.append([f"{m.get('worst_corner')} ({tt('worst')})", cell(fmt_ns(m["wns"]), _slack_cls(m["wns"])),
-                           fmt_ns(m.get("tns")), cell(fmt_ns(m.get("hold_wns")), _slack_cls(m.get("hold_wns")))])
+            t.rows.append([f"{m.get('worst_corner')} ({tt('worst')})",
+                           cell(fmt_ns(m["wns"]), _slack_cls(m["wns"], setup_small)),
+                           cell(fmt_ns(m.get("tns")), _tns_cls(m.get("tns"))),
+                           cell(fmt_ns(m.get("hold_wns")), _slack_cls(m.get("hold_wns")))])
             out.append(t)
         wp = m.get("worst_path")
         if wp:
             t = Table(tt("worst_path") + _mark(c),
                       [tt(k) for k in ("start", "end", "slack", "arrival", "corner")])
-            t.rows.append([wp.get("startpoint", ""), wp.get("endpoint", ""),
-                           cell(fmt_ns(wp.get("slack")), _slack_cls(wp.get("slack"))),
+            t.rows.append([net(wp.get("startpoint", "")), net(wp.get("endpoint", "")),
+                           cell(fmt_ns(wp.get("slack")), _slack_cls(wp.get("slack"), setup_small)),
                            _num(wp.get("arrival")), wp.get("corner", "")])
             out.append(t)
         if m.get("top_cell_types"):

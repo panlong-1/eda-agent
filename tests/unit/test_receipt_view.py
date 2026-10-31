@@ -75,12 +75,29 @@ def test_levels_follow_the_rules():
                                                           (("high", HIGH), ("medium", "other"), ("info", "x")))])
     s = summarize(r)
     assert s.issues[0].level == "fatal" and s.issues[0].text == "Rule-based reviewer said reject"
-    assert [i.quote for i in s.issues].count(HIGH) == 1        # same finding from two reviewers: once
-    assert {(i.level, i.quote) for i in s.issues} >= {("error", HIGH), ("error", "latch x1"), ("warning", "x")}
+    grouped = [i for i in s.issues if i.location == "rtl/torv_soc.sv:179"]
+    assert len(grouped) == 1                                     # same finding from two reviewers: one row
+    g = grouped[0]
+    assert g.level == "error" and g.text == "multi_driven x1: signal 'torv_soc.apb_presetn' has multiple drivers"
+    assert g.source == "rule-based reviewer, I3 (deepseek-v4-flash)" and len(g.details) == 2
+    assert {(i.level, i.text) for i in s.issues} >= {("error", "latch x1"), ("warning", "x")}
     assert s.reviews[0]["who"].endswith("(×2, identical)") and s.reviews[0]["verdict"] == "reject"
     assert [i.level for i in s.issues] == sorted((i.level for i in s.issues), key=["fatal", "error", "warning"].index)
     assert "--override" in s.commands[0] and "Fatal" in s.needs
     assert len(RULES) > 20 and {lvl for _, lvl in RULES} == {"fatal", "error", "warning"}
+
+
+def test_findings_are_grouped_by_place_with_one_line_and_full_texts():
+    from eda_agent.agent.levels import first_sentence
+    long = ("The synthesized top is `torv_cpu`, but lint ran on `torv_soc`; the SoC logic is never timed. "
+            "Evidence: synth claim_scope (at rtl/top.sv:12)")
+    r = receipt(reviews=[review("I2", "accept", (("medium", long),)),
+                         review("I3", "accept", (("high", "Top mismatch at rtl/top.sv:12, see synth"),))])
+    (g,) = [i for i in summarize(r).issues if i.location == "rtl/top.sv:12"]
+    assert g.level == "error" and len(g.details) == 2 and "I2 (deepseek-v4-flash)" in g.source
+    assert first_sentence(long) == "The synthesized top is `torv_cpu`, but lint ran on `torv_soc`"
+    page = render_html(r)
+    assert "show the 2 full text(s)" in page and '<span class="pill p-error">Error</span>' in page
 
 
 def test_fatal_and_error_items_from_the_checks():

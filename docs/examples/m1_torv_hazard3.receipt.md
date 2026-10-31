@@ -10,15 +10,15 @@
 
 ## Look at these before approving
 
-- 🟥 **Error**: The gate sent the agent's report back 1 time(s) before it passed: 'correctly' claims functional correctness, which needs E3+; the best passing evidence here is E2, which supports only 'these checks/cases passed': 'That supports that the tested forwarding and load-use scenarios run cor…
-- 🟥 **Error**: No tool versions recorded for: regress; the result cannot be tied to a tool release
+- 🟧 **Error**: The gate sent the agent's report back 1 time(s) before it passed: 'correctly' claims functional correctness, which needs E3+; the best passing evidence here is E2, which supports only 'these checks/cases passed': 'That supports that the tested forwarding and load-use scenarios run cor… — *gate*
+- 🟧 **Error**: No tool versions recorded for: regress; the result cannot be tied to a tool release — *run*
 
 <details><summary>4 warning(s)</summary>
 
-- 🟨 Warning: regress: pass/fail comes from the testbench's own self-check or exit status, not from separate results
-- 🟨 Warning: Only part of the regression ran: 30 listed case(s) not run
-- 🟨 Warning: lint was not run
-- 🟨 Warning: No independent review was run: only the gate checked the report
+- 🟨 Warning: regress: pass/fail comes from the testbench's own self-check or exit status, not from separate results — *regress*
+- 🟨 Warning: Only part of the regression ran: 30 listed case(s) not run — *run*
+- 🟨 Warning: lint was not run — *run*
+- 🟨 Warning: No independent review was run: only the gate checked the report — *review*
 
 </details>
 
@@ -56,7 +56,7 @@
 
 ## Data
 
-Numbers marked † come from the run's trace runs/m1_torv_hazard3.jsonl (this receipt predates them); the receipt .json is unchanged.
+† in a table title: its numbers come from the run's trace (runs/m1_torv_hazard3.jsonl), because this receipt was written before receipts kept them; the receipt .json is unchanged.
 
 ### Simulation (regress)
 

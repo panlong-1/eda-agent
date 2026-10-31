@@ -29,7 +29,7 @@ from .agent import human_gate
 from .agent.levels import LEVELS, TITLE, assess, counts
 from .agent.receipt import write_receipt
 from .agent.receipt_tables import with_trace_data
-from .agent.receipt_view import CSS, LEVEL_BADGE, RUN_CLASS, levels_html, render_html
+from .agent.receipt_view import CSS, RUN_CLASS, _badge, _level_badge, render_html
 
 RUN_ID = re.compile(r"^[A-Za-z0-9_.-]{1,200}$")
 MAX_BODY = 64 * 1024
@@ -80,16 +80,15 @@ class ReviewApp:
                 f"{len(a.get('notes', []))} note(s)" if a.get("notes") else "")
             body.append(
                 f'<tr><td><a href="{e(self.link("/run/" + r["run_id"]))}"><b>{e(r["run_id"])}</b></a></td>'
-                f'<td><span class="badge {RUN_CLASS.get(r["status"], "lvl")}">{e(r["status"])}</span></td>'
-                + "".join(f'<td class="num"><span class="badge {LEVEL_BADGE[lvl] if c[lvl] else "zero"}">'
-                          f"{c[lvl]}</span></td>" for lvl in LEVELS)
+                f'<td>{_badge(r["status"], RUN_CLASS.get(r["status"], "muted"))}</td>'
+                + "".join(f'<td class="num">{_badge(str(c[lvl]), lvl if c[lvl] else "muted")}</td>' for lvl in LEVELS)
                 + f'<td>{e(r["task"][:110])}{"…" if len(r["task"]) > 110 else ""}</td>'
-                + f'<td class="muted">{e(who)}</td></tr>')
-        table = ('<div class="tbl"><table><tr><th>run</th><th>status</th>'
-                 + "".join(f"<th>{TITLE[lvl]}</th>" for lvl in LEVELS)
+                + f'<td class="small muted">{e(who)}</td></tr>')
+        table = ('<div class="tbl"><table class="wide"><tr><th>run</th><th>status</th>'
+                 + "".join(f'<th class="num">{TITLE[lvl]}</th>' for lvl in LEVELS)
                  + "<th>task</th><th>decided / notes</th></tr>" + "".join(body) + "</table></div>") if body \
             else f'<p class="muted">No receipts in {e(self.runs_dir)}.</p>'
-        return self._page("Runs to review", f"<h1>Runs to review</h1><p class=\"sub\">{e(self.runs_dir.resolve())} · "
+        return self._page("Runs to review", f'<h1>Runs to review</h1><p class="note">{e(self.runs_dir.resolve())} · '
                                             f"deciding as {e(self.by)} (via review-ui)</p>{table}")
 
     def run_page(self, run_id: str, message: str = "", ok: bool = True) -> str:
@@ -119,12 +118,12 @@ class ReviewApp:
 
         def ticks(name: str, items, prefix: str) -> str:
             return "".join(f'<label><input type="checkbox" name="{name}" value="{i.id}"> {e(prefix)}'
-                           f"<b>{TITLE[i.level]}</b> · {e(i.label()[:300])}</label>" for i in items)
+                           f"{_level_badge(i.level)} {e(i.label()[:300])}</label>" for i in items)
 
         if fatal:
             approve = (f"<p><b>Approve</b> is blocked by {len(fatal)} Fatal item(s). To approve anyway, tick the "
                        "override and type a reason; both are recorded.</p>"
-                       + "".join(f"<p class=\"q\">⛔ {e(i.label()[:300])}</p>" for i in fatal)
+                       + "".join(f"<p>{_level_badge(i.level)} {e(i.label()[:300])}</p>" for i in fatal)
                        + '<label><input type="checkbox" name="override" value="yes"> I override the Fatal item(s) '
                          "above</label>" + ticks("accept", errors, "I accept: ")
                        + '<textarea name="reason" placeholder="reason (required)"></textarea>')

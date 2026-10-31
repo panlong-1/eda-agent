@@ -382,8 +382,10 @@ is laid out for that person:
      the gate, the reviewers' verdicts;
    - the task, **what you decide** (or who already decided, when, and the levels then), what
      approving needs, and the exact `approve` / `reject` / `pending` commands for this run;
-   - **look at these before approving**: every Fatal and Error item, most serious first, each
-     finding once even if several reviewers found it; the warnings folded under them;
+   - **look at these before approving**: every Fatal and Error item, most serious first, one row
+     per issue: a level badge, one plain line, then who raised it and where (`file:line`), with
+     the full texts one click away. Findings that name the same first `file:line` (or say the
+     same thing) are one row at the highest level any reviewer gave; the warnings fold under;
    - each check with pass/fail, its evidence level in words (E0 "parses / structural facts",
      E2 "these tests passed", E4 "synthesis estimate", …) and how long it took; the highest
      level reached and what each level does and does not let you say; what was **not**

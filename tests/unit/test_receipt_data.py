@@ -76,15 +76,18 @@ def texts(table) -> list[list[str]]:
 def test_data_tables_show_the_numbers():
     t = tables(receipt())
     assert texts(t["Simulation (regress)"]) == [["all", "1", "1", "0", "0", "90 passed, 0 failed of 90", "—"]]
-    assert texts(t["Lint: by warning code"])[:2] == [["UNUSEDSIGNAL", "2"], ["LATCH", "1"]]
+    assert texts(t["Lint: by warning code"]) == [["UNUSEDSIGNAL", "2"], ["LATCH", "1"]]  # numbers only
+    assert t["Lint: by warning code"].note == "0 error(s), 3 warning(s) in all"
     by_file = texts(t["Lint: by file (of the 3 of 3 diagnostics kept)"])
     assert by_file == [["rtl/a.sv", "0", "2"], ["rtl/b.sv", "0", "1"]]
     assert t["Lint: diagnostics kept (3 of 3)"].collapsed
     synth = dict(texts(t["Synthesis and timing estimate (synth, pre-PnR)"]))
     assert synth["cells"] == "14,766" and synth["timing met (under this SDC)"] == "yes"
     corners = texts(t["Timing per corner (ns; negative = violation)"])
-    assert corners[1] == ["slow (worst)", "+0.698", "+0.000", "+0.291", "+0.000"]
-    assert texts(t["Worst path"]) == [["_27317_", "d_htrans[1]", "+0.698", "7.002", "slow"]]
+    assert corners[1] == ["slow (worst)", "+0.698", "0", "+0.291", "0"]  # zero is "0", not "+0.000"
+    slow = t["Timing per corner (ns; negative = violation)"].rows[1]
+    assert slow[1]["cls"] == "warn" and slow[3]["cls"] == ""  # only the small setup slack is coloured
+    assert texts(t["Worst path"]) == [["_27317_ (internal net)", "d_htrans[1]", "+0.698", "7.002", "slow"]]
     findings = texts(t["Reviewer findings"])
     assert findings[0][:3] == ["Error", "medium", "I2 (m2)"] and findings[0][4] == "ip/uart.sv:195"  # no bare dup
     assert findings[1][:2] == ["Warning", "info"]

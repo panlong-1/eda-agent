@@ -10,13 +10,13 @@
 
 ## Look at these before approving
 
-- 🟥 **Error**: No tool versions recorded for: lint, regress; the result cannot be tied to a tool release
+- 🟧 **Error**: No tool versions recorded for: lint, regress; the result cannot be tied to a tool release — *run*
 
 <details><summary>3 warning(s)</summary>
 
-- 🟨 Warning: lint: 34 warning(s)
-- 🟨 Warning: regress: pass/fail comes from the testbench's own self-check or exit status, not from separate results
-- 🟨 Warning: No independent review was run: only the gate checked the report
+- 🟨 Warning: lint: 34 warning(s) — *lint*
+- 🟨 Warning: regress: pass/fail comes from the testbench's own self-check or exit status, not from separate results — *regress*
+- 🟨 Warning: No independent review was run: only the gate checked the report — *review*
 
 </details>
 
@@ -54,7 +54,7 @@
 
 ## Data
 
-Numbers marked † come from the run's trace runs/m1_picorv32.jsonl (this receipt predates them); the receipt .json is unchanged.
+† in a table title: its numbers come from the run's trace (runs/m1_picorv32.jsonl), because this receipt was written before receipts kept them; the receipt .json is unchanged.
 
 ### Simulation (regress)
 
