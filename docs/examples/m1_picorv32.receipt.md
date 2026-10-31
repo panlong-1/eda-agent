@@ -62,6 +62,12 @@
 |---|---|---|---|---|---|---|
 | firmware † | 1 | 1 | 0 | 0 | — | — |
 
+### Cases the run read (describe_case) †
+
+| case | source file |
+|---|---|
+| firmware | firmware/start.S |
+
 ### Evidence gate decisions
 
 | attempt | result | best passing evidence | reasons |

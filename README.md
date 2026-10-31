@@ -364,6 +364,18 @@ decision panel under the summary:
 - **Pending**: decide later; an optional note is recorded and the run stays open.
 - **Reject**: tick what is wrong, or write a reason.
 
+Every file the receipt refers to is a link: a finding's or a lint diagnostic's `file:line`,
+the artifacts (reports, logs, netlist), the SDC, the trace and the source of each case the run
+read. It opens a read-only view inside the review page, with line numbers and the line
+highlighted (40 lines around it, or the tail of a long log, and "show whole file"). Relative
+paths are taken from the run's project root (`project_root` in new receipts, else the
+`projects/*.toml` of that name, `--projects-dir`); a bare name such as `apb_uart.sv:195` is the
+project's only file of that name. The view shows only files under the project root or the runs
+folder, or listed in the receipt, after following symlinks; never dotfiles such as `.bashrc` or
+`.env`, `.git`, keys, binaries, or a file with an API-key-shaped string. Nothing opens in
+another program. The static `.html` shows the same references as plain, copyable text (the
+absolute path as a tooltip) and marks a missing file "(file not found)".
+
 A click calls the same `human_gate` functions as the command line, so the same rules hold,
 then re-renders the receipt files. The server binds 127.0.0.1 only, answers only to
 `Host: localhost`/`127.0.0.1`, needs a random token made at each start (in the URL and in every

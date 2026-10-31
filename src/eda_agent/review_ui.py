@@ -2,6 +2,8 @@
 
     index     every receipt in runs/: status, Fatal / Error / Warning counts; open runs first
     run page  the receipt, with Approve / Pending / Reject under the decision card
+    source    a file the receipt refers to (a finding's file:line, a lint location, an artifact,
+              the SDC, the trace, a case's source), read only, the line highlighted
 
 A click calls the same human_gate functions as the command line, with the same rules: Warnings
 only, one click; Error items, tick each one you accept (or write a reason); Fatal items, tick
@@ -10,9 +12,10 @@ The decision records the approver (git user.name, "via review-ui"), the reason a
 receipt's sha256, then re-renders the receipt files.
 
 Safety: the server binds 127.0.0.1 only, answers only Host: localhost / 127.0.0.1, and needs
-a random token made at each start (in the printed URL, and in every form). It reads only
-runs/<id>.receipt.json (and the run's trace, for the tables) and writes only that receipt and
-its .md/.html. Standard library only (http.server).
+a random token made at each start (in the printed URL, and in every form). It writes only
+runs/<id>.receipt.json and its .md/.html. The source view shows only files under the run's
+project root or the runs/ folder, or listed in the receipt, never dotfiles with secrets, keys,
+binaries or a file with an API-key-shaped string (agent/sources.py). Standard library only.
 """
 from __future__ import annotations
 
@@ -21,7 +24,8 @@ import html
 import json
 import re
 import secrets
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlparse
 
@@ -30,8 +34,17 @@ from .agent.levels import LEVELS, TITLE, assess, counts
 from .agent.receipt import write_receipt
 from .agent.receipt_tables import with_trace_data
 from .agent.receipt_view import CSS, RUN_CLASS, _badge, _level_badge, render_html
+from .agent.sources import Refused, Sources, project_roots, split_ref
 
 RUN_ID = re.compile(r"^[A-Za-z0-9_.-]{1,200}$")
+SRC_CSS = """
+.src{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 0;overflow-x:auto;
+font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;line-height:20px}
+.ln{display:flex;white-space:pre;min-width:max-content;scroll-margin-top:160px}
+.ln .no{width:56px;flex:none;text-align:right;padding-right:16px;
+color:var(--muted);user-select:none}.ln .tx{padding-right:16px}
+.ln.hit{background:var(--warn-bg);box-shadow:inset 4px 0 0 var(--error)}.ln:target{background:var(--warn-bg)}
+"""
 MAX_BODY = 64 * 1024
 OPEN = (human_gate.AWAITING, "pending")
 
@@ -43,10 +56,13 @@ def e(text) -> str:
 class ReviewApp:
     """The pages and the decisions, without the HTTP part (so tests can call it directly)."""
 
-    def __init__(self, runs_dir: Path, token: str | None = None, by: str | None = None):
+    def __init__(self, runs_dir: Path, token: str | None = None, by: str | None = None,
+                 projects_dir: Path | None = None):
         self.runs_dir = runs_dir
         self.token = token or secrets.token_urlsafe(18)
         self.by = by or human_gate.default_approver()
+        self.sources = Sources(runs_dir, project_roots([projects_dir, runs_dir.parent / "projects"]))
+        self.lock = threading.Lock()  # one decision at a time (each connection has its own thread)
 
     def check_token(self, given: str | None) -> bool:
         return bool(given) and hmac.compare_digest(given, self.token)
@@ -94,13 +110,48 @@ class ReviewApp:
     def run_page(self, run_id: str, message: str = "", ok: bool = True) -> str:
         receipt = self._load(run_id)
         view = with_trace_data(receipt, self.runs_dir)
-        page = render_html(view, panel=self._panel(view, message, ok))
+        page = render_html(view, panel=self._panel(view, message, ok), link=self._linker(view))
         back = f'<p><a href="{e(self.link("/"))}">← all runs</a></p>'
         return page.replace("<main>", "<main>" + back, 1)
 
+    def _linker(self, r: dict):
+        """File references as links to the source view; a missing file stays text."""
+        def link(ref: str) -> str:
+            if not self.sources.exists(r, ref):
+                return f'<code>{e(ref)}</code> <span class="small muted">(file not found)</span>'
+            _, line = split_ref(ref)
+            href = self.link("/source", run=r["run_id"], ref=ref) + (f"#L{line}" if line else "")
+            return f'<a class="ref" href="{e(href)}"><code>{e(ref)}</code></a>'
+        return link
+
+    def source_page(self, run_id: str, ref: str, whole: bool = False) -> tuple[int, str]:
+        receipt = self._load(run_id)
+        view = with_trace_data(receipt, self.runs_dir)
+        back = f'<p><a href="{e(self.link("/run/" + run_id))}">← back to {e(run_id)}</a></p>'
+        try:
+            t = self.sources.read(view, ref, whole=whole)
+        except Refused as err:
+            code = 404 if str(err) == "file not found" else 403
+            return code, self._page(f"{ref}", f"{back}<h1>{e(ref)}</h1><p class=\"msg bad\">Not shown: {e(err)}.</p>")
+        last = t.first + len(t.lines) - 1
+        if whole:
+            scope = f"whole file, {t.total} lines"
+        else:
+            scope = f"lines {t.first}–{last} of {t.total}"
+            if len(t.lines) < t.total:
+                scope += f' · <a href="{e(self.link("/source", run=run_id, ref=ref, whole=1))}' \
+                         f'{f"#L{t.line}" if t.line else ""}">show whole file</a>'
+        rows = "".join(
+            f'<div class="ln{" hit" if n == t.line else ""}" id="L{n}"><span class="no">{n}</span>'
+            f'<span class="tx">{e(text) or " "}</span></div>'
+            for n, text in enumerate(t.lines, t.first))
+        body = (f"{back}<h1 class=\"mono\" style=\"font-size:18px\">{e(ref)}</h1>"
+                f'<p class="note">{e(t.path)} · {scope} · read only</p><div class="src">{rows}</div>')
+        return 200, self._page(ref, body)
+
     def _page(self, title: str, body: str) -> str:
         return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" '
-                f'content="width=device-width,initial-scale=1"><title>{e(title)}</title><style>{CSS}</style>'
+                f'content="width=device-width,initial-scale=1"><title>{e(title)}</title><style>{CSS}{SRC_CSS}</style>'
                 f"</head><body><main>{body}</main></body></html>")
 
     def _panel(self, r: dict, message: str, ok: bool) -> str:
@@ -150,6 +201,10 @@ class ReviewApp:
 
     def decide(self, run_id: str, form: dict[str, list[str]]) -> str:
         """Apply one form post; returns the message to show. ApprovalError when refused."""
+        with self.lock:
+            return self._decide(run_id, form)
+
+    def _decide(self, run_id: str, form: dict[str, list[str]]) -> str:
         receipt = self._load(run_id)
         view = with_trace_data(receipt, self.runs_dir)
         issues = {i.id: i for i in assess(view)}
@@ -189,6 +244,7 @@ class ReviewApp:
 def make_handler(app: ReviewApp):
     class Handler(BaseHTTPRequestHandler):
         server_version = "eda-agent-review-ui"
+        timeout = 30  # an idle browser connection must not hold a thread forever
 
         def log_message(self, fmt, *args):  # keep the token out of the terminal log
             print(f"{self.command} {urlparse(self.path).path} -> {args[1] if len(args) > 1 else ''}", flush=True)
@@ -219,6 +275,13 @@ def make_handler(app: ReviewApp):
                 return self._send(403, "forbidden: open the URL printed by eda-agent review-ui")
             if url.path == "/":
                 return self._send(200, app.index())
+            if url.path == "/source":
+                try:
+                    code, page = app.source_page((q.get("run") or [""])[0], (q.get("ref") or [""])[0],
+                                                 whole=(q.get("whole") or [""])[0] == "1")
+                except human_gate.ApprovalError:
+                    return self._send(404, "no such run")
+                return self._send(code, page)
             m = re.fullmatch(r"/run/([^/]+)", url.path)
             if not m:
                 return self._send(404, "not found")
@@ -250,9 +313,10 @@ def make_handler(app: ReviewApp):
     return Handler
 
 
-def serve(runs_dir: Path, port: int = 8799, by: str | None = None) -> int:
-    app = ReviewApp(runs_dir, by=by)
-    server = HTTPServer(("127.0.0.1", port), make_handler(app))
+def serve(runs_dir: Path, port: int = 8799, by: str | None = None, projects_dir: Path | None = None) -> int:
+    app = ReviewApp(runs_dir, by=by, projects_dir=projects_dir)
+    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(app))
+    server.daemon_threads = True
     found = len(list(runs_dir.glob("*.receipt.json")))
     print(f"eda-agent review-ui: {found} receipt(s) in {runs_dir.resolve()}", flush=True)
     print(f"open: http://localhost:{server.server_address[1]}/?t={app.token}", flush=True)

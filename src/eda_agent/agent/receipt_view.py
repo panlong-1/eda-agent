@@ -353,6 +353,7 @@ p{margin:0 0 8px}
 ul{margin:0 0 8px;padding-left:24px}
 li{margin:4px 0}
 a{color:var(--accent)}
+a.ref{text-decoration:none}a.ref code{color:var(--accent)}a.ref:hover code{text-decoration:underline}
 .muted{color:var(--muted)}.small{font-size:13px;line-height:20px}
 code,pre,.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px}
 code{background:var(--soft);border-radius:4px;padding:1px 4px;overflow-wrap:anywhere}
@@ -459,10 +460,33 @@ def _numeric_columns(tb: Table) -> list[bool]:
     return cols
 
 
-def _cell_html(c, numeric: bool) -> str:
+def plain_link(ref: str) -> str:
+    """A file reference as copyable text (the static page has no viewer to link to)."""
+    return f'<code class="ref">{e(ref)}</code>'
+
+
+def static_linker(r: dict, sources):
+    """References as text, with the absolute path as a tooltip and "(file not found)" when the
+    file is not there."""
+    def link(ref: str) -> str:
+        path, _ = sources.resolve(r, ref)
+        found = bool(path) and path.is_file()
+        title = f' title="{e(path)}"' if path else ""
+        return (f'<code class="ref"{title}>{e(ref)}</code>'
+                + ("" if found else ' <span class="small muted">(file not found)</span>'))
+    return link
+
+
+def _refs(text: str, link) -> str:
+    return ", ".join(link(x.strip()) for x in text.split(",") if x.strip())
+
+
+def _cell_html(c, numeric: bool, link=plain_link) -> str:
     text = _cell_text(c)
     cls = c.get("cls", "") if isinstance(c, dict) else ""
     inner = e(text).replace("\n", "<br>")
+    if cls == "ref" and text != "—":
+        return f"<td>{_refs(text, link)}</td>"
     if cls and not _NUMERIC.match(text) and cls in PILL and cls not in ("muted",):
         inner = _badge(text, cls)
     elif cls:
@@ -470,14 +494,15 @@ def _cell_html(c, numeric: bool) -> str:
     return f'<td class="num">{inner}</td>' if numeric else f"<td>{inner}</td>"
 
 
-def table_html(tb: Table) -> str:
+def table_html(tb: Table, link=plain_link) -> str:
     kv = len(tb.cols) == 2 and tb.cols[0] == "item"
     numeric = [False, False] if kv else _numeric_columns(tb)
     wide = not kv and any(len(_cell_text(c)) > 48 for row in tb.rows for c in row)
     cls = " ".join(x for x in ("kv" if kv else "", "wide" if wide else "") if x)
     body = (f'<div class="tbl"><table{f" class={chr(34)}{cls}{chr(34)}" if cls else ""}><tr>'
             + "".join(f'<th{" class=num" if n else ""}>{e(c)}</th>' for c, n in zip(tb.cols, numeric)) + "</tr>"
-            + "".join("<tr>" + "".join(_cell_html(c, n) for c, n in zip(row, numeric)) + "</tr>" for row in tb.rows)
+            + "".join("<tr>" + "".join(_cell_html(c, n, link) for c, n in zip(row, numeric)) + "</tr>"
+                      for row in tb.rows)
             + "</table></div>")
     note = f'<p class="note">{e(tb.note)}</p>' if tb.note else ""
     if tb.collapsed:
@@ -543,8 +568,8 @@ def _args_text(args: str) -> str:
     return "; ".join(f"{k}: {', '.join(map(str, v)) if isinstance(v, list) else v}" for k, v in data.items())
 
 
-def _issue_html(i: Issue) -> str:
-    meta = " · ".join(x for x in (e(i.source), f"<code>{e(i.location)}</code>" if i.location else "") if x)
+def _issue_html(i: Issue, link=plain_link) -> str:
+    meta = " · ".join(x for x in (e(i.source), _refs(i.location, link) if i.location else "") if x)
     more = ""
     quote = i.quote
     if quote and len(quote) <= 160 and not i.details:
@@ -559,9 +584,10 @@ def _issue_html(i: Issue) -> str:
             f'{f"<div class={chr(34)}meta{chr(34)}>{meta}</div>" if meta else ""}{more}</div></li>')
 
 
-def render_html(r: dict, panel: str = "") -> str:
+def render_html(r: dict, panel: str = "", link=plain_link) -> str:
     """The receipt as one self-contained page (no script, nothing loaded from elsewhere).
-    `panel`: HTML put under the decision card (the review page's buttons)."""
+    `panel`: HTML put under the decision card (the review page's buttons); `link`: how a file
+    reference is shown (text here, a link to the source viewer on the review page)."""
     s = summarize(r)
     h = ['<!doctype html><html lang="en"><head><meta charset="utf-8">',
          '<meta name="viewport" content="width=device-width,initial-scale=1">',
@@ -586,11 +612,11 @@ def render_html(r: dict, panel: str = "") -> str:
     blocking = [i for i in s.issues if i.level != "warning"]
     warnings = [i for i in s.issues if i.level == "warning"]
     h.append("<h2>Look at these before approving</h2>")
-    h.append('<ul class="issues">' + "".join(_issue_html(i) for i in blocking) + "</ul>" if blocking
+    h.append('<ul class="issues">' + "".join(_issue_html(i, link) for i in blocking) + "</ul>" if blocking
              else '<p class="muted">No Fatal or Error items.</p>')
     if warnings:
         h.append(f'<details><summary>{len(warnings)} warning(s)</summary><ul class="issues">'
-                 + "".join(_issue_html(i) for i in warnings) + "</ul></details>")
+                 + "".join(_issue_html(i, link) for i in warnings) + "</ul></details>")
     h.append(_narrative_html(r))
 
     h.append("<h2>Checks</h2>")
@@ -639,14 +665,14 @@ def render_html(r: dict, panel: str = "") -> str:
     h.append("<h2>Data</h2>")
     if trace_note(r):
         h.append(f'<p class="note">{e(trace_note(r))}</p>')
-    h += [table_html(tb) for tb in data_tables(r)]
+    h += [table_html(tb, link) for tb in data_tables(r)]
     h.append("<h2>Details (full receipt)</h2>")
-    h += _details_html(r)
+    h += _details_html(r, link)
     h.append("</main></body></html>")
     return "\n".join(h) + "\n"
 
 
-def _details_html(r: dict) -> list[str]:
+def _details_html(r: dict, link=plain_link) -> list[str]:
     """Everything in the receipt, collapsed."""
     def sec(title: str, body: str, open_: bool = False) -> str:
         return f"<details{' open' if open_ else ''}><summary>{e(title)}</summary>{body}</details>"
@@ -673,10 +699,10 @@ def _details_html(r: dict) -> list[str]:
     for c in r["checks_run"]:
         rows = [f"<b>status</b> {e(c['status'])} · <b>evidence</b> {e(c['evidence_level'])}",
                 f"<b>summary</b> {e(c['summary'])}", f"<b>claim scope</b> {e(c['claim_scope'])}"]
-        rows += [f"artifact <code>{e(a['path'])}</code> sha256 <code>{e(a['sha256'])}</code>" for a in c["artifacts"]]
+        rows += [f"artifact {link(a['path'])} sha256 <code>{e(a['sha256'])}</code>" for a in c["artifacts"]]
         rows += [f"{e(k)}: <code>{e(v)}</code>" for k, v in c.get("tool_versions", {}).items()]
         if c.get("sdc_sha256"):
-            rows.append(f"SDC <code>{e(c.get('sdc'))}</code> sha256 <code>{e(c['sdc_sha256'])}</code>")
+            rows.append(f"SDC {link(c.get('sdc') or '')} sha256 <code>{e(c['sdc_sha256'])}</code>")
         checks.append(f"<h3>{e(c['tool'])} <code>{e(json.dumps(c['args'], ensure_ascii=False))}</code></h3>{ul(rows)}")
     if r.get("other_tool_calls"):
         checks.append("<h3>Other tool calls</h3>" + ul(
@@ -751,5 +777,5 @@ def _details_html(r: dict) -> list[str]:
                 rows.append("this approval overrode a Fatal item or the evidence gate's rejection")
         out.append(sec("Human approval", ul(rows)))
     if r.get("trace"):
-        out.append(sec("Trace", f"<p><code>{e(r['trace'])}</code></p>"))
+        out.append(sec("Trace", f"<p>{link(r['trace'])}</p>"))
     return out

@@ -3,7 +3,7 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
-from http.server import HTTPServer
+from http.server import ThreadingHTTPServer
 
 import pytest
 
@@ -46,7 +46,7 @@ def runs(tmp_path):
 @pytest.fixture
 def server(runs):
     app = ReviewApp(runs, token="tok123", by="Tester")
-    srv = HTTPServer(("127.0.0.1", 0), make_handler(app))
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(app))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     yield app, f"http://127.0.0.1:{srv.server_address[1]}"
     srv.shutdown()

@@ -150,7 +150,8 @@ async def _run(args: argparse.Namespace) -> int:
         )
         receipt = build_receipt(report, run_id=run_id, task=args.task, provider=args.provider,
                                 project=project.name, all_cases=regress_cases(project), trace=str(trace),
-                                prompt=args.prompt, sdc_origin=project.flow.sdc_origin if project.flow else "")
+                                prompt=args.prompt, sdc_origin=project.flow.sdc_origin if project.flow else "",
+                                project_root=str(project.root))
         if getattr(args, "preset", None):
             receipt["preset"] = f"{args.preset}@{PRESETS}"
         if args.review != "none":
@@ -265,7 +266,8 @@ def _receipt(args: argparse.Namespace) -> int:
 
 def _review_ui(args: argparse.Namespace) -> int:
     from .review_ui import serve
-    return serve(Path(args.runs_dir), port=args.port, by=args.by)
+    return serve(Path(args.runs_dir), port=args.port, by=args.by,
+                 projects_dir=Path(args.projects_dir) if args.projects_dir else None)
 
 
 def _init(args: argparse.Namespace) -> int:
@@ -384,6 +386,8 @@ def main() -> None:
     ui.add_argument("--runs-dir", default="runs")
     ui.add_argument("--port", type=int, default=8799)
     ui.add_argument("--by", help="who decides (default: git user.name, else the login name)")
+    ui.add_argument("--projects-dir", help="where the project configs are, to find each run's project root for "
+                                           "its file references (default: projects/ next to the runs folder)")
 
     # Personal defaults apply to run and check; anything on the command line wins.
     try:

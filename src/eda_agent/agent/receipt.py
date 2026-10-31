@@ -16,13 +16,16 @@ from .gate import described_cases, executed_cases, split_residual, timing_result
 from .loop import RunReport
 from .levels import levels_record
 from .receipt_tables import with_trace_data
-from .receipt_view import render_data_md, render_html, render_narrative_md, render_summary_md, summarize
+from .receipt_view import (render_data_md, render_html, render_narrative_md, render_summary_md, static_linker,
+                           summarize)
+from .sources import Sources, project_roots
 
 MAX_DIAGNOSTICS = 50  # per check; the count of all of them is kept in diagnostics_total
 
 
 def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, project: str,
-                  all_cases: list[str], trace: str = "", prompt: str = "", sdc_origin: str = "") -> dict:
+                  all_cases: list[str], trace: str = "", prompt: str = "", sdc_origin: str = "",
+                  project_root: str = "") -> dict:
     envelopes = [c for c in report.checks if c["result"] and c["result"].get("evidence_level") in EVIDENCE_LEVELS]
     others = [c for c in report.checks if all(c is not e for e in envelopes)]
     # Same definitions as gate rule R4, so the receipt and the gate never disagree.
@@ -44,6 +47,7 @@ def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, p
         "model": report.model,
         "prompt": prompt,
         "project": project,
+        **({"project_root": project_root} if project_root else {}),
         "stop_reason": report.stop_reason,
         "status": report.status,
         "gate": {"status": gate_status, "rewrites": max(0, len(report.gate) - 1), "decisions": report.gate},
@@ -79,6 +83,8 @@ def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, p
         "wall_s": report.wall_s,
         "trace": trace,
         **({"sdc_origin": sdc_origin} if sdc_origin else {}),
+        "case_sources": {k["name"]: k["source"] for x in results if x.get("tool") == "describe_case"
+                         for k in x.get("cases", []) if isinstance(k, dict) and k.get("name") and k.get("source")},
     }
 
 
@@ -221,5 +227,7 @@ def render_files(receipt: dict, out_dir: Path, *, base: Path | None = None) -> t
     name = f"{receipt['run_id']}.receipt"
     md, page = out_dir / f"{name}.md", out_dir / f"{name}.html"
     md.write_text(render_markdown(view), encoding="utf-8")
-    page.write_text(render_html(view), encoding="utf-8")
+    runs_dir = base or out_dir
+    sources = Sources(runs_dir, project_roots([runs_dir.parent / "projects"]))
+    page.write_text(render_html(view, link=static_linker(view, sources)), encoding="utf-8")
     return md, page

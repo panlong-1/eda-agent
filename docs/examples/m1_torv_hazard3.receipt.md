@@ -64,6 +64,14 @@
 |---|---|---|---|---|---|---|
 | bypass, hazard, muldiv_stall † | 3 | 3 | 0 | 0 | — | — |
 
+### Cases the run read (describe_case) †
+
+| case | source file |
+|---|---|
+| bypass | tests/core/asm/bypass.S |
+| hazard | tests/core/asm/hazard.S |
+| muldiv_stall | tests/core/asm/muldiv_stall.S |
+
 ### Evidence gate decisions
 
 | attempt | result | best passing evidence | reasons |

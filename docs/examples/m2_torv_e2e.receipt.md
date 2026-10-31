@@ -102,6 +102,12 @@ Or click the decision in the local review page: `eda-agent review-ui`.
 |---|---|---|---|---|---|---|
 | smoke † | 1 | 1 | 0 | 0 | — | — |
 
+### Cases the run read (describe_case) †
+
+| case | source file |
+|---|---|
+| smoke | tests/core/asm/smoke.S |
+
 ### Lint: by warning code †
 
 0 error(s), 43 warning(s) in all
@@ -142,7 +148,8 @@ Or click the decision in the local review page: `eda-agent review-ui`.
 | library | sg13g2_stdcell_typ_1p20V_25C.lib |
 | clock | hclk 10 ns |
 | timing met (under this SDC) | yes |
-| SDC | librelane/constraints.sdc · sha256 00c08cf20a426fef… |
+| SDC | librelane/constraints.sdc |
+| SDC sha256 | 00c08cf20a426fef… |
 
 ### Timing per corner (ns; negative = violation) †
 

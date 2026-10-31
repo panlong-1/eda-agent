@@ -38,7 +38,8 @@ TT = {
     "item": "item", "value": "value",
     "cells": "cells", "area": "area", "seq_area": "sequential area",
     "latches": "latches", "liberty": "library", "clock": "clock",
-    "timing_met": "timing met (under this SDC)", "sdc": "SDC",
+    "timing_met": "timing met (under this SDC)", "sdc": "SDC", "sdc_sha": "SDC sha256",
+    "case_sources": "Cases the run read (describe_case)", "case": "case", "source": "source file",
     "yes": "yes", "no": "NO",
     "corners": "Timing per corner (ns; negative = violation)",
     "corner": "corner", "setup_wns": "setup WNS", "setup_tns": "setup TNS",
@@ -140,8 +141,9 @@ def resolve_trace(r: dict, base: Path | None) -> Path | None:
 
 def with_trace_data(r: dict, base: Path | None = None) -> dict:
     """A copy of the receipt where checks without numbers get metrics, diagnostics and duration
-    from the run's trace (matched in order by tool and args). The receipt itself is not changed."""
-    if all("metrics" in c for c in r["checks_run"]):
+    from the run's trace (matched in order by tool and args), and the cases the run read get
+    their source files (from its describe_case results). The receipt itself is not changed."""
+    if all("metrics" in c for c in r["checks_run"]) and "case_sources" in r:
         return r
     path = resolve_trace(r, base)
     if not path:
@@ -162,6 +164,11 @@ def with_trace_data(r: dict, base: Path | None = None) -> dict:
                 calls.append((rec["name"], rec.get("input"), result, round(t - last_t, 2)))
         last_t = t
     out = copy.deepcopy(r)
+    if "case_sources" not in out:
+        sources = {k["name"]: k["source"] for name, _, result, _ in calls if name == "describe_case"
+                   for k in result.get("cases", []) if isinstance(k, dict) and k.get("name") and k.get("source")}
+        if sources:
+            out["_case_sources"] = sources
     i = 0
     for c in out["checks_run"]:
         if "metrics" in c:
@@ -173,7 +180,8 @@ def with_trace_data(r: dict, base: Path | None = None) -> dict:
                          diagnostics_total=result.get("diagnostics_total", 0), duration_s=duration, from_trace=True)
                 i = j + 1
                 break
-    out["_trace_used"] = r["trace"]
+    if any(c.get("from_trace") for c in out["checks_run"]) or out.get("_case_sources"):
+        out["_trace_used"] = r["trace"]
     out["_source"] = r  # the receipt as saved, e.g. for its sha256
     return out
 
@@ -233,13 +241,13 @@ def lint_tables(r: dict) -> list[Table]:
                 f[0 if d.get("severity") == "error" else 1] += 1
             t = Table(tt("lint_by_file", n=len(diags), total=total) + _mark(c),
                       [tt("file"), tt("errors"), tt("warnings")])
-            t.rows = [[f, cell(_num(e), "bad" if e else ""), _num(w)]
+            t.rows = [[cell(f, "ref"), cell(_num(e), "bad" if e else ""), _num(w)]
                       for f, (e, w) in sorted(files.items(), key=lambda x: (-x[1][0], -x[1][1], x[0]))]
             out.append(t)
             t = Table(tt("lint_list", n=len(diags), total=total) + _mark(c),
                       [tt("level"), tt("code"), tt("location"), tt("message")], collapsed=True)
             t.rows = [[level_cell(DIAG_LEVEL.get(d.get("severity"), "warning")),
-                       d.get("code", ""), f"{d.get('file', '')}:{d.get('line', '')}", d.get("msg", "")]
+                       d.get("code", ""), cell(f"{d.get('file', '')}:{d.get('line', '')}", "ref"), d.get("msg", "")]
                       for d in diags]
             out.append(t)
     return out
@@ -258,8 +266,9 @@ def synth_tables(r: dict) -> list[Table]:
                 ("clock", f"{m.get('clock_port') or ''} {_num(m.get('clock_period'))} ns".strip()),
                 ("timing_met", cell(tt("yes") if m.get("timing_met") else tt("no"),
                                     "ok" if m.get("timing_met") else "bad")),
-                ("sdc", f"{c.get('sdc') or m.get('sdc') or '—'} · sha256 {str(c.get('sdc_sha256') or '')[:16]}…")]
-        t.rows = [[tt(k), v] for k, v in rows if v not in ("—", " ns")]
+                ("sdc", cell(c.get("sdc") or m.get("sdc") or "—", "ref")),
+                ("sdc_sha", f"{str(c.get('sdc_sha256') or '')[:16]}…" if c.get("sdc_sha256") else "—")]
+        t.rows = [[tt(k), v] for k, v in rows if (v["text"] if isinstance(v, dict) else v) not in ("—", " ns")]
         if void:
             t.rows.append([cell(tt("void"), "bad"), ""])
         out.append(t)
@@ -313,7 +322,8 @@ def sdc_tables(r: dict) -> list[Table]:
         others = m.get("other_warnings") or []
         t.rows.append([cell(tt("other_warn"), "k"), cell(_num(len(others)), "warn" if others else "ok"),
                        "; ".join(map(str, others[:5]))])
-        t.rows.append([cell(tt("sdc"), "k"), m.get("sdc") or "", str(m.get("sdc_sha256") or "")[:16] + "…"])
+        t.rows.append([cell(tt("sdc"), "k"), cell(m.get("sdc") or "—", "ref"),
+                       str(m.get("sdc_sha256") or "")[:16] + "…"])
         out.append(t)
     return out
 
@@ -360,7 +370,7 @@ def findings_table(r: dict) -> list[Table]:
         found = list(dict.fromkeys(_LOCATION.findall(text)))
         locs = [x for x in found if not any(y != x and y.endswith("/" + x) for y in found)]
         t.rows.append([level_cell(FINDING_LEVEL.get(sev, "warning")), sev, ", ".join(who), text,
-                       ", ".join(locs) or "—"])
+                       cell(", ".join(locs), "ref") if locs else "—"])
     if not t.rows:
         t.rows.append(["—", "—", "—", tt("no_findings"), "—"])
     return [t]
@@ -407,9 +417,18 @@ def cost_table(r: dict) -> list[Table]:
     return [t]
 
 
+def case_tables(r: dict) -> list[Table]:
+    sources = r.get("case_sources") or r.get("_case_sources") or {}
+    if not sources:
+        return []
+    mark = " †" if "case_sources" not in r else ""
+    return [Table(tt("case_sources") + mark, [tt("case"), tt("source")],
+                  [[name, cell(src, "ref")] for name, src in sources.items()])]
+
+
 def data_tables(r: dict) -> list[Table]:
-    return (regress_tables(r) + lint_tables(r) + synth_tables(r) + sdc_tables(r) + other_tables(r)
-            + findings_table(r) + gate_table(r) + cost_table(r))
+    return (regress_tables(r) + case_tables(r) + lint_tables(r) + synth_tables(r) + sdc_tables(r)
+            + other_tables(r) + findings_table(r) + gate_table(r) + cost_table(r))
 
 
 def trace_note(r: dict) -> str:
