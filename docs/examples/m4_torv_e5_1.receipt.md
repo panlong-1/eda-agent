@@ -2,7 +2,7 @@
 
 - **Task:** Report on the fresh LibreLane RTL-to-GDS run of TORV made by eda-agent. Call flow_report with run="/home/panlong/project/eda-agent-m4/runs/pnr/torv_m4_e5_1/src/librelane/runs/m4_e5_1" and baseline="full_p10_fwd" (one call is enough). Say plainly: whether physical signoff passed and which rule failed, the post-route setup and hold slack per corner, DRC/LVS/antenna, which experience table the run is in, whether its lineage is complete, how it compares with full_p10_fwd, and what this run does not cover (gate-level simulation, activity-based power, RC corners).
 - **Project:** torv  ·  **Model:** deepseek / deepseek-v4-pro  ·  **Prompt:** system.v2
-- **Stop:** end  ·  **Status:** awaiting_approval (agent: done)  ·  **Gate:** passed (1 rewrite(s))
+- **Stop:** end  ·  **Status:** approved (agent: done)  ·  **Gate:** passed (1 rewrite(s))
 - **Cost:** 3 turns, 1 tool calls (0 errors), 46411 in / 7913 out tokens, 58.39 s
 
 ## Checks run
@@ -159,8 +159,9 @@ Findings:
 
 ## Human approval
 
-- **Step:** final report  ·  **Status:** pending
+- **Step:** final report  ·  **Status:** approved
 - requested: 2026-10-31T23:33:26+01:00 (the evidence gate passed; a person accepts the result)
-- decide with `eda-agent approve 20261031_233226` or `eda-agent reject 20261031_233226 --reason "..."`
+- decided by **Long Pan** at 2026-10-31T23:53:00+01:00
+- receipt content sha256 at decision: `84897a44e9f93346a96e3ddc205c697a54e49f0414e64e6171c4c5c44ee41b1b`
 
 Trace: `runs/20261031_233226.jsonl`

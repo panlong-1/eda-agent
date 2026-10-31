@@ -45,17 +45,25 @@ def rel_to(path: str | Path, roots: list[Path]) -> str:
     return str(p)
 
 
-def make_snapshot(rtl_files: list[str], roots: list[Path], *, sdc_sha256: str | None, pdk_version: str | None,
+def make_snapshot(rtl_files: list[str] | dict, roots: list[Path], *, sdc_sha256: str | None, pdk_version: str | None,
                   defines=(), include_dirs=(), flow_config_sha256: str | None = None, tools: dict | None = None,
-                  image: str | None = None, state: str = CURRENT, note: str = "") -> dict:
+                  image: str | None = None, state: str = CURRENT, note: str = "",
+                  required: tuple[str, ...] = ("RTL", "SDC", "PDK version")) -> dict:
+    """rtl_files: paths to hash, or {path: sha256} already known (e.g. from a manifest). `required`:
+    the parts without which there is no id (an import may know its RTL but not the PDK version)."""
     roots = [Path(r).resolve() for r in roots if r]
-    rtl = {rel_to(f, roots): (sha256_path(f) if state == CURRENT else None) for f in rtl_files}
+    if isinstance(rtl_files, dict):
+        rtl = {rel_to(f, roots): (h if state == CURRENT else None) for f, h in rtl_files.items()}
+    else:
+        rtl = {rel_to(f, roots): (sha256_path(f) if state == CURRENT else None) for f in rtl_files}
     design = {"rtl": rtl, "sdc_sha256": sdc_sha256, "pdk_version": pdk_version}
     full = {"design": design, "defines": sorted(defines), "include_dirs": sorted(rel_to(d, roots) for d in include_dirs),
             "flow_config_sha256": flow_config_sha256, "tools": tools or {}, "image": image}
     unknown = [k for k, v in rtl.items() if v is None] + (["SDC"] if not sdc_sha256 else []) + \
         (["PDK version"] if not pdk_version else [])
-    known = state == CURRENT and not unknown
+    missing_required = [u for u in unknown if u in required or ("RTL" in required and u in rtl)] + \
+        (["RTL"] if "RTL" in required and not rtl else [])
+    known = state == CURRENT and not missing_required
     return {"id": _h(full)[:16] if known else None, "design_id": _h(design)[:16] if known else None,
             "state": state if state != CURRENT or known else UNKNOWN, "note": note,
             "unknown_parts": unknown[:10], "rtl_files": len(rtl), "parts": full}
@@ -138,11 +146,13 @@ def compare_snapshots(a: dict, b: dict) -> dict:
     diff = [f"RTL {f} differs" for f in sorted(common) if da["rtl"][f] != db["rtl"][f]]
     if not common:
         diff.append("no RTL file in common")
-    if da["sdc_sha256"] != db["sdc_sha256"]:
-        diff.append("SDC differs")
-    if da["pdk_version"] != db["pdk_version"]:
-        diff.append("PDK version differs")
-    return {"same_design": not diff, "common_rtl_files": len(common), "differences": diff[:10]}
+    unknown = []
+    for key, label in (("sdc_sha256", "SDC"), ("pdk_version", "PDK version")):
+        if da[key] and db[key] and da[key] != db[key]:
+            diff.append(f"{label} differs")
+        elif not (da[key] and db[key]):
+            unknown.append(f"{label} not known for both")  # unknown is not evidence of a difference
+    return {"same_design": not diff, "common_rtl_files": len(common), "differences": diff[:10], "unknown": unknown}
 
 
 def consistency(results: list[dict]) -> dict:

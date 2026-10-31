@@ -51,7 +51,7 @@ result), and raises `NotMine` for anything it does not recognize. Never guess.
   "design": "torv_cpu",                               # top/block, if the report says
   "pdk_version": "...",                               # optional
   "metrics": {...},                                   # the category's required key numbers (below)
-  "inputs":  [{"path": "...", "role": "rtl|netlist|sdc|constraints|waivers|library|spef|sdf|vcd|saif|def|gds|other",
+  "inputs":  [{"path": "...", "role": "rtl|rtl_manifest|netlist|sdc|constraints|waivers|library|spef|sdf|vcd|saif|def|gds|other",
                "sha256": "optional; if given it must match the file"}],
   "outputs": [{"path": "report.rpt", "role": "report|netlist|patterns|...", "sha256": "optional"}],  # >= 1, must exist
   "corners": [...],                                   # optional
@@ -81,7 +81,7 @@ Relative paths are relative to the imported directory. Waived items go in `metri
 | `drc` | `violations`, `deck` | fail if unwaived violations | E4 |
 | `lvs` | `match`, `errors` | fail unless match and 0 errors | E4 |
 | `simulation` | `passed`, `failed` (opt. `gate_level`, `sdf`, `timing_checks`) | fail if any failed | E2 |
-| `power` | `total_w`, `method` (opt. `annotation_coverage_pct`, `activity_corner`, `lib_corner`) | fail only above an approved budget | E4 |
+| `power` | `total_w` (watts; `None` when the report gives no unit, raw value in `total_raw`), `method` (opt. `annotation_coverage_pct`, `activity_corner`, `lib_corner`) | error if the unit is not established; fail only above an approved budget | E4 |
 
 E0 categories are facts in their own category: they never stand in for simulation or signoff.
 The claim scope (what the result shows and does not) is written by the core from a template.
@@ -103,7 +103,20 @@ with who and when (`<experience_dir>/<project>/standards.json`). No MCP tool can
 
 ```bash
 eda-agent import path/to/report_dir [--as mytool_cdc] [--project projects/torv.toml]
+eda-agent import path/to/dc_run --all                      # every importer that recognizes the folder
+eda-agent import path/to/report_dir --rtl-manifest SRC.sha256   # which RTL the reports describe
 ```
+
+One folder often holds several categories (a synthesis run: synthesis, STA and power). `--all`
+runs every importer whose `detect()` is above 0 and writes one result and receipt per importer;
+without it, a tie between importers is refused and `--as` chooses.
+
+**Which design.** A result is tied to a design snapshot (plan §0.18) only through its RTL hashes.
+Reports of commercial tools rarely name their RTL, so give them: a person passes `--rtl-manifest`
+(`sha256sum` lines `<sha256>  <path>`, or JSON `{path: sha256}` / `{"files": {...}}`, paths relative
+to the design root), or the importer names a manifest it found as an input with role
+`rtl_manifest`. Without one, the result's snapshot is unknown and gate R8 cannot join it to other
+stages. For imports the SDC and PDK version may stay unknown; unknown is not counted as a difference.
 
 The judged result is appended to the design's imported table
 (`<experience_dir>/<project>/imported_reports.jsonl`) and a receipt is written to `runs/imports/`.

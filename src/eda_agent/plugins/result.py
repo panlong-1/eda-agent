@@ -23,7 +23,7 @@ from pathlib import Path
 from ..core.categories import CATEGORIES, FORBIDDEN_KEYS
 from ..core.snapshot import sha256_path
 
-ROLES = ("rtl", "netlist", "sdc", "constraints", "waivers", "library", "report", "patterns", "spef", "sdf",
+ROLES = ("rtl", "rtl_manifest", "netlist", "sdc", "constraints", "waivers", "library", "report", "patterns", "spef", "sdf",
          "vcd", "saif", "def", "gds", "other")
 
 

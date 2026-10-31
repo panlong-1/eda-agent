@@ -17,7 +17,7 @@ from ..core import standards
 from ..core.categories import CATEGORIES, judge, scope
 from ..core.envelope import Diagnostic, ToolResult
 from ..core.project import Project
-from ..core.snapshot import UNKNOWN, make_snapshot
+from ..core.snapshot import UNKNOWN, make_snapshot, sha256_path
 from ..plugins import choose
 from ..plugins.result import NotMine, files_with_hashes, validate
 
@@ -30,18 +30,50 @@ def _exp_dir(project: Project) -> Path:
     return Path(base) / project.name
 
 
-def _snapshot(project: Project, res: dict, files: dict, src: Path) -> dict:
-    rtl = [f["path"] for f in files["inputs"] if f["role"] == "rtl"]
+def read_manifest(path: Path) -> dict[str, str]:
+    """RTL hashes from a manifest: `sha256sum` lines ("<sha256>  <path>") or JSON {path: sha256}
+    (also {"files": {...}}). Paths as the manifest writes them (relative to the design root)."""
+    text = Path(path).read_text(errors="replace")
+    try:
+        data = json.loads(text)
+        data = data.get("files", data) if isinstance(data, dict) else {}
+        return {str(k): str(v).lower() for k, v in data.items() if isinstance(v, str) and len(v) == 64}
+    except ValueError:
+        pass
+    out = {}
+    for line in text.splitlines():
+        parts = line.strip().split(maxsplit=1)
+        if len(parts) == 2 and len(parts[0]) == 64 and all(c in "0123456789abcdefABCDEF" for c in parts[0]):
+            out[parts[1].lstrip("*").strip()] = parts[0].lower()
+    return out
+
+
+def _snapshot(project: Project, res: dict, files: dict, src: Path, manifest: Path | None = None) -> dict:
+    """The design an imported report describes: RTL from a person-supplied manifest (--rtl-manifest),
+    else from an `rtl_manifest` input the importer named, else from `rtl` inputs found here. SDC and
+    PDK version may stay unknown; the RTL may not."""
     sdc = next((f["sha256"] for f in files["inputs"] if f["role"] == "sdc"), None)
+    tools = {res["tool"]["name"]: res["tool"]["version"]}
+    named = next((Path(f["path"]) for f in files["inputs"] if f["role"] == "rtl_manifest" and f["sha256"]), None)
+    for mf, who in ((manifest, "a person-supplied RTL manifest"), (named, "the RTL manifest the report names")):
+        if mf:
+            hashes = read_manifest(mf)
+            if hashes:
+                snap = make_snapshot(hashes, [project.root], sdc_sha256=sdc, pdk_version=res.get("pdk_version"),
+                                     tools=tools, required=("RTL",),
+                                     note=f"imported report; RTL from {who} ({mf.name}, {len(hashes)} file(s))")
+                snap["rtl_manifest"] = {"path": str(mf), "sha256": sha256_path(mf), "supplied_by": who}
+                return snap
+    rtl = [f["path"] for f in files["inputs"] if f["role"] == "rtl"]
     if not rtl:
         return {"id": None, "design_id": None, "state": UNKNOWN, "unknown_parts": ["RTL"],
-                "note": "imported report: it names no RTL inputs, so the design it describes is not identified"}
+                "note": "imported report: it names no RTL inputs and no RTL manifest was given, so the design it "
+                        "describes is not identified (eda-agent import --rtl-manifest FILE)"}
     return make_snapshot(rtl, [project.root, src], sdc_sha256=sdc, pdk_version=res.get("pdk_version"),
-                         tools={res["tool"]["name"]: res["tool"]["version"]},
-                         note="imported report: RTL inputs as found here at import time")
+                         tools=tools, required=("RTL",), note="imported report: RTL inputs as found here at import time")
 
 
-def import_result(project: Project, src: Path, importer, res: dict) -> ToolResult:
+def import_result(project: Project, src: Path, importer, res: dict, manifest: Path | None = None) -> ToolResult:
     """Judge a parsed neutral result (already validated) into an envelope."""
     cat = res["category"]
     std = standards.load(project)
@@ -68,14 +100,34 @@ def import_result(project: Project, src: Path, importer, res: dict) -> ToolResul
         error_class=None if status in ("pass", "fail") else "incomplete",
         residual_risk=[f"imported: {CATEGORIES[cat]['question']} is answered by {res['tool']['name']}'s own report; "
                        "eda-agent did not run the tool", "the result is only as complete as the report the tool wrote"],
-        snapshot=_snapshot(project, res, files, src))
+        snapshot=_snapshot(project, res, files, src, manifest))
 
 
-def run_import(project: Project, src: Path, plugin: str | None = None, write: bool = True) -> ToolResult:
+def run_import_all(project: Project, src: Path, write: bool = True, manifest: Path | None = None) -> list[ToolResult]:
+    """Every installed importer that recognizes the directory (a synthesis run folder holds synthesis,
+    STA and power reports): one judged result, record and receipt each."""
+    from ..plugins import importers
+    hits = []
+    for n, imp in sorted(importers().items()):
+        try:
+            if float(imp.detect(src) or 0) > 0:
+                hits.append(n)
+        except Exception:
+            continue
+    if not hits:
+        return [run_import(project, src, None, write, manifest)]  # the same "no importer" error as a single import
+    return [run_import(project, src, n, write, manifest) for n in hits]
+
+
+def run_import(project: Project, src: Path, plugin: str | None = None, write: bool = True,
+               manifest: Path | None = None) -> ToolResult:
     src = Path(src)
     if not src.exists():
         return ToolResult("imported", "error", "E0", "Nothing was imported.", summary=f"{src} does not exist",
                           error_class="bad_config")
+    if manifest is not None and not read_manifest(manifest):
+        return ToolResult("imported", "error", "E0", "Nothing was imported.", error_class="bad_config",
+                          summary=f"{manifest}: no RTL hashes in it (sha256sum lines or JSON {{path: sha256}})")
     imp, why = choose(src, plugin)
     if imp is None:
         return ToolResult("imported", "error", "E0", "Nothing was imported.", summary=why, error_class="no_importer")
@@ -88,9 +140,9 @@ def run_import(project: Project, src: Path, plugin: str | None = None, write: bo
         return ToolResult("imported", "error", "E0", "Nothing was imported.", error_class="bad_plugin_output",
                           summary=f"importer {imp.name} returned an invalid result: {'; '.join(problems[:5])}",
                           diagnostics=[Diagnostic("error", "PLUGIN_CONTRACT", p) for p in problems[:20]])
-    env = import_result(project, src, imp, res)
+    env = import_result(project, src, imp, res, manifest)
     if write:
-        rec = {"id": f"{res['category']}_{datetime.now():%Y%m%d_%H%M%S_%f}", "design": project.name,
+        rec = {"id": f"{res['category']}_{getattr(imp, 'name', 'x')}_{datetime.now():%Y%m%d_%H%M%S_%f}", "design": project.name,
                "imported_at": datetime.now().astimezone().isoformat(timespec="seconds"),
                "made_by": "unknown (imported report)", "envelope": env.to_dict()}
         env.metrics["import_id"] = rec["id"]

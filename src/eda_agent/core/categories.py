@@ -160,6 +160,9 @@ def judge(category: str, metrics: dict, approved_waivers: set[str], targets: dic
     if category == "synthesis":
         return ("fail", [f"{m['latches']} latch(es)"]) if m.get("latches") else ("pass", [])
     if category == "power":
+        if not isinstance(m.get("total_w"), (int, float)) or isinstance(m.get("total_w"), bool):
+            return "error", [f"power unit not established: the report gives no unit (raw value {m.get('total_raw', '?')}); "
+                             "total_w must be in watts"]
         target = targets.get("power.total_w")
         if target is not None and float(m["total_w"]) > target:
             return "fail", [f"{m['total_w']} W above target {target} W"]
@@ -206,6 +209,8 @@ def signoff_extras(results: list[dict]) -> dict[str, str]:
 def scope(category: str, tool: dict, design: str | None, metrics: dict, approved: int, targets: dict) -> str:
     spec = CATEGORIES[category]
     fields = {k: (v if not isinstance(v, (dict, list)) else "…") for k, v in metrics.items()}
+    if category == "power" and not isinstance(metrics.get("total_w"), (int, float)):
+        fields["total_w"] = f"unknown (unit not established; raw {metrics.get('total_raw', '?')})"
     sev = metrics.get("violations_by_severity") or {}
     fields.update(tool=tool.get("name"), version=tool.get("version"), design=design or "the design",
                   waived=approved, errors=sev.get("error", 0), warnings=sev.get("warning", 0),

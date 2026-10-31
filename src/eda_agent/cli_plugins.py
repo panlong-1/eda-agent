@@ -19,6 +19,8 @@ def add_parsers(sub) -> None:
     im = sub.add_parser("import", help="import a report made elsewhere through an installed importer plug-in")
     im.add_argument("dir", help="the report directory")
     im.add_argument("--as", dest="plugin", help="importer name (default: the one that recognizes the directory)")
+    im.add_argument("--all", action="store_true", help="every importer that recognizes the directory, one result each")
+    im.add_argument("--rtl-manifest", help="RTL hashes of the design the reports describe (sha256sum lines or JSON)")
     im.add_argument("--project", help=f"project config (default: {PROJECT_FILE} here or in a parent)")
     pl = sub.add_parser("plugins", help="installed importer and adapter plug-ins; their contract tests")
     pl.add_argument("action", choices=["list", "check"])
@@ -62,17 +64,24 @@ def dispatch(args: argparse.Namespace, resolve_project) -> int | None:
     if args.cmd == "import":
         from pathlib import Path
 
-        from .tools.importing import run_import
-        res = run_import(project, Path(args.dir), args.plugin).to_dict()
-        print(f"import: {res['status'].upper()} [{res['evidence_level']}] — {res['summary']}")
-        print(f"claim scope: {res['claim_scope']}")
-        snap = res.get("snapshot") or {}
-        print(f"snapshot: {snap.get('id') or '-'} ({snap.get('state')}: {snap.get('note')})")
-        for d in res["diagnostics"]:
-            print(f"  {d['severity']:7} {d['code']} {d['msg']}")
-        if r := res["metrics"].get("receipt"):
-            print(f"receipt: {r}")
-        return {"pass": 0, "fail": 1}.get(res["status"], 2)
+        from .tools.importing import run_import, run_import_all
+        manifest = Path(args.rtl_manifest) if args.rtl_manifest else None
+        if args.all and args.plugin:
+            print("error: --all and --as exclude each other")
+            return 2
+        results = [r.to_dict() for r in (run_import_all(project, Path(args.dir), manifest=manifest) if args.all
+                                         else [run_import(project, Path(args.dir), args.plugin, manifest=manifest)])]
+        for res in results:
+            print(f"import: {res['status'].upper()} [{res['evidence_level']}] — {res['summary']}")
+            print(f"claim scope: {res['claim_scope']}")
+            snap = res.get("snapshot") or {}
+            print(f"snapshot: {snap.get('id') or '-'} ({snap.get('state')}: {snap.get('note')})")
+            for d in res["diagnostics"]:
+                print(f"  {d['severity']:7} {d['code']} {d['msg']}")
+            if r := res["metrics"].get("receipt"):
+                print(f"receipt: {r}")
+        worst = max(({"pass": 0, "fail": 1}.get(r["status"], 2) for r in results), default=2)
+        return worst
     from .agent import human_gate
     from .core import standards
     by = args.by or human_gate.default_approver()

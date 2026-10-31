@@ -226,3 +226,73 @@ def test_tapeout_lists_the_checklist_items_not_covered():
                         "lineage": {"available": True, "breaks": []}}}
     d = check_report("flow_report r: ready for tapeout." + RISK, [flow])
     assert any("cdc not covered" in r and "post_scan_equivalence not covered" in r for r in d.reasons)
+
+
+# --- findings from the private importers: power unit, RTL manifests, --all -------------------------
+
+def test_power_without_an_established_unit_is_an_error():
+    from eda_agent.core.categories import scope
+    m = {"total_w": None, "total_raw": "5.327", "method": "vcd"}
+    st, why = judge("power", m, set(), {})
+    assert st == "error" and "unit not established" in why[0]
+    text = scope("power", {"name": "P", "version": "1"}, "d", m, 0, {})
+    assert "None W" not in text and "unit not established" in text
+    assert judge("power", {"total_w": 0.005, "method": "vcd"}, set(), {})[0] == "pass"
+
+
+def _manifest(design: Path, tmp_path: Path, as_json=False) -> Path:
+    import hashlib
+    (design / "rtl").mkdir(exist_ok=True)
+    (design / "rtl" / "top.sv").write_text("module top; endmodule\n")
+    h = hashlib.sha256((design / "rtl" / "top.sv").read_bytes()).hexdigest()
+    f = tmp_path / ("rtl.json" if as_json else "SRC.sha256")
+    f.write_text(json.dumps({"files": {"rtl/top.sv": h}}) if as_json else f"{h}  rtl/top.sv\n")
+    return f
+
+
+def test_a_person_supplied_rtl_manifest_identifies_the_design(project, tmp_path):
+    from eda_agent.core.snapshot import compare_snapshots, make_snapshot
+    mf = _manifest(project.root, tmp_path)
+    r = run_import(project, SAMPLES / "clean", write=False, manifest=mf)
+    s = r.snapshot
+    assert s["state"] == "current" and s["id"] and s["rtl_manifest"]["supplied_by"] == "a person-supplied RTL manifest"
+    assert s["unknown_parts"] == ["SDC", "PDK version"]  # allowed for an import; the RTL is what is required
+    mine = make_snapshot([str(project.root / "rtl" / "top.sv")], [project.root], sdc_sha256="s" * 64, pdk_version="v")
+    c = compare_snapshots(mine, s)
+    assert c["same_design"] is True and c["unknown"]  # unknown SDC/PDK is not a difference
+    bad = tmp_path / "empty.txt"
+    bad.write_text("nothing here\n")
+    assert run_import(project, SAMPLES / "clean", write=False, manifest=bad).error_class == "bad_config"
+
+
+def test_an_importer_may_name_an_rtl_manifest_input(project, tmp_path):
+    mf = _manifest(project.root, tmp_path, as_json=True)
+
+    class Named(FakeCdcImporter):
+        name = "fake_cdc_manifest"
+
+        def parse(self, path):
+            r = super().parse(path)
+            return {**r, "inputs": r["inputs"] + [{"path": str(mf), "role": "rtl_manifest"}]}
+    plugins.register_importer(Named)
+    r = run_import(project, SAMPLES / "clean", "fake_cdc_manifest", write=False)
+    assert r.snapshot["state"] == "current" and "names" in r.snapshot["rtl_manifest"]["supplied_by"]
+
+
+def test_import_all_runs_every_importer_that_recognizes_the_folder(project, monkeypatch):
+    from eda_agent.tools.importing import run_import_all
+
+    class FakeRdc(FakeCdcImporter):
+        name = "fake_rdc"
+        categories = ("rdc",)
+
+        def parse(self, path):
+            return {**super().parse(path), "category": "rdc"}
+    monkeypatch.setattr(plugins, "_IMPORTERS", {})
+    monkeypatch.setattr(plugins, "_LOADED", {"importers": True, "adapters": True})
+    plugins.register_importer(FakeCdcImporter)
+    plugins.register_importer(FakeRdc)
+    assert plugins.choose(SAMPLES / "clean")[0] is None  # a tie: a single import needs --as
+    res = run_import_all(project, SAMPLES / "clean")
+    assert sorted(r.metrics["category"] for r in res) == ["cdc", "rdc"]
+    assert len({r.metrics["receipt"] for r in res}) == 2 and len(imported(project)) == 2
