@@ -130,14 +130,18 @@ def build_context(level: str, run: AuthorRun) -> str:
         return f"Final report under review:\n\n{run.final_text}"
     if level == "I0":
         lines = [f"Task given to the author:\n{run.task}", "", "The author's whole session, in order:"]
-        tools = iter(run.tools)
+        unused = list(run.tools)
         for i, turn in enumerate(run.turns, 1):
             if turn["text"]:
                 lines.append(f"\n[author turn {i}]\n{turn['text']}")
             for call in turn["calls"]:
-                tool = next(tools, None)
+                # Pair by name and arguments: a call refused by the budget has no result event.
+                tool = next((t for t in unused if t["name"] == call["name"] and t["input"] == call["input"]), None)
                 lines.append(f"\n[tool call] {call['name']} {json.dumps(call['input'])}")
-                if tool is not None:
+                if tool is None:
+                    lines.append("[tool result] (none: the call was not executed)")
+                else:
+                    unused.remove(tool)
                     lines.append(f"[tool result] {json.dumps(tool['result'], ensure_ascii=False)}")
         lines += ["", f"The author's final report:\n\n{run.final_text}"]
         return "\n".join(lines)
@@ -234,7 +238,17 @@ def rules_review(run: AuthorRun, rtl_rules: dict | None) -> Review:
         findings.append({"severity": severity, "text": text})
 
     results = [t for t in run.tools if isinstance(t["result"], dict)]
+    # Only the latest result of each check counts: a run may fix a failure and re-run it.
+    # regress is keyed by its cases too, since different case sets are different checks.
+    latest: dict[tuple, dict] = {}
     for t in results:
+        key = (t["name"], json.dumps(t["input"], sort_keys=True) if t["name"] == "regress" else "")
+        latest[key] = t
+    current = [t for t in results if any(t is v for v in latest.values())]
+    if superseded := len(results) - len(current):
+        add("info", f"{superseded} earlier result(s) were superseded by a later run of the same check; "
+                    "only the latest of each is judged")
+    for t in current:
         r, name = t["result"], t["name"]
         m = r.get("metrics") or {}
         if r.get("status") in ("error", "timeout"):
@@ -254,9 +268,15 @@ def rules_review(run: AuthorRun, rtl_rules: dict | None) -> Review:
             add("medium", f"check_sdc: {r.get('summary', '')}")
     hashes = {(t["result"].get("metrics") or {}).get("sdc_sha256") for t in results
               if (t["result"].get("metrics") or {}).get("sdc_sha256") not in (None, "missing")}
-    if len(hashes) > 1:
-        add("high", f"timing results of this run were measured under {len(hashes)} different SDCs; "
+    if len(hashes) > 1:  # allowed (the gate voids the older ones), but a person should know
+        add("info", f"timing results of this run were measured under {len(hashes)} different SDCs; "
                     "only those under the latest one count")
+        latest_sha = next((m.get("sdc_sha256") for t in reversed(results)
+                           if (m := t["result"].get("metrics") or {}).get("sdc_sha256")), None)
+        if any(t["name"] == "synth" and (t["result"].get("metrics") or {}).get("sdc_sha256") != latest_sha
+               for t in current):
+            add("high", "the latest synth result was measured under an SDC that changed afterwards; "
+                        "no valid timing result remains")
     if rtl_rules is None:
         add("info", "rtl_rules did not run")
     elif rtl_rules.get("status") in ("error", "timeout"):

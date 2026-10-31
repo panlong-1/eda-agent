@@ -41,7 +41,7 @@ def test_timing_claim_must_name_its_result():
 
 def test_timing_claim_against_a_failing_result_is_rejected():
     d = check_report("synth shows timing is met at 100 MHz." + RISK, [synth(wns=-1.2, met=False)])
-    assert not d.passed and any("NOT met" in r for r in d.reasons)
+    assert not d.passed and any("no valid synth result" in r for r in d.reasons)
 
 
 def test_wrong_frequency_is_rejected():
@@ -79,3 +79,56 @@ def test_sdc_change_voids_earlier_timing_results():
 def test_chinese_timing_claim():
     d = check_report("设计满足时序。" + RISK, [])
     assert not d.passed and any("满足时序" in r for r in d.reasons)
+
+
+# Adversarial sentences from the M2 code review.
+LINT = {"tool": "lint", "status": "pass", "evidence_level": "E0", "metrics": {"errors": 0}}
+
+
+def test_distant_negation_does_not_cancel_a_claim():
+    for s in ("Without any retiming the core meets 200 MHz.",
+              "No retiming was needed and timing is met at 200 MHz.",
+              "The design closes timing at 200 MHz."):
+        assert not check_report(s + RISK, [LINT]).passed, s
+
+
+def test_admitted_failure_is_not_a_positive_claim():
+    failing = synth(wns=-1.2, met=False)
+    for s in ("synth (E4): the design fails to meet 100 MHz, WNS -1.2 ns.",
+              "synth (E4) is unable to meet timing at 100 MHz.",
+              "synth (E4) does not meet 100 MHz."):
+        d = check_report(s + RISK, [failing])
+        assert d.passed, (s, d.reasons)
+
+
+def test_every_stated_clock_must_match_a_timed_period():
+    for s in ("synth (E4): timing is met. The clock is 200 MHz.",
+              "synth (E4) meets 100 MHz, i.e. fmax about 107 MHz.",
+              "synth (E4) meets 0.2 GHz.",
+              "synth (E4) meets 5 ns."):
+        assert not check_report(s + RISK, [synth()]).passed, s
+    assert check_report("synth (E4) meets 0.1 GHz." + RISK, [synth()]).passed
+
+
+def test_claimed_frequency_must_be_the_one_that_met():
+    results = [synth(period=20.0, met=True), synth(period=10.0, wns=-0.4, met=False)]
+    assert not check_report("synth (E4) meets 100 MHz." + RISK, results).passed
+    assert check_report("synth (E4) meets 50 MHz." + RISK, results).passed
+
+
+def test_setup_only_claim_needs_only_setup_slack():
+    r = synth(wns=0.5, met=False)
+    r["metrics"]["hold_wns"] = -0.1
+    assert check_report("synth (E4): setup timing is met at 100 MHz, WNS 0.5 ns." + RISK, [r]).passed
+    assert not check_report("synth (E4): timing is met at 100 MHz." + RISK, [r]).passed
+
+
+def test_numbers_are_checked_against_the_right_metric():
+    failing = synth(wns=-0.4, met=False)  # typ corner keeps setup_tns 0.0
+    assert not check_report("synth (E4): setup WNS 0 ns, TNS 0." + RISK, [failing]).passed
+    assert check_report("synth (E4): typ corner TNS 0.0, slow WNS -0.4 ns." + RISK, [failing]).passed
+
+
+def test_corner_name_digits_are_not_a_wns():
+    d = check_report("synth (E4): WNS on tt_025C_1v80 is +0.698 ns." + RISK, [synth()])
+    assert d.passed, d.reasons

@@ -100,6 +100,13 @@ async def _run(args: argparse.Namespace) -> int:
     project = load_project(args.project)
     system = load_prompt(args.prompt)
     model_name = args.model or DEFAULT_MODELS[args.provider]
+    if args.review == "I3":  # refuse before the author runs, not after
+        _, review_model = review_model_choice("I3", args.provider, model_name, args.review_provider,
+                                              args.review_model)
+        if review_model == model_name:
+            print(f"error: --review I3 needs a reviewer model other than the author's ({model_name})",
+                  file=sys.stderr)
+            return 2
     model = make_model(args.provider, model_name, args.effort)
     async with mcp_tools(sys.executable, _server_args(args.project)) as (tools, execute, instructions):
         if instructions:  # the tool server's own rules travel with the system prompt
@@ -114,7 +121,11 @@ async def _run(args: argparse.Namespace) -> int:
                                 project=project.name, all_cases=regress_cases(project), trace=str(trace),
                                 prompt=args.prompt)
         if args.review != "none":
-            receipt["reviews"] = await run_reviews(args, receipt, trace, tools, execute)
+            try:
+                receipt["reviews"] = await run_reviews(args, receipt, trace, tools, execute)
+            except Exception as e:  # a failed review must not lose the author's receipt
+                receipt["review_error"] = f"{type(e).__name__}: {e}"
+                print(f"review failed: {receipt['review_error']}", file=sys.stderr)
     if report.status == "done" and not args.no_approval:
         human_gate.request_approval(receipt, "final report",
                                     "the evidence gate passed; a person accepts the result")

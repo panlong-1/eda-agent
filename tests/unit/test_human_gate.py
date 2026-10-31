@@ -26,6 +26,7 @@ def test_request_then_approve_records_who_when_and_what():
     a = r["approval"]
     assert (r["status"], a["status"], a["by"], a["receipt_sha256"]) == ("approved", "approved", "Long Pan", sha)
     assert a["at"] and not a["overrode_gate"]
+    assert human_gate.content_sha256(r) == sha  # re-checkable on the saved receipt
     assert "decided by **Long Pan**" in render_markdown(r)
     with pytest.raises(human_gate.ApprovalError, match="final"):
         human_gate.decide(r, "reject", by="x", reason="changed my mind")

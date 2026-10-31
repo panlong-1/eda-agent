@@ -99,12 +99,12 @@ def run_rtl_rules(project: Project, max_diagnostics: int = 30) -> ToolResult:
     root = str(project.root)
     findings: list[Diagnostic] = []
     for d in parse_verilator(proc.output):
-        if d.code not in VERILATOR_RULES or (d.file and not d.file.startswith(root)):
+        if d.code not in VERILATOR_RULES or (d.file and not d.file.startswith(root + "/")):
             continue
         rule, severity, meaning = VERILATOR_RULES[d.code]
         findings.append(Diagnostic(severity, rule.upper(), f"{meaning}: {d.msg}",
-                                   d.file[len(root) + 1:] if d.file.startswith(root) else d.file, d.line, d.col))
-    sources = [Path(p) for p in cmd if p.startswith(root) and p.endswith((".v", ".sv"))]
+                                   d.file[len(root) + 1:] if d.file.startswith(root + "/") else d.file, d.line, d.col))
+    sources = [Path(p) for p in cmd if p.startswith(root + "/") and p.endswith((".v", ".sv"))]
     for src in sources:
         for d in scan_reset_polarity(src.relative_to(project.root), src.read_text(errors="replace")):
             findings.append(d)

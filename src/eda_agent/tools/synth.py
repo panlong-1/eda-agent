@@ -231,13 +231,13 @@ def parse_stat(stat: dict, top: str) -> dict:
             "top_cell_types": dict(sorted(cells.items(), key=lambda kv: -kv[1])[:8])}
 
 
-def _versions(flow: FlowConfig, setup: _Setup) -> dict:
+def _versions(flow: FlowConfig, setup: _Setup, extra_images: tuple[str, ...] = ()) -> dict:
     """Image digest plus the yosys/sta version lines inside it (cached per image and process)."""
     if flow.image in _VERSION_CACHE:
         return _VERSION_CACHE[flow.image]
     versions = {"image": image_digest(flow.image)}
     for name, inner in (("yosys", ["yosys", "-V"]), ("opensta", ["sta", "-version"])):
-        cmd = docker_command(flow.image, inner, [])
+        cmd = docker_command(flow.image, inner, [], extra_images)
         versions[name] = (run(cmd, setup.root, setup.env, 60).output.strip().splitlines() or ["unknown"])[0] \
             if isinstance(cmd, list) else "unknown"
     if versions["image"] != "unknown":
@@ -344,7 +344,7 @@ def run_synth(project: Project, work_base: Path = WORK_DIR) -> ToolResult:
         return refused
     flow = setup.flow
     work = _work_dir(project, work_base, "synth")
-    versions = _versions(flow, setup)
+    versions = _versions(flow, setup, project.allowed_images)
     sdc_sha = sha256_file(setup.sdc)
     failed, facts = _synthesize(project, setup, work, "synth", level, scope)
     if failed:
@@ -375,6 +375,9 @@ def run_synth(project: Project, work_base: Path = WORK_DIR) -> ToolResult:
     diags += [Diagnostic("warning", "SYNTH_CHECK", ln) for ln in facts["check_lines"]]
     unit = first["time_unit"] or "?"
     path = timed[worst_corner]["worst_path"]
+    # The period timing was measured at is the SDC's, which may differ from [flow] (CLOCK_PERIOD warning).
+    sdc_period = next((c["period"] for c in first["clocks"]
+                       if flow.clock_port in c["sources"] and c["period"] is not None), flow.clock_period)
     return ToolResult(
         tool="synth",
         status="pass" if met else "fail",
@@ -382,14 +385,15 @@ def run_synth(project: Project, work_base: Path = WORK_DIR) -> ToolResult:
         claim_scope=scope,
         summary=(f"{facts['cells']} cells, area {facts['area']:.0f}, {facts['latches']} latch(es); "
                  f"setup WNS {wns:+.3f} {unit} (corner {worst_corner}), hold WNS "
-                 f"{hold if hold is None else f'{hold:+.3f}'} at {flow.clock_period:g} ns; "
+                 f"{hold if hold is None else f'{hold:+.3f}'} at {sdc_period:g} ns; "
                  f"{'timing met' if met else 'timing NOT met'} under this SDC, pre-PnR estimate"),
         metrics={
             **{k: facts[k] for k in ("cells", "area", "sequential_area", "latches", "check_problems",
                                      "top_cell_types")},
-            "clock_port": flow.clock_port, "clock_period": flow.clock_period, "time_unit": unit,
-            "sdc": flow.sdc, "sdc_sha256": sdc_sha, "liberty": setup.liberty.name,
+            "clock_port": flow.clock_port, "clock_period": sdc_period, "flow_clock_period": flow.clock_period,
+            "time_unit": unit, "sdc": flow.sdc, "sdc_sha256": sdc_sha, "liberty": setup.liberty.name,
             "wns": wns, "tns": min(r["setup_tns"] or 0.0 for r in timed.values()), "hold_wns": hold,
+            "hold_tns": min(r["hold_tns"] or 0.0 for r in timed.values()),
             "worst_corner": worst_corner, "worst_path": {**path, "corner": worst_corner},
             "timing_met": met,
             "corners": {c: {k: r[k] for k in ("setup_wns", "setup_tns", "hold_wns", "hold_tns")}
@@ -412,7 +416,7 @@ def run_check_sdc(project: Project, max_listed: int = 20, work_base: Path = WORK
         return refused
     flow = setup.flow
     work = _work_dir(project, work_base, "check_sdc")
-    versions = _versions(flow, setup)
+    versions = _versions(flow, setup, project.allowed_images)
     sdc_sha = sha256_file(setup.sdc)
     failed, _ = _synthesize(project, setup, work, "check_sdc", level, scope)
     if failed:

@@ -114,3 +114,37 @@ async def test_rules_review_without_a_model(tmp_path):
     assert "high:multi_driven x1" in texts and "medium:blocking_in_sequential x4" in texts and "b.sv:9" in texts
     assert review.verdict == "reject" and review.checklist and review.model == ""
     assert rules_review(run, None).findings[-1]["text"] == "rtl_rules did not run"
+
+
+def _run_of(*tools):
+    from eda_agent.agent.reviewer import AuthorRun
+    return AuthorRun("t", [], [{"name": n, "input": {}, "result": r} for n, r in tools], "", "m")
+
+
+def test_rules_review_judges_only_the_latest_result_of_each_check():
+    fixed = {**SYNTH, "status": "pass", "metrics": {**SYNTH["metrics"], "wns": 0.2, "timing_met": True,
+                                                    "latches": 0}}
+    review = rules_review(_run_of(("synth", SYNTH), ("synth", fixed)), {"status": "pass", "diagnostics": []})
+    assert review.verdict == "accept"  # only the info about the superseded run
+    assert [f["severity"] for f in review.findings] == ["info"]
+
+
+def test_rules_review_sdc_change_is_info_unless_no_valid_timing_remains():
+    sdc_b = {"tool": "check_sdc", "status": "pass", "evidence_level": "E0", "metrics": {"sdc_sha256": "d" * 64}}
+    passing = {**SYNTH, "status": "pass", "metrics": {**SYNTH["metrics"], "timing_met": True, "latches": 0}}
+    stale = rules_review(_run_of(("synth", passing), ("check_sdc", sdc_b)), {"status": "pass", "diagnostics": []})
+    assert any(f["severity"] == "high" and "no valid timing" in f["text"] for f in stale.findings)
+    redone = {**passing, "metrics": {**passing["metrics"], "sdc_sha256": "d" * 64}}
+    ok = rules_review(_run_of(("synth", passing), ("check_sdc", sdc_b), ("synth", redone)),
+                      {"status": "pass", "diagnostics": []})
+    assert {f["severity"] for f in ok.findings} == {"info"}
+
+
+def test_i0_pairs_calls_with_their_own_results():
+    from eda_agent.agent.reviewer import AuthorRun
+    run = AuthorRun("t", [{"text": "", "calls": [{"name": "regress", "input": {"cases": ["a"]}},
+                                                {"name": "synth", "input": {}}]}],
+                    [{"name": "synth", "input": {}, "result": {"tool": "synth", "status": "pass"}}], "r", "m")
+    ctx = build_context("I0", run)
+    assert "[tool call] regress" in ctx and "(none: the call was not executed)" in ctx
+    assert ctx.index('"tool": "synth"') > ctx.index("[tool call] synth")
