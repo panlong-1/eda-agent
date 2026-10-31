@@ -24,6 +24,9 @@ lets an overclaim through.
                 slower" needs a perf result compared with the approved baseline and slower nowhere
   R8 signoff    "DRC/LVS/antenna clean", "post-route timing met", "signoff passed", "tapeout-ready"
                 name a flow result of this run that shows exactly that; see gate_signoff.py
+  R9 category   "lint/CDC/RDC clean", "DFT passed", "test coverage N%", "formally equivalent" cite a
+                result of that category with its numbers; categories never stand in for each
+                other; see gate_categories.py
 """
 from __future__ import annotations
 
@@ -478,7 +481,8 @@ def check_report(report: str, results: list[dict]) -> GateDecision:
     claims, residual = split_residual(report)
     reasons = (check_citations(claims, envelopes) + check_strength(claims, envelopes)
                + check_timing(claims, envelopes) + check_perf(claims, envelopes)
-               + check_signoff(claims, envelopes) + check_residual(residual))
+               + check_signoff(claims, envelopes) + check_categories(claims, envelopes)
+               + check_residual(residual))
     if not reasons:  # R4 needs the residual-risk section, so it is checked once R1-R3 pass
         reasons = check_skipped(residual, results)
     return GateDecision(passed=not reasons, reasons=reasons, max_level=max_level)
@@ -491,4 +495,5 @@ def rejection_message(decision: GateDecision, attempt: int, limit: int) -> str:
     return "\n".join(lines)
 
 
+from .gate_categories import check_categories  # noqa: E402  (R9, own module)
 from .gate_signoff import check_signoff  # noqa: E402  (R8 lives in its own module and uses helpers above)

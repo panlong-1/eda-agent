@@ -171,6 +171,11 @@ def consistency(results: list[dict]) -> dict:
                    if r.get("tool") in ("flow_report", "flow_run")} - {()}
     if len(corner_sets) > 1:
         issues.append({"level": "error", "what": f"different signoff corner sets: {sorted(corner_sets)}"})
+    from .categories import scan_links
+    for link in scan_links(results):  # scan insertion made a new netlist: only equivalence ties it to the old one
+        if not link["equivalence_passed"]:
+            issues.append({"level": "fatal", "what": "scan insertion changed the netlist and no passing equivalence "
+                                                     "result covers the pre-scan and post-scan netlists"})
     for r in results:
         lin = (r.get("metrics") or {}).get("lineage")
         if lin and lin.get("breaks"):

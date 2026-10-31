@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import re
 
+from ..core.categories import signoff_extras
 from ..core.snapshot import consistency
 from .gate import _T_CLAUSE, _T_SENTENCE, _negated
 
@@ -138,6 +139,12 @@ def check_signoff(claims: str, results: list[dict]) -> list[str]:
                 reasons.append(f"cites '{m.group(0)}' but no flow result of this run reports that count: {text!r}")
         if any(kind in MULTI_STAGE for kind, _ in found):
             reasons += _one_design(results, flows, text)
+        if any(kind == "tapeout" for kind, _ in found):
+            missing = {k: v for k, v in signoff_extras(results).items() if v != "pass"}
+            if missing:
+                reasons.append("[error] ready for tapeout also needs CDC/RDC clean (or waivers approved), DFT rules "
+                               "passed, ATPG coverage at target and post-scan equivalence; here: "
+                               + ", ".join(f"{k} {v}" for k, v in missing.items()) + f": {text!r}")
     return reasons
 
 

@@ -1,0 +1,8 @@
+FAKECDC REPORT v1
+tool: ToyCDC 0.0-fake
+design: toy_top
+constraints: complete
+crossing X1 clk_a -> clk_b : synchronized
+crossing X3 clk_a -> clk_c : UNSYNCHRONIZED waived:W-0001
+crossing X4 clk_c -> clk_b : UNSYNCHRONIZED
+input rtl rtl/toy_top.sv

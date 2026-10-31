@@ -415,6 +415,9 @@ def _root_path(project: Project, p: str) -> Path:
 
 def backend_of(project: Project) -> Backend:
     assert project.pnr is not None
+    if project.pnr.backend != "librelane":
+        from ..plugins import load_adapters
+        load_adapters()  # adapters installed as plug-ins (entry point group eda_agent.adapters)
     return get_backend(project.pnr.backend)
 
 

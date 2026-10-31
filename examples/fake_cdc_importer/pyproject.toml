@@ -1,0 +1,18 @@
+# FAKE example plug-in for eda-agent (made-up report format and data). Install into the project's
+# .venv to see entry-point discovery:  .venv/bin/pip install -e examples/fake_cdc_importer
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eda-agent-fake-cdc-importer"
+version = "0.1"
+description = "Fake example importer for the eda-agent plug-in interface (toy CDC report, made-up data)"
+requires-python = ">=3.11"
+dependencies = ["eda-agent"]
+
+[project.entry-points."eda_agent.importers"]
+fake_cdc = "fake_cdc_importer:FakeCdcImporter"
+
+[tool.setuptools.package-data]
+fake_cdc_importer = ["samples/*/*"]

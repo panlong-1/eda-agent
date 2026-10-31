@@ -151,6 +151,21 @@ def build_server(project: Project) -> MCPServer:
         return attach(run_flow_history(project, baseline=baseline), project).to_dict()
 
     @server.tool(description=(
+        "Results imported from reports made elsewhere (other tools, other machines), judged by eda-agent's "
+        "own rules per category: lint_rules, cdc, rdc, dft, atpg, equivalence, synthesis, pnr, sta, drc, lvs, "
+        "simulation, power. Returns the latest result of the category (or a list of what was imported). "
+        "Provenance 'imported': eda-agent did not run those tools. Any claim about one of these categories "
+        "must cite this result and its numbers; categories never stand in for each other."
+    ))
+    def imported_results(category: str | None = None) -> dict:
+        from ..tools.importing import imported
+        recs = imported(project, category)
+        if category and recs:
+            return recs[-1]["envelope"]
+        return {"imported": [{"id": r["id"], "category": r["envelope"]["metrics"].get("category"),
+                              "status": r["envelope"]["status"], "summary": r["envelope"]["summary"]} for r in recs]}
+
+    @server.tool(description=(
         "Run the LibreLane RTL-to-GDS flow on a copy of the design (never in the checkout), then report it "
         "like flow_report. Takes about one to one and a half hours; one flow at a time. Refuses unless the "
         "project's [pnr] agent_may_run is true (a person runs it with `eda-agent flow-run` otherwise)."
