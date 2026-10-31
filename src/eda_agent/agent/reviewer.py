@@ -33,7 +33,8 @@ CONTEXT = {
     "I3": "as I2, on a different model than the author",
 }
 # Tools an I2/I3 reviewer may call: all of them only read the design and write under runs/.
-REVIEW_TOOLS = ("lint", "list_regress_cases", "describe_case", "regress", "rtl_rules", "synth", "check_sdc")
+REVIEW_TOOLS = ("lint", "list_regress_cases", "describe_case", "regress", "rtl_rules", "synth", "check_sdc",
+                "flow_report")
 SEVERITIES = ("high", "medium", "low", "info")
 VERDICTS = ("accept_with_findings", "accept", "reject")  # longest first, for matching
 
@@ -227,6 +228,7 @@ RULES_CHECKLIST = [
     "synth: no latches, timing met under the SDC on every corner",
     "check_sdc: every endpoint constrained, the clock on the configured port",
     "all timing results of the run were measured under one SDC (same sha256)",
+    "flow_report / flow_run: every signoff rule passes; the run is of the current top, RTL and SDC",
 ]
 
 
@@ -277,7 +279,14 @@ def rules_review(run: AuthorRun, rtl_rules: dict | None) -> Review:
             add("info", f"mutate {m.get('file')}: {m.get('survived', 0)} mutant(s) survive the chosen cases"
                         + (f", {m['perf_killed']} caught only by a cycle-count change" if m.get("perf_killed") else "")
                         + " (test gaps, not design bugs)")
-    hashes = {(t["result"].get("metrics") or {}).get("sdc_sha256") for t in results
+        elif name in ("flow_report", "flow_run"):
+            for rule, v in (m.get("signoff") or {}).items():
+                if v.get("outcome") == "fail":
+                    add("high", f"{name} {m.get('tag')}: signoff rule {rule} fails: {v.get('detail')}")
+            for d in r.get("diagnostics") or []:
+                if d.get("code") in ("OTHER_TOP", "SDC_UNKNOWN", "INPUTS_CHANGED", "CROSS_CHECK"):
+                    add("medium", f"{name} {m.get('tag')}: {d.get('msg', '')[:200]}")
+    hashes ={(t["result"].get("metrics") or {}).get("sdc_sha256") for t in results
               if (t["result"].get("metrics") or {}).get("sdc_sha256") not in (None, "missing")}
     if len(hashes) > 1:  # allowed (the gate voids the older ones), but a person should know
         add("info", f"timing results of this run were measured under {len(hashes)} different SDCs; "

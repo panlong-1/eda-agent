@@ -44,6 +44,9 @@ src/eda_agent/
                          against regression cases: kill matrix, survivors, perf_killed (E0)
     perf.py              cycle counts and other testbench counters per case, against the
                          person-approved baseline (E2); recording that baseline (CLI only)
+    flow.py              flow_report: a LibreLane run judged by fixed signoff rules, compared with a
+                         baseline run and synth (E4, signoff_level E5-partial); flow_run (copy, no network)
+    reports/librelane.py reads one LibreLane run directory: metrics, STA, DRC, LVS, antenna, logs
   server/mcp_server.py   MCP server (stdio): lint / list_regress_cases / describe_case / regress /
                          rtl_rules / synth / check_sdc / perf / mutate
   agent/                 the agent runtime; reaches the tools only through MCP
@@ -288,6 +291,56 @@ is recorded as is; anything that loosens it (a case slower, a larger tolerance, 
 needs `--allow-loosen --reason`, and the old baseline stays in its `history`. `perf` is E2:
 numbers for these programs in RTL simulation, nothing about clock frequency or other workloads.
 
+### RTL-to-GDS: `[pnr]`
+
+`flow_report` reads a finished LibreLane run (the design's own `runs/<tag>/`) and runs nothing
+heavy; `flow_run` makes a new run. `[pnr]` names the LibreLane config; everything else defaults.
+
+```toml
+[pnr]
+config = "librelane/config.yaml"
+baseline = "full_p10"          # run compared with by default
+# signoff_corners = [...]      # default: the run's STA_CORNERS
+# agent_may_run = false        # the MCP flow_run tool refuses unless true (about an hour of CPU)
+```
+
+```bash
+eda-agent flow-report full_p10_fwd --project projects/torv.toml [--baseline full_p10] [--with-synth]
+eda-agent flow-run --project projects/torv.toml --tag mytag [--dry-run]
+```
+
+**Signoff rules** (one table, `SIGNOFF_RULES` in `tools/flow.py`): post-route setup and hold
+worst slack ≥ 0 on every signoff corner, Magic DRC = 0, KLayout DRC = 0, Netgen LVS errors = 0
+with a matching report, antenna-violating nets and pins = 0. Any rule failing → `fail`; a
+check that did not run → `error` (incomplete); else `pass`. Max slew/cap/fanout, IR drop and
+detailed-router DRC are reported as warnings. Metric counts are cross-checked against the
+report files they come from.
+
+**Evidence level.** E5 means post-route multi-corner STA + DRC/LVS + gate-level simulation +
+VCD power. LibreLane gives the first two, with vectorless power and no gate-level simulation of
+the routed netlist, so `metrics.signoff_level` is `E5-partial` (with `e5_parts` saying what is
+there) and the envelope stays **E4**: the gate treats E5 as a functional level (R2), and a
+physical flow says nothing about function.
+
+**Which SDC.** A timing result is tied to its SDC (R5). LibreLane does not record the SDC's
+content, so `flow_report` decides how sure it is: `recorded` (flow_run wrote the hash next to
+the run), `unchanged_since_run` (git: no commit and no edit of the SDC since the run started),
+`mtime_before_run` (no git), else `changed_since_run` / `unknown`. Only the first three put an
+`sdc_sha256` in the result; otherwise no timing claim can cite it. The same check is done for
+the RTL files the run read (`inputs_changed`) and for the top (`OTHER_TOP`).
+
+**Comparisons**: against a baseline run (deltas, plus LibreLane keys that differ and what
+makes the two not comparable), against the same run's own pre-PnR STA, and against `synth`.
+**Setup diagnosis**: PDK and macro views, corner data and signoff decks the config names but
+that are missing, signoff steps switched off, and floorplan/PDN/macro/image errors in the logs
+(`setup_issues`, plan §0.11).
+
+`flow_run` copies the project root (minus `.git`, the design's runs and `copy_exclude`) under
+`[pnr] work_dir`, runs `librelane --manual-pdk` in the image with `--network none`, the PDK
+read-only and only the copy writable, writes the image digest, SDC sha256 and source commit
+next to the run, and reports it. One flow at a time (a lock file). Config overrides are limited
+to `allowed_overrides`; the SDC, clock port and period can never be overridden.
+
 ## Evidence gate
 
 When the model ends its turn, `agent/gate.py` checks the report against the tool
@@ -321,6 +374,12 @@ results of this run. All rules are in that one file:
   same sentence, and its cycle, IPC/CPI and percentage numbers must be ones those results
   report. "No performance regression" / "not slower" needs a `perf` result compared with the
   approved baseline and slower on no case. A negation earlier in the clause makes it a limit.
+- **R8 signoff** (`agent/gate_signoff.py`). "DRC clean", "LVS clean", "antenna clean",
+  "post-route timing met", "signoff passed", "tapeout-ready" (and 签核通过, 可以流片 …) must name
+  a `flow_report`/`flow_run` result (or its run tag) in the same sentence, and a flow result of
+  this run must show exactly that fact. "Tapeout-ready" needs every signoff rule passing **and**
+  E5 (gate-level simulation and VCD power), which a LibreLane run alone does not give. Counts
+  ("0 DRC errors") must be counts a flow result reports. (R6 is reserved for test scores.)
 
 A rejected report goes back to the model with the reasons, at most twice; then the run
 stops with `stop_reason: gate_rejected` and `status: pending` for a human to judge. The
@@ -387,6 +446,7 @@ Ideas only, unless marked as a dependency; no code was copied.
 | [avl-core](https://github.com/projectapheleia/avl) | (dependency, `[mutation]` extra) source-level SystemVerilog mutants from the slang syntax tree; its Yosys miter for equivalent mutants | only its generator: we run the project's own regression per mutant in a copy (avl grades cocotb only), lint each mutant, and work around its byte/character offset bug |
 | [MCY](https://github.com/YosysHQ/mcy) | considered for M2.5 and kept as an alternative | it mutates the synthesized netlist, so a mutant is not a readable RTL diff and the RTL regression cannot run it as is |
 | [LibreLane](https://github.com/librelane/librelane) | (dependency) its container image with Yosys and OpenSTA; its ABC script, driving cell and corners for IHP SG13G2 | we run only synthesis + pre-PnR STA, and record the SDC hash and image digest in an envelope |
+| [OpenROAD-MCP](https://github.com/The-OpenROAD-Project/OpenROAD-MCP), [ORFS-Agent](https://github.com/ABKGroup/ORFS-Agent) | back-end tools split into run and report; a flow iteration is a unit with its own budget | we read LibreLane's own run directory into fixed signoff rules and an envelope; parameter tuning is not done |
 | [mcp-rtl-review](https://github.com/zesun33/mcp-rtl-review) | deterministic RTL review rules (blocking assignments, reset polarity, width truncation) as a reviewer without an LLM | it walks an AST; our rules come from Verilator's own warnings plus one text scan; findings feed the receipt next to a model reviewer |
 | [Agent-as-a-Judge](https://github.com/metauto-ai/agent-as-a-judge) | a judge that uses tools to check the work instead of reading the author's account | the I2/I3 reviewer gets the task and raw tool results, never the author's conclusions, and re-runs the same MCP tools |
 
@@ -400,4 +460,5 @@ accelerator (FuseSoC, pulp IP) · M2.5 test generation scored by mutants (step 1
 `mutate`, plus `perf` with a human baseline and gate R7; next `write_case`, `score_tests`,
 gate R6) · M3
 simulation-failure localisation (logs, waveforms), lessons store · M4 LibreLane flow tool
-(PPA, DRC/LVS).
+(step 1 done: `flow_report`, signoff rules, gate R8, `flow_run` written; next: a fresh TORV run
+with `flow_run`, gate-level simulation for a full E5).

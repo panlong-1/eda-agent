@@ -22,6 +22,8 @@ lets an overclaim through.
                 performance regression") names a perf (or mutate) result of this run in the same
                 sentence, and its numbers are ones those results report; "no regression / not
                 slower" needs a perf result compared with the approved baseline and slower nowhere
+  R8 signoff    "DRC/LVS/antenna clean", "post-route timing met", "signoff passed", "tapeout-ready"
+                name a flow result of this run that shows exactly that; see gate_signoff.py
 """
 from __future__ import annotations
 
@@ -97,7 +99,7 @@ _STANDALONE_NUM = re.compile(r"(?<![\w.])([+-]?\d+(?:\.\d+)?)(?![\w])")
 _T_SENTENCE = re.compile(r"(?:[^.!?。！？\n]|(?<=\d)\.(?=\d))+")
 _T_CLAUSE = re.compile(r"(?:[^.!?;,。！？；，\n]|(?<=\d)[.,](?=\d))+")
 # What names a timing result in a sentence: the tool, its STA, its level, or the SDC hash
-_TIMING_CITE = re.compile(r"\b(?:synth|STA|OpenSTA|E4)\b|\b[0-9a-f]{8,64}\b", re.I)
+_TIMING_CITE = re.compile(r"\b(?:synth|STA|OpenSTA|E4|flow(?:_report|_run)?)\b|\b[0-9a-f]{8,64}\b", re.I)
 
 
 # Performance claims (R7). "no ... regression" style claims say nothing got slower; they need a
@@ -475,7 +477,8 @@ def check_report(report: str, results: list[dict]) -> GateDecision:
     max_level = max(passing, key=_rank, default="")
     claims, residual = split_residual(report)
     reasons = (check_citations(claims, envelopes) + check_strength(claims, envelopes)
-               + check_timing(claims, envelopes) + check_perf(claims, envelopes) + check_residual(residual))
+               + check_timing(claims, envelopes) + check_perf(claims, envelopes)
+               + check_signoff(claims, envelopes) + check_residual(residual))
     if not reasons:  # R4 needs the residual-risk section, so it is checked once R1-R3 pass
         reasons = check_skipped(residual, results)
     return GateDecision(passed=not reasons, reasons=reasons, max_level=max_level)
@@ -486,3 +489,6 @@ def rejection_message(decision: GateDecision, attempt: int, limit: int) -> str:
              "send the full report again; you may run more checks if you need evidence:"]
     lines += [f"- {r}" for r in decision.reasons]
     return "\n".join(lines)
+
+
+from .gate_signoff import check_signoff  # noqa: E402  (R8 lives in its own module and uses helpers above)
