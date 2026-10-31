@@ -405,13 +405,14 @@ async def _write_tests(args: argparse.Namespace) -> int:
         "usage": usage, "wall_s": round(time.monotonic() - t0, 1),
         "status": "done" if closed and gate["decision"]["passed"] else "failed",
     }
-    if receipt["status"] == "done":
+    ok = receipt["status"] == "done"
+    if ok:
         human_gate.request_approval(receipt, "new tests",
                                     "a person decides whether the new test(s) and patch enter the regression")
     js, md = write_receipt(receipt, Path("runs"))
     print(gate["report"])
     print(f"\nreceipt: {md} (json: {js})")
-    return 0 if receipt["status"] == "done" else 1
+    return 0 if ok else 1
 
 
 def _add_run_args(p: argparse.ArgumentParser) -> None:
