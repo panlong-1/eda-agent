@@ -31,3 +31,12 @@ reference) and stats (cycle/instruction counters). The testbench prints ALL TEST
 the firmware traps with tests_passed set, ERROR otherwise. The testbench also raises IRQ 4 and \
 IRQ 5 periodically from a cycle counter, so the interrupt entry/return path (firmware/irq.c) \
 runs during the tests."""
+
+# Performance (perf): the firmware's stats test prints its own counters.
+[perf]
+patterns = [
+    'Cycle counter \.+ (?P<cycles>\d+)',
+    'Instruction counter \.+ (?P<instr>\d+)',
+    'CPI: (?P<cpi>[\d.]+)',
+]
+key = "cycles"

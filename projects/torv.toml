@@ -36,6 +36,17 @@ copy_exclude = [".git", "build", "librelane/runs", "regress/results", ".torv_las
 jobs = 4
 timeout_s = 1500   # per mutant; the whole case list (survivor re-check) takes about 7 min
 
+# Performance (perf): the testbench prints these [PERF] lines at the end of every case
+# (scripts/perf_summary.py reads the same lines). The baseline, projects/torv.perf-baseline.json,
+# is written only by a person with `eda-agent perf-baseline`.
+[perf]
+patterns = [
+    '\[PERF\] cycles=(?P<cycles>\d+) instr=(?P<instr>\d+) ipc=(?P<ipc>[\d.]+)',
+    '\[PERF\] stall if=(?P<stall_if>\d+) id=(?P<stall_id>\d+) ex=(?P<stall_ex>\d+) flush=(?P<flush>\d+)',
+]
+key = "cycles"
+cases = ["perf_alu_chain", "perf_branch_loop", "perf_loadstore_loop", "perf_mul_loop", "hazard", "bypass"]
+
 # Synthesis + pre-PnR timing estimate (synth, check_sdc). Mirrors librelane/config.yaml:
 # DESIGN_NAME, VERILOG_FILES, USE_SLANG, SYNTH_MUL_BOOTH, CLOCK_PORT, CLOCK_PERIOD and the SDC.
 # The SDC is the design team's; the agent only reads it.

@@ -51,6 +51,7 @@ def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, p
             "artifacts": [{"path": a.get("path"), "sha256": a.get("sha256")}
                           for a in c["result"].get("artifacts", [])],
             **_timing(c["result"], void),
+            **_perf(c["result"]),
         } for c in envelopes],
         "other_tool_calls": [{"tool": c["tool"], "args": c["args"],
                               "status": (c["result"] or {}).get("status", "")} for c in others],
@@ -81,6 +82,15 @@ def _timing(result: dict, void: list[dict]) -> dict:
                                                "timing_met", "cells", "area", "latches")}
         out["timing"]["void"] = any(result is v for v in void)
     return out
+
+
+def _perf(result: dict) -> dict:
+    """The per-case table of a perf result (and the baseline it was compared with); nothing else."""
+    if result.get("tool") != "perf":
+        return {}
+    m = result.get("metrics") or {}
+    return {"perf": {k: m.get(k) for k in ("key", "cases", "comparison", "slower", "faster",
+                                           "baseline_sha256", "baseline_by")}}
 
 
 def _cell(text: str) -> str:

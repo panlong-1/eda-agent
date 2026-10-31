@@ -34,6 +34,7 @@ from ..core.envelope import Diagnostic, ToolResult, artifact
 from ..core.proc import check_allowed, docker_available, docker_command, run
 from ..core.project import MutationConfig, Project, case_specs, project_env, project_versions
 from .lint import run_lint
+from .perf import case_perf, compare
 from .regress import run_regress
 
 WORK_DIR = Path("runs/work")
@@ -128,12 +129,14 @@ class Mutant:
     line: int
     changes: list[dict]
     path: Path                      # the mutated file, under the run's mutants/<id>/
-    status: str = "pending"         # killed | survived | likely_equivalent | invalid | error
+    # killed | perf_killed (all cases pass, [perf] key moved) | survived | likely_equivalent | invalid | error
+    status: str = "pending"
     killed_by: list[str] = field(default_factory=list)
     detail: str = ""
     seconds: float = 0.0
     equivalence: str = "not checked"  # different | equivalent | unknown | timeout | not checked
     full: dict | None = None        # survivors re-run on the whole case list: {status, killed_by}
+    perf: dict | None = None        # case -> [perf] key vs the unmodified design (when it passed)
 
     def change_text(self) -> str:
         c = self.changes[0] if self.changes else {"before": "?", "after": "?"}
@@ -240,29 +243,40 @@ def _root_state(root: Path, rel: str) -> str:
 
 
 def _judge(c: _Copy, m: Mutant, cases: list[str] | None, baseline_errors: int, mcfg: MutationConfig,
-           logs: Path) -> tuple[str, list[str], str]:
-    """(status, failing cases, detail) of one mutant in one copy; the copy is restored afterwards."""
+           logs: Path, reference: dict[str, float] | None = None) -> tuple[str, list[str], str, dict | None]:
+    """(status, cases that caught it, detail, perf comparison) of one mutant in one copy; the copy
+    is restored afterwards. With a reference (the unmodified design's [perf] key per case), a mutant
+    that passes every case but moves that number beyond the tolerance is perf_killed."""
     try:
         c.target.write_bytes(m.path.read_bytes())
         lint = run_lint(c.project, max_diagnostics=3)
         if lint.status in ("error", "timeout"):
-            return "error", [], f"lint {lint.status}: {lint.summary}"
+            return "error", [], f"lint {lint.status}: {lint.summary}", None
         if lint.metrics.get("errors", 0) > baseline_errors:
             first = next((d for d in lint.diagnostics if d.severity == "error"), None)
-            return "invalid", [], "does not compile: " + (f"{first.file}:{first.line} {first.msg}" if first else lint.summary)
+            return "invalid", [], "does not compile: " + (
+                f"{first.file}:{first.line} {first.msg}" if first else lint.summary), None
         res = run_regress(c.project, cases, log_dir=logs / str(m.id))
         for a in res.artifacts:  # keep the per-case summary: the copy's results are emptied next
             if a.get("path") and Path(a["path"]).is_file():
                 shutil.copy(a["path"], m.path.parent / f"{'full_' if cases is None else ''}{Path(a['path']).name}")
         if res.status == "pass":
-            return "survived", [], res.summary
+            if reference and c.project.perf:
+                rows = compare(case_perf(c.project, res), reference, c.project.perf)
+                moved = {k: r for k, r in rows.items() if r["verdict"] in ("slower", "faster")}
+                if moved:
+                    key = c.project.perf.key
+                    return "perf_killed", sorted(moved), "all cases pass, but " + ", ".join(
+                        f"{k} {r['delta']:+g} {key} ({r['delta_pct']:+g}%)" for k, r in sorted(moved.items())), rows
+                return "survived", [], res.summary, rows
+            return "survived", [], res.summary, None
         if res.status == "timeout":
-            return "killed", ["(timeout)"], f"regression did not finish in {mcfg.timeout_s} s"
+            return "killed", ["(timeout)"], f"regression did not finish in {mcfg.timeout_s} s", None
         if res.status == "fail" and res.metrics.get("failed_cases"):
-            return "killed", list(res.metrics["failed_cases"]), res.summary
-        return "error", [], f"regress {res.status}: {res.summary}"
+            return "killed", list(res.metrics["failed_cases"]), res.summary, None
+        return "error", [], f"regress {res.status}: {res.summary}", None
     except Exception as e:  # noqa: BLE001 - one mutant must not end the run
-        return "error", [], f"{type(e).__name__}: {e}"
+        return "error", [], f"{type(e).__name__}: {e}", None
     finally:
         c.target.write_bytes(c.original)
         _clean(c.project.root, mcfg.copy_exclude)
@@ -320,20 +334,24 @@ def check_equivalence(project: Project, rel: str, m: Mutant, work: Path, cycles:
     return "different" if found[-1] == "FAIL" else "equivalent"
 
 
-def kill_rate(mutants: list[Mutant]) -> float | None:
+def kill_rate(mutants: list[Mutant], with_perf: bool = False) -> float | None:
+    """killed / (killed + perf_killed + survived); with_perf counts perf_killed as caught too."""
     killed = sum(m.status == "killed" for m in mutants)
-    scored = killed + sum(m.status == "survived" for m in mutants)
-    return round(killed / scored, 4) if scored else None
+    perf = sum(m.status == "perf_killed" for m in mutants)
+    scored = killed + perf + sum(m.status == "survived" for m in mutants)
+    return round((killed + (perf if with_perf else 0)) / scored, 4) if scored else None
 
 
 def write_matrix(mutants: list[Mutant], cases: list[str], path: Path) -> None:
-    """One row per mutant; per case K = this case failed (killed it), - = passed, blank = not run."""
+    """One row per mutant; per case K = this case failed (killed it), P = it passed but its [perf]
+    number moved (perf_killed), - = passed, blank = not run."""
     with path.open("w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["id", "line", "type", "status", "change", *cases, "full_regression"])
         for m in mutants:
-            ran = m.status in ("killed", "survived", "likely_equivalent")
-            cells = [("K" if c in m.killed_by else "-") if ran else "" for c in cases]
+            ran = m.status in ("killed", "perf_killed", "survived", "likely_equivalent")
+            mark = "P" if m.status == "perf_killed" else "K"
+            cells = [(mark if c in m.killed_by else "-") if ran else "" for c in cases]
             full = "" if m.full is None else (m.full["status"] + (" by " + " ".join(m.full["killed_by"])
                                                                   if m.full["killed_by"] else ""))
             w.writerow([m.id, m.line, m.type, m.status, m.change_text(), *cells, full])
@@ -344,19 +362,32 @@ def write_report(path: Path, rel: str, mutants: list[Mutant], cases: list[str], 
     lines = [f"# Mutation run: {rel}", "",
              f"- cases run on every mutant: {', '.join(cases)}",
              f"- mutants: {metrics['mutants']} generated, {metrics['invalid']} did not compile (not counted)",
-             f"- killed {metrics['killed']}, survived {metrics['survived']}, likely equivalent "
-             f"{metrics['likely_equivalent']}, errors {metrics['error']}",
-             f"- kill rate: {'n/a' if rate is None else f'{rate:.0%}'} (killed / (killed + survived))", ""]
+             f"- killed {metrics['killed']}, perf-killed {metrics['perf_killed']} (results right, cycle count "
+             f"moved), survived {metrics['survived']}, likely equivalent {metrics['likely_equivalent']}, "
+             f"errors {metrics['error']}",
+             f"- kill rate: {'n/a' if rate is None else f'{rate:.0%}'} functional (killed / (killed + perf-killed "
+             f"+ survived))" + ("" if metrics["kill_rate_with_perf"] is None else
+                                f", {metrics['kill_rate_with_perf']:.0%} counting perf-killed"), ""]
     if metrics.get("full_checked"):
         lines += [f"- survivors re-run on the whole case list: {metrics['full_checked']}, still surviving "
                   f"{metrics['full_survived']}", ""]
     lines += ["| id | line | type | change (before -> after) | result | caught by |", "|---|---|---|---|---|---|"]
     for m in mutants:
         by = ", ".join(m.killed_by) or ("" if m.status != "invalid" else m.detail[:60])
+        if m.status == "perf_killed":
+            by = m.detail.removeprefix("all cases pass, but ")
         if m.full is not None:
             by += f" (whole list: {m.full['status']}{' by ' + ', '.join(m.full['killed_by']) if m.full['killed_by'] else ''})"
-        lines.append(f"| {m.id} | {m.line} | {m.type} | `{m.change_text().replace('|', '/')}` | {m.status} | {by} |")
+        lines.append(f"| {m.id} | {m.line} | {m.type} | `{m.change_text().replace('|', chr(92) + '|')}` | {m.status} | {by} |")
     path.write_text("\n".join(lines) + "\n")
+
+
+def _reference(project: Project, golden: ToolResult) -> dict[str, float]:
+    """The unmodified design's [perf] key per case, read before the copy's results are emptied."""
+    if project.perf is None or golden.status != "pass":
+        return {}
+    key = project.perf.key
+    return {c: v[key] for c, v in case_perf(project, golden).items() if key in v}
 
 
 def _error(summary: str, scope: str, error_class: str, **kw) -> ToolResult:
@@ -390,6 +421,9 @@ def run_mutate(project: Project, file: str, count: int = 20, types: list[str] | 
     types_t = tuple(types or mcfg.types)
     scope = CLAIM_SCOPE.format(n=count, file=rel, seed=seed, cases=", ".join(chosen),
                                types=f", types {', '.join(types_t)}" if types_t else "")
+    if project.perf:
+        scope += (f" perf_killed = every case passed but its '{project.perf.key}' moved more than "
+                  f"{project.perf.tolerance_pct:g}% from the unmodified design's: the change is visible only as speed.")
 
     work = (work_base / f"{project.name}_mutate_{datetime.now():%Y%m%d_%H%M%S_%f}").resolve()
     work.mkdir(parents=True)
@@ -415,6 +449,7 @@ def run_mutate(project: Project, file: str, count: int = 20, types: list[str] | 
 
     golden_lint = run_lint(copies[0].project, max_diagnostics=3)
     golden = run_regress(copies[0].project, chosen, log_dir=work / "logs" / "golden")
+    golden_perf = _reference(copies[0].project, golden)
     _clean(copies[0].project.root, mcfg.copy_exclude)
     if golden_lint.status in ("error", "timeout") or golden.status != "pass":
         return _error(f"the unmodified design does not pass in the copy, so no mutant can be judged: lint "
@@ -422,13 +457,17 @@ def run_mutate(project: Project, file: str, count: int = 20, types: list[str] | 
                       tool_versions=versions, metrics={"work_dir": str(work)})
     baseline_errors = golden_lint.metrics.get("errors", 0)
 
+    full_perf: dict[str, float] = {}
+
     def judge(c: _Copy, m: Mutant, run_cases: list[str] | None = chosen) -> None:
         t = time.monotonic()
-        status, by, detail = _judge(c, m, run_cases, baseline_errors, mcfg, work / "logs")
+        ref = golden_perf if run_cases is not None else full_perf
+        status, by, detail, perf = _judge(c, m, run_cases, baseline_errors, mcfg, work / "logs", ref)
         if run_cases is None:
             m.full = {"status": status, "killed_by": by, "detail": detail}
         else:
             m.status, m.killed_by, m.detail, m.seconds = status, by, detail, round(time.monotonic() - t, 1)
+            m.perf = perf
 
     _pool(copies, mutants, judge)
 
@@ -456,6 +495,7 @@ def run_mutate(project: Project, file: str, count: int = 20, types: list[str] | 
     full_note = ""
     if confirm_full and survivors and set(full_cases) != set(chosen):
         g = run_regress(copies[0].project, None, log_dir=work / "logs" / "golden_full")
+        full_perf.update(_reference(copies[0].project, g))
         _clean(copies[0].project.root, mcfg.copy_exclude)
         if g.status == "pass":
             _pool(copies, survivors, lambda c, m: judge(c, m, None))
@@ -465,10 +505,18 @@ def run_mutate(project: Project, file: str, count: int = 20, types: list[str] | 
 
     after = _root_state(project.root, rel)
     counts = {s: sum(m.status == s for m in mutants)
-              for s in ("killed", "survived", "likely_equivalent", "invalid", "error")}
+              for s in ("killed", "perf_killed", "survived", "likely_equivalent", "invalid", "error")}
     full_checked = [m for m in mutants if m.full is not None]
+    if project.perf is None:
+        risks.append("no [perf] section: a mutant that only makes the design slower (extra stall cycles, "
+                     "results still right) counts as survived")
+    elif not golden_perf:
+        risks.append(f"the unmodified design printed no '{project.perf.key}' for these cases, so no mutant "
+                     "could be perf-killed")
     metrics = {
         "file": rel, "mutants": len(mutants), **counts, "kill_rate": kill_rate(mutants),
+        "kill_rate_with_perf": kill_rate(mutants, with_perf=True) if project.perf else None,
+        "perf_key": project.perf.key if project.perf else None, "perf_reference": golden_perf,
         "cases": chosen, "seed": seed, "types": list(types_t),
         "full_checked": len(full_checked),
         "full_survived": sum(m.full["status"] == "survived" for m in full_checked),
@@ -491,9 +539,16 @@ def run_mutate(project: Project, file: str, count: int = 20, types: list[str] | 
                         + ("; also survives the whole case list" if m.full and m.full["status"] == "survived" else ""),
                         file=rel, line=m.line)
              for m in mutants if m.status == "survived"]
-    rate = metrics["kill_rate"]
-    summary = (f"{counts['killed']} of {counts['killed'] + counts['survived']} judged mutants killed "
-               f"({'n/a' if rate is None else f'{rate:.0%}'}), {counts['survived']} survived"
+    diags += [Diagnostic("info", "PERF_KILLED", f"mutant {m.id} ({m.type}) {m.change_text()}: {m.detail}",
+                         file=rel, line=m.line)
+              for m in mutants if m.status == "perf_killed"]
+    rate, prate = metrics["kill_rate"], metrics["kill_rate_with_perf"]
+    judged = counts["killed"] + counts["perf_killed"] + counts["survived"]
+    summary = (f"{counts['killed']} of {judged} judged mutants killed "
+               f"({'n/a' if rate is None else f'{rate:.0%}'})"
+               + (f", {counts['perf_killed']} more caught only by cycle count ({prate:.0%} with them)"
+                  if counts["perf_killed"] and prate is not None else "")
+               + f", {counts['survived']} survived"
                f", {counts['likely_equivalent']} likely equivalent, {counts['invalid']} did not compile"
                + (f", {counts['error']} errors" if counts["error"] else "")
                + (f"; {metrics['full_survived']} of {len(full_checked)} survivors also pass the whole case list"

@@ -147,6 +147,34 @@ class MutationConfig:
 
 
 @dataclass(frozen=True)
+class PerfConfig:
+    """Performance numbers the testbench already prints ([perf]), read per case with regexes.
+    Each pattern's named groups become that case's numbers, e.g. cycles, instr, ipc."""
+    patterns: tuple[str, ...]
+    key: str = "cycles"                 # the number that decides slower / same / faster
+    lower_is_better: bool = True        # cycles: fewer is faster; set false for e.g. ipc
+    cases: tuple[str, ...] = ()         # default cases for perf; empty = the whole case list
+    # Allowed difference, in percent of the reference, before a case counts as slower or faster.
+    # RTL simulation is deterministic, so 0 is the default.
+    tolerance_pct: float = 0.0
+    # Where a case's output is, when the regression format does not say: {root}, {case}, {detail}.
+    log: str = ""
+    # The person-approved expectations (case -> key value); see `eda-agent perf-baseline`.
+    baseline: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.patterns:
+            raise ValueError("[perf] needs at least one pattern")
+        for p in self.patterns:
+            if not re.compile(p).groupindex:
+                raise ValueError(f"[perf] pattern {p!r} has no named group, e.g. (?P<cycles>\\d+)")
+        if not any(self.key in re.compile(p).groupindex for p in self.patterns):
+            raise ValueError(f"[perf] key {self.key!r} is not a named group of any pattern")
+        if self.tolerance_pct < 0:
+            raise ValueError("[perf] tolerance_pct must not be negative")
+
+
+@dataclass(frozen=True)
 class Project:
     name: str
     root: Path
@@ -160,6 +188,21 @@ class Project:
     allowed_images: tuple[str, ...] = ()
     flow: FlowConfig | None = None   # None: synth and check_sdc refuse (no [flow] section)
     mutation: MutationConfig | None = None  # None: mutate refuses (no [mutation] section)
+    perf: PerfConfig | None = None          # None: perf refuses (no [perf] section)
+
+
+def _perf(data: dict | None, config: Path) -> PerfConfig | None:
+    """[perf]; the baseline defaults to <config stem>.perf-baseline.json next to the config."""
+    if data is None:
+        return None
+    unknown = set(data) - set(PerfConfig.__dataclass_fields__)
+    if unknown:
+        raise ValueError(f"unknown [perf] key(s) {sorted(unknown)}")
+    base = data.get("baseline") or f"{config.stem}.perf-baseline.json"
+    baseline = Path(os.path.expanduser(base))
+    data = {**data, "baseline": str(baseline if baseline.is_absolute() else (config.parent / baseline).resolve())}
+    tuples = ("patterns", "cases")
+    return PerfConfig(**{k: tuple(v) if k in tuples else v for k, v in data.items()})
 
 
 def _mutation(data: dict | None) -> MutationConfig | None:
@@ -202,6 +245,7 @@ def load_project(path: str | Path) -> Project:
         allowed_images=tuple(data.get("allowed_images", ())),
         flow=_flow(data.get("flow"), root),
         mutation=_mutation(data.get("mutation")),
+        perf=_perf(data.get("perf"), Path(path)),
         lint=LintConfig(
             top=lint["top"],
             filelists=tuple(lint.get("filelists", ())),

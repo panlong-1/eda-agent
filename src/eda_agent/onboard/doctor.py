@@ -116,6 +116,17 @@ def diagnose(config: Path, provider: str | None = None) -> list[Check]:
         checks.append(Check("ok" if avl else "fail", "avl-core", "avl-mutation-testing found" if avl else
                             "not installed: pip install -e '.[mutation]' (mutate generates mutants with it)"))
 
+    pf = project.perf
+    if pf is not None:
+        known = set(regress_cases(project))
+        unknown = [c for c in pf.cases if c not in known]
+        checks.append(Check("fail" if unknown else "ok", "perf cases",
+                            f"not in the case list: {unknown}" if unknown else f"{len(pf.cases) or len(known)} cases"))
+        has = Path(pf.baseline).is_file()
+        checks.append(Check("ok" if has else "warn", "perf baseline", pf.baseline if has else
+                            f"none yet ({pf.baseline}): perf cannot say 'slower'; a person records one with "
+                            "`eda-agent perf` then `eda-agent perf-baseline <result>`"))
+
     for prov, var in API_KEYS.items():
         if provider and prov != provider:
             continue

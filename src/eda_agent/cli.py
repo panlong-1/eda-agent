@@ -4,6 +4,8 @@
     eda-agent doctor --project projects/mydesign.toml                   (is everything there?)
     eda-agent check  --project projects/torv.toml [--full]              (fixed lint/regress[/synth] task)
     eda-agent mutate --project projects/torv.toml --file rtl/x.sv       (mutation run, no model)
+    eda-agent perf --project projects/torv.toml                         (cycle counts, no model)
+    eda-agent perf-baseline runs/perf/<result>.json                     (a person approves a baseline)
     eda-agent run --project projects/torv.toml "Lint the design and run the smoke case"
     eda-agent run --provider deepseek --review I2 --project projects/torv.toml "..."
     eda-agent review <run_id> --review I3 --project projects/torv.toml   (review a finished run)
@@ -262,6 +264,45 @@ def _mutate(args: argparse.Namespace) -> int:
     return {"pass": 0, "fail": 1}.get(res.status, 2)
 
 
+def _perf(args: argparse.Namespace) -> int:
+    """No model: run the perf tool, print the table and keep the result for perf-baseline."""
+    from .tools.perf import run_perf
+    project = load_project(resolve_project(args.project))
+    res = run_perf(project, args.cases)
+    print(f"perf: {res.status} — {res.summary}")
+    m = res.metrics
+    for case, v in (m.get("cases") or {}).items():
+        row = (m.get("comparison") or {}).get(case)
+        vs = f"  vs baseline {row['reference']} ({row['delta']:+g}, {row['delta_pct']:+g}%) {row['verdict']}" \
+            if row and row.get("delta") is not None else ""
+        print(f"  {case:24} " + " ".join(f"{k}={x}" for k, x in v.items()) + vs)
+    for r in res.residual_risk:
+        print(f"  risk: {r}")
+    out = Path("runs/perf") / f"{project.name}_{datetime.now():%Y%m%d_%H%M%S}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(res.to_dict(), indent=2) + "\n")
+    print(f"result: {out}  (a person may record it: eda-agent perf-baseline {out})")
+    return {"pass": 0, "fail": 1}.get(res.status, 2)
+
+
+def _perf_baseline(args: argparse.Namespace) -> int:
+    """A person records a perf result as the approved baseline (never done by the agent)."""
+    from .tools.perf import record_baseline
+    project = load_project(resolve_project(args.project))
+    try:
+        new, loosened = record_baseline(project, Path(args.result), by=args.by or human_gate.default_approver(),
+                                        reason=args.reason or "", tolerance_pct=args.tolerance_pct,
+                                        allow_loosen=args.allow_loosen)
+    except (ValueError, OSError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    print(f"baseline for {project.name} recorded by {new['recorded_by']} at {new['recorded_at']}: "
+          f"{len(new['cases'])} cases, {new['key']}, tolerance {new['tolerance_pct']}%"
+          + (f"; loosened: {'; '.join(loosened)} (reason: {new['reason']})" if loosened else ""))
+    print(f"file: {project.perf.baseline}")
+    return 0
+
+
 def _add_run_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--project", help=f"project config (default: {PROJECT_FILE} here or in a parent directory)")
     p.add_argument("--provider", default="anthropic", choices=sorted(DEFAULT_MODELS))
@@ -325,6 +366,19 @@ def main() -> None:
     mut.add_argument("--confirm-full", action="store_true", help="re-run survivors on the whole case list")
     mut.add_argument("--no-equiv", action="store_true", help="skip the equivalence check of survivors")
 
+    prf = sub.add_parser("perf", help="cycle counts per case, no model; compared with the approved baseline")
+    prf.add_argument("--project", help=f"project config (default: {PROJECT_FILE} here or in a parent)")
+    prf.add_argument("--cases", nargs="*", help="regression cases (default: [perf] cases)")
+
+    pb = sub.add_parser("perf-baseline", help="record a perf result as the approved baseline (a person decides)")
+    pb.add_argument("result", help="a perf result file written by `eda-agent perf` (runs/perf/*.json)")
+    pb.add_argument("--project", help=f"project config (default: {PROJECT_FILE} here or in a parent)")
+    pb.add_argument("--by", help="who decides (default: git user.name, else the login name)")
+    pb.add_argument("--reason", help="why; required with --allow-loosen")
+    pb.add_argument("--tolerance-pct", type=float, help="allowed difference in percent (default: [perf] tolerance_pct)")
+    pb.add_argument("--allow-loosen", action="store_true",
+                    help="accept a baseline that is slower, has a larger tolerance or drops cases (needs --reason)")
+
     rev = sub.add_parser("review", help="review a finished run (writes into its receipt)")
     rev.add_argument("run_id")
     rev.add_argument("--project", help=f"project config (default: {PROJECT_FILE} here or in a parent)")
@@ -358,6 +412,10 @@ def main() -> None:
         sys.exit(_doctor(args))
     if args.cmd == "mutate":
         sys.exit(_mutate(args))
+    if args.cmd == "perf":
+        sys.exit(_perf(args))
+    if args.cmd == "perf-baseline":
+        sys.exit(_perf_baseline(args))
     if args.cmd == "check":
         args.preset = "full" if args.full else "check"
         args.task = load_preset(args.preset)

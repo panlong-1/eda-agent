@@ -12,6 +12,7 @@ from ..core.project import Project, load_project
 from ..tools.describe import describe_cases, list_cases
 from ..tools.lint import run_lint
 from ..tools.mutate import run_mutate
+from ..tools.perf import run_perf
 from ..tools.regress import run_regress
 from ..tools.rtl_rules import run_rtl_rules
 from ..tools.synth import run_check_sdc, run_synth
@@ -83,6 +84,20 @@ def build_server(project: Project) -> MCPServer:
     def check_sdc(max_listed: int = 20) -> dict:
         return run_check_sdc(project, max_listed=max_listed).to_dict()
 
+    pcfg = project.perf
+    perf_what = (f"'{pcfg.key}' and the other counters the testbench prints, on cases "
+                 f"{', '.join(pcfg.cases) or 'of the whole list'} by default") if pcfg else \
+        "not configured for this project: the tool will refuse"
+
+    @server.tool(description=(
+        f"Performance numbers from simulation: runs regression cases and reads {perf_what}. Compares "
+        "with the person-approved baseline when one exists (slower / same / faster per case); the "
+        "baseline cannot be changed through this server. Evidence level E2. Any statement about speed, "
+        "cycles, IPC/CPI or 'no performance regression' must cite this result."
+    ))
+    def perf(cases: list[str] | None = None) -> dict:
+        return run_perf(project, cases).to_dict()
+
     mut = project.mutation
     mut_files = (f"one of {list(mut.files)}" if mut.files else "a .sv/.v file under the project root") \
         if mut else "not configured for this project: the tool will refuse"
@@ -92,7 +107,8 @@ def build_server(project: Project) -> MCPServer:
         f"Mutation run: make `count` small source-level changes to one RTL file ({mut_files}), each in a "
         f"copy of the design, and run regression cases on each (default: {mut_cases}). Returns which "
         "mutants were killed by which case and which survived, with file:line and before -> after for "
-        "each. Survivors are changes the tests do not detect (test gaps), not design bugs. "
+        "each. Survivors are changes the tests do not detect (test gaps), not design bugs; with "
+        "[perf], a mutant whose results stay right but whose cycle count moves is reported as perf_killed. "
         "confirm_full re-runs survivors on the whole case list. Evidence level E0 (facts only). "
         "Takes minutes: about one regression run per mutant."
     ))
