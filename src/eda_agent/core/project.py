@@ -68,9 +68,19 @@ class RegressConfig:
     junit_file: str = ""
     pass_regex: str = ""
     fail_regex: str = ""
+    # exitcode only: the testbench's own summary line, with named groups passed / failed / total,
+    # e.g. "regress: (?P<passed>\d+)/(?P<total>\d+) cases ok". Its counts then decide too.
+    summary_regex: str = ""
     timeout_s: int = 1800
 
     def __post_init__(self) -> None:
+        if self.summary_regex:
+            groups = set(re.compile(self.summary_regex).groupindex)
+            if not groups or groups - {"passed", "failed", "total"} or groups == {"total"}:
+                raise ValueError("regress summary_regex needs named groups among passed, failed, total "
+                                 "(at least passed or failed), and no others")
+            if self.format != "exitcode":
+                raise ValueError("regress summary_regex is for format 'exitcode'")
         if self.format not in REGRESS_FORMATS:
             raise ValueError(f"unknown regress format {self.format!r}; use one of {REGRESS_FORMATS}")
         if self.format == "junit" and not self.junit_file:
@@ -93,6 +103,9 @@ class FlowConfig:
     pdk_root: str = "${PDK_ROOT}"    # mounted read-only into the container
     files: tuple[str, ...] = ()
     filelists: tuple[str, ...] = ()
+    # Verilator-style command files (e.g. FuseSoC's synth target written with --tool verilator):
+    # their source files and +incdir+ directories are used, relative to each file's directory.
+    command_files: tuple[str, ...] = ()
     include_dirs: tuple[str, ...] = ()
     defines: tuple[str, ...] = ()
     frontend: str = "slang"          # slang (SystemVerilog plugin) | verilog (read_verilog -sv)
@@ -133,7 +146,7 @@ def _flow(data: dict | None, root: Path) -> FlowConfig | None:
     if data is None:
         return None
     data = resolve_flow(data, root)
-    tuples = ("files", "filelists", "include_dirs", "defines", "synth_flags")
+    tuples = ("files", "filelists", "command_files", "include_dirs", "defines", "synth_flags")
     known = set(FlowConfig.__dataclass_fields__)
     unknown = set(data) - known
     if unknown:
@@ -181,6 +194,7 @@ def load_project(path: str | Path) -> Project:
             junit_file=regress.get("junit_file", ""),
             pass_regex=regress.get("pass_regex", ""),
             fail_regex=regress.get("fail_regex", ""),
+            summary_regex=regress.get("summary_regex", ""),
             timeout_s=int(regress.get("timeout_s", 1800)),
         ),
     )
@@ -214,6 +228,26 @@ _VAR = re.compile(r"\$\{(\w+)\}|\$(\w+)")
 
 def expand_vars(text: str, env: dict[str, str]) -> str:
     return _VAR.sub(lambda m: env.get(m.group(1) or m.group(2), m.group(0)), text)
+
+
+def read_command_file(path: Path) -> tuple[list[Path], list[Path]]:
+    """(source files, include dirs) named in a Verilator command file, relative to its directory.
+    Options other than +incdir+ (--Mdir, -CFLAGS ..., --top-module ...) are skipped."""
+    base = path.parent
+    files, incs = [], []
+    tokens = path.read_text(encoding="utf-8").split()
+    skip = False
+    for tok in tokens:
+        if skip:
+            skip = False
+            continue
+        if tok.startswith("+incdir+"):
+            incs += [(base / d).resolve() for d in tok[len("+incdir+"):].split("+") if d]
+        elif tok in ("-CFLAGS", "--Mdir", "--top-module", "-LDFLAGS", "-f", "-F"):
+            skip = True  # option with a value
+        elif not tok.startswith(("-", "+")) and tok.endswith((".sv", ".v", ".svh", ".vh")):
+            files.append((base / tok).resolve())
+    return files, incs
 
 
 def read_filelist(path: Path, env: dict[str, str], root: Path) -> list[Path]:

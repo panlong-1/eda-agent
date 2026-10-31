@@ -167,6 +167,14 @@ A project is one TOML file. `[lint]` gives the top and the files (`filelists` an
 | `junit` | a JUnit XML file the run writes (rejected if not rewritten by this run) | yes, per `<testcase>` | `junit_file` |
 | `exitcode` | the exit status of one command per case, optionally confirmed by `pass_regex` / `fail_regex` | no: one status may cover many tests | `pass_regex`, `fail_regex` |
 
+An `exitcode` project can also name the testbench's own summary line with `summary_regex`,
+using named groups `passed`, `failed`, `total` (e.g. `scenario \S+: (?P<passed>\d+)/(?P<total>\d+)
+cases ok`). The counts then decide too: exit 0 and the pass pattern are not enough when the
+testbench reports a failure or prints no summary. They are reported as `subtests_passed` /
+`subtests_failed` / `subtests_total`, the gate accepts them as counts a report may cite, and
+the claim scope says they are the testbench's own count. `init` proposes the regex from a
+`$display("... %0d/%0d cases ok ...")` it finds in the testbench.
+
 Cases come from a `case_list` file (first column = name; the first later column that
 is an existing file is taken as the source for `describe_case`) or from inline
 `[[regress.cases]]` entries with `name`, `args`, `source` and `description`. Each format's
@@ -205,7 +213,12 @@ need not be copied: `librelane = "librelane/config.yaml"` reads top, files, incl
 frontend, Booth multiplier, clock and SDC from the LibreLane config, and a known PDK
 (`ihp-sg13g2` today) fills the library, corner and cell settings; keys written in `[flow]`
 win. A test checks that these two lines give exactly the same setup as the hand-written
-section in `projects/torv.toml`. TORV's section mirrors its `librelane/config.yaml`; on TORV the estimate is within about 0.7 ns of
+section in `projects/torv.toml`. For a FuseSoC design, `command_files` takes the synth
+target's file list as a Verilator command file (`fusesoc run --setup --target synth --tool
+verilator <core>`); the design's own files are read from the checkout through
+`lint.copy_of_root`, because FuseSoC rewrites its copy for whichever target was set up last.
+Library cells instantiated in the RTL (an integrated clock gate, say) come from the Liberty
+file as blackboxes; any other unknown module still fails `hierarchy -check`. TORV's section mirrors its `librelane/config.yaml`; on TORV the estimate is within about 0.7 ns of
 LibreLane's own pre-PnR STA per corner. A project without `[flow]` (PicoRV32 today) gets a
 clean `not_configured` refusal. Containers come from an allowlist (`ghcr.io/librelane/librelane`
 built in; `allowed_images` adds more) and may only start allowlisted programs.
@@ -219,9 +232,12 @@ results of this run. All rules are in that one file:
   and every "N passed / N failed" count must come from a tool result of this run. A level
   named as a requirement ("that would need E3") is not a citation.
 - **R2 strength.** Words that claim functional correctness (handles, correct, verified,
-  works, bug-free, … and Chinese equivalents such as 正确, 已验证) need a passing result at
-  E3 or higher, and the same sentence must name that result (its tool or a case it passed),
-  so E3 on one check cannot vouch for another. With E2 the report may only say which cases passed. A negation earlier in
+  works, bug-free, … and Chinese equivalents such as 正确, 已验证) need a passing result at a
+  level that speaks about function, E3 (bit-exact comparison or mutants) or E5 (signoff with
+  gate-level simulation), and the same sentence must name that result (its tool or a case it
+  passed), so evidence on one check cannot vouch for another. E4 (synthesis, PPA) is above E3
+  on the ladder but never vouches for function. A sentence of the form "does not prove: A, B,
+  or gate-level functional correctness" lists limits after its colon, not claims. With E2 the report may only say which cases passed. A negation earlier in
   the same clause ("does not show … correct") makes it a stated limit, not a claim, and so
   are the list items that follow it ("not … handled, correct, or bug-free"); a clause with
   more than a list connector before the word ("…, but the design is correct") is a new claim.

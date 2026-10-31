@@ -8,9 +8,10 @@ lets an overclaim through.
   R1 citations  every (status, evidence level) pair and "N passed/failed" count the
                 report cites must come from a tool result of this run; a level named as
                 a requirement ("would need E3") is not a citation
-  R2 strength   functional-correctness words need E3+ from a passing result that the
-                same sentence names (its tool or one of its cases); with E2 the report may
-                only say which cases passed
+  R2 strength   functional-correctness words need a passing result at a functional level
+                (E3 or E5; E4 synthesis says nothing about function) that the same sentence
+                names (its tool or one of its cases); with E2 the report may only say which
+                cases passed. "Does not prove: A, B, or C" lists limits, not claims
   R3 risk       the report has a residual-risk section with some content
   R4 skipped    a case the agent described but did not run is named in that section
   R5 timing     a timing claim ("meets 100 MHz", "positive slack", "timing met") names a result
@@ -27,6 +28,9 @@ from ..core.envelope import EVIDENCE_LEVELS
 
 # Level a passing result must reach before the report may use strong claim words.
 STRONG_CLAIM_MIN_LEVEL = "E3"
+# Levels that speak about function. The ladder is not one line: E4 (synthesis, PPA) is above
+# E3 but says nothing about whether the design computes the right thing.
+FUNCTIONAL_LEVELS = ("E3", "E5")
 
 STRONG_CLAIM_WORDS = [
     r"handles?", r"handled", r"correct(?:ly|ness)?", r"verified", r"verifies", r"proven",
@@ -53,6 +57,12 @@ _SENTENCE = re.compile(r"[^.!?。！？\n]+")
 # What may stand before the strong word in a later item of a list: "correct", "or bug-free",
 # "fully correct", "或无 bug". Anything more ("but the design is correct") starts a new claim.
 _LIST_ITEM = re.compile(r"\s*(?:(?:or|and|nor)\s+|或者?|和|以及|及)?\s*(?:[A-Za-z]+ly\s+)?", re.I)
+# A heading-style limit: "Does not prove: A, B, or gate-level functional correctness." Everything
+# after the colon, to the end of the sentence, is a list of what was not shown.
+_LIMIT_LIST = re.compile(
+    r"(?<![A-Za-z])(?:not|never|cannot|no)\s+(?:\w+\s+){0,2}?(?:prove|show|establish|cover|demonstrate|"
+    r"verify|guarantee|imply|tell|say)\w*\s*(?:about\s*)?[:：]|(?:不能|无法|未能?)(?:证明|说明|覆盖|保证)\s*[:：]",
+    re.I)
 
 
 # Positive timing claims. A negation in the few words just before one (within its part of
@@ -130,12 +140,16 @@ def check_citations(claims: str, results: list[dict]) -> list[str]:
                 reasons.append(f"cites {'/'.join(sorted(statuses))} at {lvl} but no tool result of this "
                                f"run has that status at {lvl}: {line.strip()!r}")
     counts: dict[str, list[int]] = {"passed": [], "failed": []}
+    sub_counts: dict[str, list[int]] = {"passed": [], "failed": []}
     for r in results:
         m = r.get("metrics") or {}
         for k in counts:
             if isinstance(m.get(k), int):
                 counts[k].append(m[k])
-    allowed = {k: {*v, sum(v)} for k, v in counts.items()}  # several regress calls may be summed
+            if isinstance(m.get(f"subtests_{k}"), int):  # the testbench's own counts (summary_regex)
+                sub_counts[k].append(m[f"subtests_{k}"])
+    # several regress calls may be summed; case counts and testbench sub-test counts are each a source
+    allowed = {k: {*v, sum(v), *sub_counts[k], sum(sub_counts[k])} for k, v in counts.items()}
     for m in _COUNT.finditer(claims):
         n, kind = int(m.group(1)), m.group(2).lower()
         if n not in allowed[kind]:
@@ -148,10 +162,11 @@ def _names(text: str, subject: str) -> bool:
 
 
 def check_strength(claims: str, envelopes: list[dict]) -> list[str]:
-    """A strong word needs a passing E3+ result that its sentence names, by tool or case,
-    so E3 on one check cannot vouch for a claim about something else."""
+    """A strong word needs a passing result at a functional level (E3, E5) that its sentence
+    names, by tool or case, so evidence on one check cannot vouch for a claim about something
+    else, and synthesis (E4) never vouches for function."""
     strong = [r for r in envelopes if r.get("status") == "pass"
-              and _rank(r.get("evidence_level", "")) >= _rank(STRONG_CLAIM_MIN_LEVEL)]
+              and r.get("evidence_level") in FUNCTIONAL_LEVELS]
     subjects = sorted({s for r in strong
                        for s in [r.get("tool", ""), *(r.get("metrics") or {}).get("passed_cases", [])] if s})
     best = max((r["evidence_level"] for r in envelopes if r.get("status") == "pass"), key=_rank, default="")
@@ -159,6 +174,8 @@ def check_strength(claims: str, envelopes: list[dict]) -> list[str]:
     for sentence in _SENTENCE.findall(claims):
         if any(_names(sentence, s) for s in subjects):
             continue
+        if m := _LIMIT_LIST.search(sentence):
+            sentence = sentence[:m.start()]  # what follows "does not prove:" is a list of limits
         limit = False  # the previous clause stated a limit ("does not show ... handled")
         for clause in _CLAUSE.findall(sentence):
             m = _STRONG.search(clause)
@@ -174,13 +191,14 @@ def check_strength(claims: str, envelopes: list[dict]) -> list[str]:
             if subjects:
                 reasons.append(
                     f"'{m.group(0)}' claims functional correctness, but its sentence does not name the "
-                    f"check that reached {STRONG_CLAIM_MIN_LEVEL}+ ({', '.join(subjects)}); evidence on one "
-                    f"check does not support a claim about another: {clause.strip()!r}")
+                    f"check that reached {'/'.join(FUNCTIONAL_LEVELS)} ({', '.join(subjects)}); evidence on "
+                    f"one check does not support a claim about another: {clause.strip()!r}")
             else:
                 reasons.append(
-                    f"'{m.group(0)}' claims functional correctness, which needs {STRONG_CLAIM_MIN_LEVEL}+; "
-                    f"the best passing evidence here is {best or 'none'}, which supports only "
-                    f"'these checks/cases passed': {clause.strip()!r}")
+                    f"'{m.group(0)}' claims functional correctness, which needs {STRONG_CLAIM_MIN_LEVEL} "
+                    f"(bit-exact comparison or mutants) or E5; the best passing evidence here is "
+                    f"{best or 'none'}" + (" (synthesis: it says nothing about function)" if best == "E4" else "")
+                    + f", which supports only 'these checks/cases passed': {clause.strip()!r}")
     return reasons
 
 

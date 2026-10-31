@@ -76,6 +76,47 @@ def _markers(root: Path, markers: tuple[str, ...]) -> tuple[str, Path] | None:
     return None
 
 
+# "%0d/%0d cases ok" in a $display/printf format string: passed/total, then words that say pass
+_COUNT_FMT = re.compile(r"%0?d/%0?d((?:\s+[A-Za-z]+){1,2})")
+_PASS_WORDS = re.compile(r"\b(ok|pass|passed|correct|matched)\b", re.I)
+_FMT_STRING = re.compile(r'(?:\$display|\$sformatf|\$write|printf)\s*\(\s*"((?:[^"\\]|\\.)*)"')
+
+
+def _fmt_to_regex(text: str) -> str:
+    """A format-string fragment as a regex: literals escaped, %s / %d / %h as tokens."""
+    out, i = [], 0
+    for m in re.finditer(r"%0?(\d*)([sdhxbt])", text):
+        out.append(re.escape(text[i:m.start()]))
+        out.append(r"\S+" if m.group(2) in "st" else r"\w+")
+        i = m.end()
+    out.append(re.escape(text[i:]))
+    return "".join(out).replace(r"\ ", " ")
+
+
+def summary_regex_from_source(text: str) -> str | None:
+    """The testbench's own pass count, from a format string like "scenario %s: %0d/%0d cases ok"."""
+    for fmt in _FMT_STRING.findall(text):
+        m = _COUNT_FMT.search(fmt)
+        if not m or not _PASS_WORDS.search(m.group(1)):
+            continue
+        prefix = fmt[:m.start()]
+        prefix = prefix[max(0, len(prefix) - 40):]
+        prefix = prefix[prefix.find(" ") + 1:] if len(prefix) == 40 and " " in prefix else prefix
+        return _fmt_to_regex(prefix) + r"(?P<passed>\d+)/(?P<total>\d+)" + re.escape(m.group(1)).replace(r"\ ", " ")
+    return None
+
+
+def _summary(root: Path) -> tuple[str, Path] | None:
+    for d in ("tb", "test", "tests", "sim", "verif", "testbench"):
+        base = root / d
+        if base.is_dir():
+            for src in _files(base, "*", depth=3):
+                if src.suffix in (".sv", ".v", ".c", ".cpp"):
+                    if rx := summary_regex_from_source(src.read_text(errors="replace")):
+                        return rx, src
+    return None
+
+
 def read_fusesoc_core(path: Path) -> dict:
     import yaml
     text = path.read_text(errors="replace")
@@ -171,6 +212,9 @@ def detect(root: Path, run_fusesoc: bool = True) -> Detection:
         det.regress["pass_regex"] = Guess(found[0], f"printed by {found[1].relative_to(root)}", confirm=True)
     if found := _markers(root, FAIL_MARKERS):
         det.regress["fail_regex"] = Guess(found[0], f"printed by {found[1].relative_to(root)}")
+    if (found := _summary(root)) and det.regress["cmd"].value != ["TODO"]:
+        det.regress["summary_regex"] = Guess(found[0], f"the summary line {found[1].relative_to(root)} "
+                                                       "prints; its counts then decide too", confirm=True)
     lists = _files(root, "*.list", depth=3)
     if lists:
         det.notes.append(f"case list(s) found: {', '.join(str(p.relative_to(root)) for p in lists)}. "

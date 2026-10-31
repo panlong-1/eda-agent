@@ -21,7 +21,8 @@ from pathlib import Path
 
 from ..core.envelope import Diagnostic, ToolResult, artifact
 from ..core.proc import docker_command, image_digest, run
-from ..core.project import FlowConfig, Project, expand_vars, project_env, read_filelist
+from ..core.project import FlowConfig, Project, expand_vars, project_env, read_command_file, read_filelist
+from .lint import source_path
 
 WORK_DIR = Path("runs/flow")
 _VERSION_CACHE: dict[str, dict] = {}
@@ -91,10 +92,17 @@ class _Setup:
         self.pdk_root = path(flow.pdk_root) if flow.pdk_root else None
         self.dont_use = path(flow.dont_use_file) if flow.dont_use_file else None
         files: list[Path] = []
+        incs: list[Path] = []
+        for cf in flow.command_files:
+            cf_files, cf_incs = read_command_file(root / cf)
+            # The design's own files are read from the checkout, not from the tool's copy
+            # (lint.copy_of_root): FuseSoC rewrites that copy for whichever target was set up last.
+            files += [Path(source_path(str(f), root, project)) for f in cf_files]
+            incs += cf_incs
         for fl in flow.filelists:
             files += read_filelist(root / fl, env, root)
         self.files = [*files, *(path(f) for f in flow.files)]
-        self.include_dirs = [path(d) for d in flow.include_dirs]
+        self.include_dirs = [*incs, *(path(d) for d in flow.include_dirs)]
 
     def missing(self) -> list[str]:
         needed = [self.sdc, self.liberty, *self.corners.values(), *self.files]
@@ -124,11 +132,15 @@ def synth_script(setup: _Setup, work: Path) -> str:
     incs = " ".join(f"-I {d}" for d in setup.include_dirs)
     defs = " ".join(f"-D {d}" for d in flow.defines)
     files = " ".join(map(str, setup.files))
+    lib, du = setup.liberty, _dont_use_args(setup)
+    # Library cells instantiated in the RTL (e.g. an integrated clock gate) are blackboxes from the
+    # Liberty file; slang leaves them unresolved and `hierarchy -check` still fails on any module
+    # that is neither in the RTL nor in the library.
     if flow.frontend == "slang":
-        read = f"read_slang --top {flow.top} {incs} {defs} {files}"
+        read = f"read_slang --top {flow.top} --ignore-unknown-modules {incs} {defs} {files}"
     else:
         read = f"read_verilog -sv {incs} {defs} {files}"
-    lib, du = setup.liberty, _dont_use_args(setup)
+    read = f"read_liberty -lib {lib}\n{read}"
     abc = f"abc -liberty {lib} -D {flow.clock_period * 1000:g} -script {work / 'abc.script'} {du}"
     if flow.abc_driving_cell:
         abc += f" -constr {work / 'abc.constr'}"

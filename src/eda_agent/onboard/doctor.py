@@ -96,7 +96,7 @@ def diagnose(config: Path, provider: str | None = None) -> list[Check]:
     else:
         checks += _paths(project, env, "flow sdc", [flow.sdc])
         checks += _paths(project, env, "flow liberty", [flow.liberty, *flow.corners.values()])
-        checks += _paths(project, env, "flow files", list(flow.files) + list(flow.filelists))
+        checks += _paths(project, env, "flow files", list(flow.files) + list(flow.filelists) + list(flow.command_files))
         if shutil.which("docker") is None:
             checks.append(Check("fail", "docker", "not installed; synth runs in a container"))
         else:

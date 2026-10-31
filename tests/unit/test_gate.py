@@ -26,7 +26,7 @@ def test_overclaim_is_rejected():
                             "So the pipeline handles all forwarding and load-use hazards correctly.")
     d = check_report(report, RESULTS)
     assert not d.passed
-    assert any("'handles'" in r and "E3+" in r for r in d.reasons)
+    assert any("'handles'" in r and "needs E3" in r for r in d.reasons)
 
 
 def test_overclaim_in_chinese_is_rejected():
@@ -71,6 +71,28 @@ def test_strong_words_allowed_with_e3_evidence_the_sentence_names():
     unnamed = SCOPED.replace("These three directed cases passed", "The forwarding logic is verified")
     d = check_report(unnamed, e3)
     assert not d.passed and any("does not name the check" in r and "mutate" in r for r in d.reasons)
+
+
+def test_synthesis_never_vouches_for_function():
+    # Found in a live run: E4 ranks above E3, but synthesis says nothing about function.
+    synth = {"tool": "synth", "status": "pass", "evidence_level": "E4", "metrics": {}}
+    report = SCOPED.replace("These three directed cases passed", "synth: pass (E4); so the design is correct")
+    d = check_report(report, [*RESULTS, synth])
+    assert not d.passed and any("synthesis" in r for r in d.reasons)
+
+
+def test_colon_list_after_a_limit_is_not_a_claim():
+    # Rejected by mistake in a live run (m12_isa_v1b_full): the comma cut "or ... correctness" off.
+    limit = SCOPED.replace("These three directed cases passed under the testbench's own self-check.",
+                           "Does not prove: post-route timing (usually worse), RTL-to-netlist "
+                           "equivalence, or gate-level functional correctness.")
+    assert check_report(limit, RESULTS).passed, check_report(limit, RESULTS).reasons
+    zh = SCOPED.replace("These three", "不能证明：时序、等价性或功能正确。These three")
+    assert check_report(zh, RESULTS).passed, check_report(zh, RESULTS).reasons
+    # the list ends with its sentence; the next sentence is judged on its own
+    after = SCOPED.replace("These three directed cases passed under the testbench's own self-check.",
+                           "Does not prove: post-route timing. The pipeline is correct.")
+    assert not check_report(after, RESULTS).passed
 
 
 def test_fabricated_citation_is_rejected():

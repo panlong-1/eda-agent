@@ -153,6 +153,33 @@ def test_find_project_and_user_defaults(tmp_path, monkeypatch):
         user_defaults(cfg)
 
 
+def test_summary_regex_from_the_testbench_display(tmp_path):
+    import re
+    from eda_agent.onboard.detect import summary_regex_from_source
+    tb = ('$display("[tb_x] scenario %s: %0d/%0d cases ok (%0d model_only), %0d failures", n, p, t, m, f);\n'
+          '$display("accepted %0d/%0d, y_rsp %0d", a, b, c);\n')
+    rx = summary_regex_from_source(tb)
+    assert re.search(rx, "[tb_x] scenario regress: 88/90 cases ok (7 model_only)").groupdict() == \
+        {"passed": "88", "total": "90"}
+    assert summary_regex_from_source('$display("accepted %0d/%0d, y_rsp %0d", a, b, c);') is None
+    root = _accel_repo(tmp_path)
+    (root / "tb" / "tb_my_accel.sv").write_text(tb + '$display("TEST PASSED");\n')
+    out, det = write_draft(root, tmp_path / "p.toml", "2026-10-31", run_fusesoc=False)
+    assert det.regress["summary_regex"].confirm
+    assert load_project(out).regress.summary_regex == rx  # survives the TOML round trip
+
+
+def test_read_command_file(tmp_path):
+    from eda_agent.core.project import read_command_file
+    d = tmp_path / "build" / "c" / "synth-verilator"
+    d.mkdir(parents=True)
+    (d / "c.vc").write_text("--Mdir .\n+incdir+../src/ip/include\n-CFLAGS -I../src/ip/include\n"
+                            "../src/ip/src/fifo.sv\n../src/c/rtl/top.sv\n--top-module top\n")
+    files, incs = read_command_file(d / "c.vc")
+    assert files == [tmp_path / "build/c/src/ip/src/fifo.sv", tmp_path / "build/c/src/c/rtl/top.sv"]
+    assert incs == [tmp_path / "build/c/src/ip/include"]
+
+
 def test_check_presets_load():
     from eda_agent.cli import load_preset
     assert "Residual risk" in load_preset("check") and "synthesize" in load_preset("full")

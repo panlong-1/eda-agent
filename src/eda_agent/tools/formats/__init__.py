@@ -21,6 +21,7 @@ class Outcome:
     rows: list[Row]
     artifacts: list[dict] = field(default_factory=list)
     diags: dict[str, str] = field(default_factory=dict)  # failing case -> detail text
+    subtests: dict[str, dict] = field(default_factory=dict)  # case -> testbench's own counts
 
 
 def tail(text: str, lines: int = 8) -> str:

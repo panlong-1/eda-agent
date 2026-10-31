@@ -71,7 +71,7 @@ def test_flow_config_and_synth_script(tmp_path):
     setup = _Setup(project)
     assert setup.missing() == [] and list(setup.corners) == ["default"]
     script = synth_script(setup, tmp_path / "w")
-    assert script.startswith("read_slang --top top") and str(tmp_path / "rtl" / "top.sv") in script
+    assert script.startswith("read_liberty -lib ") and "read_slang --top top --ignore-unknown-modules" in script and str(tmp_path / "rtl" / "top.sv") in script
     assert "-dont_use bad_cell_1 -dont_use bad_cell_2" in script and "comment" not in script
     assert "-D 10000" in script and "-constr" in script and "stat -json -liberty" in script
     # the design checkout is mounted read-only; only the work dir is writable

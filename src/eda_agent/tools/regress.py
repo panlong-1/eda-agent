@@ -23,7 +23,10 @@ _CASE_NAME = re.compile(r"^[A-Za-z0-9_.\-]+$")
 
 def claim_scope(cfg: RegressConfig) -> str:
     pattern = f" and printed /{cfg.pass_regex}/" if cfg.pass_regex else ""
-    return FORMATS[cfg.format].CLAIM_SCOPE.format(pattern=pattern)
+    scope = FORMATS[cfg.format].CLAIM_SCOPE.format(pattern=pattern)
+    if cfg.summary_regex:
+        scope += exitcode.SUBTEST_SCOPE.format(regex=cfg.summary_regex)
+    return scope
 
 
 def _case_args(cfg: RegressConfig, spec: CaseSpec) -> list[str]:
@@ -72,6 +75,19 @@ def run_regress(project: Project, cases: list[str] | None = None, max_diagnostic
     diags = [Diagnostic("error", "CASE_FAIL", f"{name}: {outcome.diags.get(name, '')}".strip(), file=detail)
              for name, _, detail in failed[:max_diagnostics]]
     ok = bool(passed) and not failed and not missing
+    metrics = {"passed": len(passed), "failed": len(failed), "cases": len(rows),
+               "passed_cases": [r[0] for r in passed], "failed_cases": [r[0] for r in failed],
+               "format": cfg.format}
+    sub_text = ""
+    if outcome.subtests:
+        totals = {k: sum(s.get(k, 0) for s in outcome.subtests.values()) for k in ("passed", "failed", "total")}
+        metrics |= {"subtests": outcome.subtests, "subtests_passed": totals["passed"],
+                    "subtests_failed": totals["failed"], "subtests_total": totals["total"]}
+        sub_text = (f"; testbench sub-tests: {totals['passed']} passed, {totals['failed']} failed "
+                    f"of {totals['total']}")
+    risks = list(FORMATS[cfg.format].RESIDUAL_RISK)
+    if outcome.subtests:
+        risks = [exitcode.SUBTEST_RISK if "which sub-tests ran" in r else r for r in risks]
     return ToolResult(
         tool="regress",
         status="pass" if ok else "fail",
@@ -79,14 +95,12 @@ def run_regress(project: Project, cases: list[str] | None = None, max_diagnostic
         claim_scope=scope,
         summary=f"{len(passed)} passed, {len(failed)} failed, {len(rows) - len(passed) - len(failed)} skipped"
                 + ("" if cases else " (full list)")
-                + (f"; requested but not reported: {missing}" if missing else ""),
-        metrics={"passed": len(passed), "failed": len(failed), "cases": len(rows),
-                 "passed_cases": [r[0] for r in passed], "failed_cases": [r[0] for r in failed],
-                 "format": cfg.format},
+                + (f"; requested but not reported: {missing}" if missing else "") + sub_text,
+        metrics=metrics,
         diagnostics=diags,
         diagnostics_total=len(failed),
         artifacts=outcome.artifacts,
         tool_versions=versions,
-        residual_risk=list(FORMATS[cfg.format].RESIDUAL_RISK)
+        residual_risk=risks
         + ([] if versions else ["tool versions not recorded: the project config has no [versions] table"]),
     )
