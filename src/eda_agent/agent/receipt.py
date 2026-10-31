@@ -1,7 +1,8 @@
 """Run receipt: what was asked, what was checked, what was not, and what was claimed.
 
-Written at the end of every run as runs/<id>.receipt.json (for tools) and
-runs/<id>.receipt.md (for a human reviewer). Everything in it is taken from the
+Written at the end of every run as runs/<id>.receipt.json (for tools) and, for a human
+reviewer, runs/<id>.receipt.md and runs/<id>.receipt.html: a review summary on top
+(receipt_view.py), the full receipt below. Everything in it is taken from the
 run report and the tool envelopes; nothing is re-derived by a model.
 """
 from __future__ import annotations
@@ -12,10 +13,11 @@ from pathlib import Path
 from ..core.envelope import EVIDENCE_LEVELS
 from .gate import described_cases, executed_cases, split_residual, timing_results
 from .loop import RunReport
+from .receipt_view import render_html, render_summary_md, summarize
 
 
 def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, project: str,
-                  all_cases: list[str], trace: str = "", prompt: str = "") -> dict:
+                  all_cases: list[str], trace: str = "", prompt: str = "", sdc_origin: str = "") -> dict:
     envelopes = [c for c in report.checks if c["result"] and c["result"].get("evidence_level") in EVIDENCE_LEVELS]
     others = [c for c in report.checks if all(c is not e for e in envelopes)]
     # Same definitions as gate rule R4, so the receipt and the gate never disagree.
@@ -67,6 +69,7 @@ def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, p
         "tool_errors": report.tool_errors,
         "wall_s": report.wall_s,
         "trace": trace,
+        **({"sdc_origin": sdc_origin} if sdc_origin else {}),
     }
 
 
@@ -88,7 +91,12 @@ def _cell(text: str) -> str:
     return " ".join(str(text).split()).replace("|", "\\|")
 
 
-def render_markdown(r: dict) -> str:
+def render_markdown(r: dict, lang: str = "en") -> str:
+    """The review summary (in `lang`) on top, then the full receipt (details, in English)."""
+    return render_summary_md(summarize(r, lang)) + "\n---\n\n" + render_details(r)
+
+
+def render_details(r: dict) -> str:
     gate = r["gate"]
     out = [
         f"# Run receipt {r['run_id']}",
@@ -102,6 +110,8 @@ def render_markdown(r: dict) -> str:
         f"- **Cost:** {r['turns']} turns, {r['tool_calls']} tool calls ({r['tool_errors']} errors), "
         f"{r['usage'].get('input_tokens', 0)} in / {r['usage'].get('output_tokens', 0)} out tokens, "
         f"{r['wall_s']} s",
+        *([f"- **Preset:** {r['preset']}"] if r.get("preset") else []),
+        *([f"- **SDC origin:** {r['sdc_origin']}"] if r.get("sdc_origin") else []),
         "",
         "## Checks run",
         "",
@@ -179,9 +189,19 @@ def _render_review(v: dict) -> list[str]:
     return out
 
 
-def write_receipt(receipt: dict, out_dir: Path) -> tuple[Path, Path]:
+def write_receipt(receipt: dict, out_dir: Path, lang: str = "en") -> tuple[Path, Path]:
+    """runs/<id>.receipt.json, plus the rendered .md and .html next to it."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    js, md = (out_dir / f"{receipt['run_id']}.receipt.{ext}" for ext in ("json", "md"))
+    js = out_dir / f"{receipt['run_id']}.receipt.json"
     js.write_text(json.dumps(receipt, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    md.write_text(render_markdown(receipt), encoding="utf-8")
+    md, _ = render_files(receipt, out_dir, lang)
     return js, md
+
+
+def render_files(receipt: dict, out_dir: Path, lang: str = "en") -> tuple[Path, Path]:
+    """(Re-)write runs/<id>.receipt.md and .html from the receipt data; the .json is not touched."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    md, page = (out_dir / f"{receipt['run_id']}.receipt.{ext}" for ext in ("md", "html"))
+    md.write_text(render_markdown(receipt, lang), encoding="utf-8")
+    page.write_text(render_html(receipt, lang), encoding="utf-8")
+    return md, page

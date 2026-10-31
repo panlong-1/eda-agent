@@ -1,7 +1,59 @@
+# Review summary · m1_torv_hazard3
+
+> Written by plain code from the receipt data (no model). Everything else is in the details below; quotes and tool output stay in their original language.
+
+**In one line:** 1 of 1 check(s) passed; gate passed; 0 serious and 2 warning item(s) to look at.
+
+- **Task**: Run the forwarding and load-use hazard cases and tell me if the pipeline hazards are handled
+- **What you decide**: No human decision was requested for this run (status done); nothing to decide.
+- **Status**: done (no approval requested) · torv · deepseek / deepseek-v4-pro
+
+## Look at these before approving
+
+- ⚠️ No tool versions recorded for: regress. The result cannot be tied to a tool release.
+- ⚠️ The gate sent the agent's report back 1 time(s) before it passed; reason: 'correctly' claims functional correctness, which needs E3+; the best passing evidence here is E2, which supports only 'these checks/cases passed': 'That supports that the tested forwarding and load-use scenarios run cor…
+- ℹ️ Only part of the regression ran: 30 listed case(s) were not run.
+- ℹ️ lint was not run.
+- ℹ️ No independent review was run: only the gate checked the report.
+
+## Checks
+
+| check | result | evidence | tool summary |
+|---|---|---|---|
+| regress `{"cases": ["bypass", "hazard", "muldiv_stall"]}` | ✅ pass | E2 these tests passed | 3 passed, 0 failed, 0 skipped |
+
+## What the evidence allows
+
+- Highest evidence reached: E2 (these tests passed).
+- E2 (these tests passed): may say the listed test cases ran and passed by the testbench's own checks; may NOT say that the design is correct, or that the tests would catch a bug (no coverage).
+
+## Not checked
+
+- 30 case(s) in the project's list were not run: smoke, alu, imm, branch, compare_edges, shift_edges, jump, flush …
+- lint was not run
+- no synthesis or timing estimate was run
+- pass/fail is reported by the test program itself
+- test adequacy unknown: no coverage or mutation score yet
+
+## Evidence gate
+
+- passed; the agent's report was sent back for a rewrite 1 time(s)
+  - 'correctly' claims functional correctness, which needs E3+; the best passing evidence here is E2, which supports only 'these checks/cases passed': 'That supports that the tested forwarding and load-use scenarios run correctly in simulation'
+
+## Reviewers
+
+- no independent review was run
+
+## Approval
+
+- no approval record
+
+---
+
 # Run receipt m1_torv_hazard3
 
 - **Task:** Run the forwarding and load-use hazard cases and tell me if the pipeline hazards are handled
-- **Project:** torv  ·  **Model:** deepseek / deepseek-v4-pro
+- **Project:** torv  ·  **Model:** deepseek / deepseek-v4-pro  ·  **Prompt:** n/a
 - **Stop:** end  ·  **Status:** done  ·  **Gate:** passed (1 rewrite(s))
 - **Cost:** 5 turns, 4 tool calls (0 errors), 14847 in / 1211 out tokens, 52.02 s
 

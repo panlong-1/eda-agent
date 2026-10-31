@@ -1,3 +1,75 @@
+# Review summary · m2_torv_e2e
+
+> Written by plain code from the receipt data (no model). Everything else is in the details below; quotes and tool output stay in their original language.
+
+**In one line:** 4 of 4 check(s) passed; gate passed; reviewers: 1× REJECT, 2× accept with findings; 1 serious and 5 warning item(s) to look at.
+
+- **Task**: Check the TORV core end to end: lint it, run the smoke regression case, synthesize it and estimate timing at the project clock, and check that the SDC constrains every endpoint. Report what passed, and whether the timing estimate meets the project clock target.
+- **What you decide**: Approve or reject step 'final report': accept the agent's final report below as the result of this task? (requested because: the evidence gate passed; a person accepts the result)
+- **Status**: awaiting approval · torv · deepseek / deepseek-v4-pro · prompt system.v2
+
+```bash
+eda-agent approve m2_torv_e2e
+eda-agent reject m2_torv_e2e --reason "..."
+```
+
+## Look at these before approving
+
+- 🛑 Reviewer rule-based (no model) said REJECT.
+- ⚠️ [high] from rule-based (no model): multi_driven x1: signal driven from more than one block: Bits [0:0] of signal 'torv_soc.apb_presetn' have multiple combinational drivers (at rtl/torv_soc.sv:179)
+- ⚠️ [high] from I3 (deepseek-v4-flash): A real rule error was never surfaced: `rtl_rules` (E0) **fails** with `MULTI_DRIVEN` on `torv_soc.apb_presetn` bits[0:0], "driven from more than one block" — the author reported only `lint` status=pass and did not triag…
+- ⚠️ [high] from I3 (deepseek-v4-flash): The synthesized/STA'd top is `torv_cpu`, but lint was run on `torv_soc`; the SoC-level logic (AHB/APB bridge, `apb_uart_sv`, `torv_ahb_sram`, AHB dport) is never synthesized, timed, or covered by the SDC — so "timing me…
+- ⚠️ synth: small setup slack, +0.698 ns = 7% of the 10.0 ns clock (pre-PnR; usually worse after routing).
+- ⚠️ synth: small hold slack, +0.068 ns (corner slow); real clock skew after layout can eat it.
+- ℹ️ 10 more medium finding(s) from the reviewers (see Reviewers and the details).
+- ℹ️ Only part of the regression ran: 32 listed case(s) were not run.
+- ℹ️ Note on reviewer I3 (deepseek-v4-flash): I3 here is the author's provider with a different model (deepseek-v4-pro -> deepseek-v4-flash); a different vendor would be more independent (shared training data and blind spots).
+
+## Checks
+
+| check | result | evidence | tool summary |
+|---|---|---|---|
+| lint | ✅ pass | E0 parses / structural facts | 0 error(s), 43 warning(s), top=torv_soc |
+| regress `{"cases": ["smoke"]}` | ✅ pass | E2 these tests passed | 1 passed, 0 failed, 0 skipped |
+| synth | ✅ pass | E4 synthesis estimate | 14766 cells, area 236631, 0 latch(es); setup WNS +0.698 ns (corner slow), hold WNS +0.068 at 10 ns; timing met under this SDC, pre-PnR estimate |
+| check_sdc | ✅ pass | E0 parses / structural facts | 1 clock(s), 0 unconstrained endpoint(s), 0 other check_setup warning(s) |
+
+## What the evidence allows
+
+- Highest evidence reached: E4 (synthesis estimate).
+- On function the highest is E2 (these tests passed); E4 never speaks about function.
+- E4 (synthesis estimate): may say area and timing as estimated before placement and routing, under this SDC; may NOT say function, or signoff timing after placement and routing.
+- E2 (these tests passed): may say the listed test cases ran and passed by the testbench's own checks; may NOT say that the design is correct, or that the tests would catch a bug (no coverage).
+- E0 (parses / structural facts): may say the design parses and elaborates, or the constraints exist as stated; may NOT say that the design works, or meets timing.
+
+## Not checked
+
+- 32 case(s) in the project's list were not run: alu, imm, branch, compare_edges, shift_edges, jump, flush, x0 …
+- inputs without set_input_delay are not endpoints and are not listed here
+- lint says nothing about function; run regress for E2
+- pass/fail is reported by the test program itself
+- pre-PnR estimate: no wire parasitics, ideal clock tree; post-route slack is usually worse
+- synthesis is not checked for equivalence with the RTL and no gate-level simulation was run
+- test adequacy unknown: no coverage or mutation score yet
+- the SDC's values (I/O budgets, uncertainty) are not judged, only whether they exist
+- timing is only as meaningful as the SDC: I/O delays and exceptions there are assumptions
+
+## Evidence gate
+
+- passed; the agent's report was sent back for a rewrite 0 time(s)
+
+## Reviewers
+
+- **rule-based (no model) (×2, identical)**: REJECT (high 1 · medium 2); most serious: [high] multi_driven x1: signal driven from more than one block: Bits [0:0] of signal 'torv_soc.apb_presetn' have multiple combinational drivers (at rtl/torv_soc.sv:17…
+- **I3 (deepseek-v4-flash)**: accept with findings (high 2 · medium 6 · low 2 · info 1); most serious: [high] A real rule error was never surfaced: `rtl_rules` (E0) **fails** with `MULTI_DRIVEN` on `torv_soc.apb_presetn` bits[0:0], "driven from more than one block" — t…
+- **I2 (deepseek-v4-pro)**: accept with findings (medium 2 · low 1 · info 3); most serious: [medium] Lint is not clean: 43 warnings include a LATCH at `ip/third_party/apb_uart_sv/apb_uart.sv:195`, MULTIDRIVEN on `torv_soc.apb_presetn` at `rtl/torv_soc.sv:179`,…
+
+## Approval
+
+- pending
+
+---
+
 # Run receipt m2_torv_e2e
 
 - **Task:** Check the TORV core end to end: lint it, run the smoke regression case, synthesize it and estimate timing at the project clock, and check that the SDC constrains every endpoint. Report what passed, and whether the timing estimate meets the project clock target.

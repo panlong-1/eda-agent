@@ -63,7 +63,7 @@ async def test_receipt_of_gate_rejected_run(tmp_path):
 
 
 def test_markdown_table_survives_pipe_in_args():
-    from eda_agent.agent.receipt import render_markdown
+    from eda_agent.agent.receipt import render_details
     receipt = {"run_id": "r", "task": "t", "project": "p", "provider": "x", "model": "m", "prompt": "",
                "stop_reason": "end", "status": "done", "turns": 1, "tool_calls": 1, "tool_errors": 0,
                "usage": {}, "wall_s": 0, "trace": "",
@@ -72,5 +72,5 @@ def test_markdown_table_survives_pipe_in_args():
                                "evidence_level": "E2", "summary": "x | y", "claim_scope": "", "artifacts": []}],
                "not_run": {"lint_run": False, "described_but_not_run": [], "cases_not_run": []},
                "final_claims": "", "residual_risk": {"report": "", "from_tools": []}}
-    row = next(line for line in render_markdown(receipt).splitlines() if line.startswith("| regress"))
+    row = next(line for line in render_details(receipt).splitlines() if line.startswith("| regress"))
     assert row.count("|") - row.count("\\|") == 6  # five cells, unchanged by the '|' inside them

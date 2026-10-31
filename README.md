@@ -47,7 +47,8 @@ src/eda_agent/
                          scripted.py (for tests)
     loop.py              tool loop with budgets: turns, tool calls, 2-strike retry stop; JSONL trace
     gate.py              evidence gate on the final report (no LLM), up to 2 rewrites
-    receipt.py           runs/<id>.receipt.json + .md at the end of every run
+    receipt.py           runs/<id>.receipt.json + .md + .html at the end of every run
+    receipt_view.py      the review summary on top of a receipt (plain code, en/zh) and the HTML page
     reviewer.py          independent review I0-I3 (context assembled by code) + rule-based reviewer
     human_gate.py        awaiting_approval / approve / reject, recorded in the receipt
     mcp_client.py        connects the loop to the MCP server
@@ -94,10 +95,14 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 
 # review a finished run again, e.g. at I3 (another model), without re-running the author
 .venv/bin/eda-agent review <run_id> --review I3 --project projects/torv.toml
+
+# re-render a receipt's .md and .html from its .json, with the review summary in Chinese
+.venv/bin/eda-agent receipt <run_id> --lang zh [--print] [--out-dir DIR]
 ```
 
 Each run writes `runs/<id>.jsonl` (every model turn, tool call, gate decision, token
-count and wall time) and a receipt `runs/<id>.receipt.md` / `.json`: task, model,
+count and wall time) and a receipt `runs/<id>.receipt.json`, rendered for people as
+`runs/<id>.receipt.html` and `.md` (see [Reading a receipt](#reading-a-receipt)): task, model,
 stop reason and gate status, the checks run (args, status, evidence level,
 claim_scope, artifact sha256), cases that were described or listed but not run,
 the final claims, residual risk, tokens and wall time. The CLI prints the receipt path
@@ -136,7 +141,7 @@ not used until a person has read it: the config decides what each check means. `
 then checks that every tool, file, container image and API key it names is there (key
 values are never printed). Put the file in the design directory as `eda-agent.toml` and
 `--project` can be left out; `~/.config/eda-agent/config.toml` holds personal defaults such
-as `provider = "deepseek"` and `review = "I2"`.
+as `provider = "deepseek"`, `review = "I2"` and `lang = "zh"` (receipt summaries in Chinese).
 
 Left out, a project gets defaults: lint flags `-Wall -Wno-fatal`, `[versions]` with
 Verilator, regress format `exitcode` with no case flag, and with no case list one case,
@@ -222,6 +227,9 @@ file as blackboxes; any other unknown module still fails `hierarchy -check`. TOR
 LibreLane's own pre-PnR STA per corner. A project without `[flow]` (PicoRV32 today) gets a
 clean `not_configured` refusal. Containers come from an allowlist (`ghcr.io/librelane/librelane`
 built in; `allowed_images` adds more) and may only start allowlisted programs.
+When the SDC is not the design's own (a hand translation of other constraints, say), write
+that in `[flow] sdc_origin = "..."`: every receipt copies it and the review summary asks
+the approver to look at it.
 
 ## Evidence gate
 
@@ -299,6 +307,38 @@ eda-agent approve <run_id> --override-gate --reason "..."   # a gate-rejected (p
 The receipt then records who decided (`--by`, else `git config user.name`, else the login
 name), when, the reason, and the sha256 of the receipt content they decided on. Decisions
 are final; a rejected run is fixed by a new run. `--no-approval` skips the gate (status `done`).
+
+### Reading a receipt
+
+The person who approves should not have to read tables of claim scopes, checklists and three
+reviews to find out what they are deciding. So every rendered receipt (`.html`, and `.md`)
+starts with a **review summary** that fits on about one screen, and keeps the whole receipt
+below it (in the HTML, as sections that open on a click):
+
+- one line: how many checks passed, the gate, the reviewers' verdicts, how many items to look at;
+- the task, **what you decide** (or who already decided, and when), and the exact
+  `approve` / `reject` commands for this run;
+- **look at these before approving**, sorted serious → warning → note: a reviewer that said
+  reject, every high-severity finding (once, even if several reviewers found it), failing or
+  skipped cases, a small setup or hold slack (under 10 % of the clock period, or under
+  0.1 ns), timing not met or void, checks without tool versions, tool errors, gate rewrites
+  and why, cases read but not run, testbench sub-test counts, a hand-made SDC
+  (`sdc_origin`), an approval that overrode the gate, a receipt changed after its decision;
+- each check with pass/fail and its evidence level in words (E0 "parses / structural facts",
+  E2 "these tests passed", E4 "synthesis estimate", …), the highest level reached and what
+  each level does and does not let you say;
+- what was **not** checked: cases not run, no lint / simulation / timing, and every residual
+  risk the tools reported;
+- the gate verdict, one line per reviewer (identical reviews merged) with its worst finding,
+  and the approval status.
+
+The summary is written by plain code from the receipt's own data, no model, so it can say
+nothing the receipt does not. `--lang zh` (or `lang = "zh"` in the user config) writes it in
+Chinese; tool output, file names, findings and the agent's report stay as they were written.
+`approve` and `reject` re-render the files; `eda-agent receipt <run_id>` re-renders any
+receipt, old ones included, without touching its `.json` (so the sha256 recorded at the
+decision still checks out). The HTML page is a single file with no scripts or external
+links, so it opens offline. Example: [docs/examples/m2_torv_e2e.receipt.html](docs/examples/m2_torv_e2e.receipt.html).
 
 ## Related work: what we borrowed
 

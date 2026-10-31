@@ -119,6 +119,9 @@ class FlowConfig:
     # corner name -> Liberty file; STA runs on each, the worst one decides. Default: liberty only.
     corners: dict = field(default_factory=dict, hash=False, compare=False)
     timeout_s: int = 1800
+    # Where the SDC came from when it is not the design's own (e.g. "hand translation of the
+    # course DC constraints"); copied into each receipt and shown to the approver.
+    sdc_origin: str = ""
 
     def __post_init__(self) -> None:
         if self.frontend not in ("slang", "verilog"):

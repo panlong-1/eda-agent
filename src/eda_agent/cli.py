@@ -8,9 +8,10 @@
     eda-agent review <run_id> --review I3 --project projects/torv.toml   (review a finished run)
     eda-agent approve <run_id>                                          (human gate)
     eda-agent reject <run_id> --reason "..."
+    eda-agent receipt <run_id> --lang zh                                (re-render .md/.html)
 
 --project may be left out when the current directory (or a parent) has eda-agent.toml.
-Personal defaults (provider, model, effort, review) live in ~/.config/eda-agent/config.toml.
+Personal defaults (provider, model, effort, review, lang) live in ~/.config/eda-agent/config.toml.
 """
 from __future__ import annotations
 
@@ -28,7 +29,8 @@ from .agent import human_gate
 from .agent.loop import Budget, run_agent
 from .agent.mcp_client import mcp_tools
 from .agent.models import AnthropicAdapter, OpenAICompatAdapter
-from .agent.receipt import build_receipt, write_receipt
+from .agent.receipt import build_receipt, render_files, write_receipt
+from .agent.receipt_view import LANGS, render_summary_md, summarize
 from .agent.reviewer import LEVELS, load_trace, model_review, rules_review
 from .core.project import load_project, regress_cases
 from .core.settings import PROJECT_FILE, find_project, user_defaults
@@ -143,7 +145,7 @@ async def _run(args: argparse.Namespace) -> int:
         )
         receipt = build_receipt(report, run_id=run_id, task=args.task, provider=args.provider,
                                 project=project.name, all_cases=regress_cases(project), trace=str(trace),
-                                prompt=args.prompt)
+                                prompt=args.prompt, sdc_origin=project.flow.sdc_origin if project.flow else "")
         if getattr(args, "preset", None):
             receipt["preset"] = f"{args.preset}@{PRESETS}"
         if args.review != "none":
@@ -155,7 +157,7 @@ async def _run(args: argparse.Namespace) -> int:
     if report.status == "done" and not args.no_approval:
         human_gate.request_approval(receipt, "final report",
                                     "the evidence gate passed; a person accepts the result")
-    js, md = write_receipt(receipt, trace.parent)
+    js, md = write_receipt(receipt, trace.parent, args.lang)
     print(report.final_text)
     print("\n--- run report ---")
     print(json.dumps({k: v for k, v in asdict(report).items() if k not in ("final_text", "checks")},
@@ -163,7 +165,7 @@ async def _run(args: argparse.Namespace) -> int:
     _print_reviews(receipt.get("reviews", []))
     print(f"\nstatus: {receipt['status']}")
     print(f"trace: {trace}")
-    print(f"receipt: {md} (json: {js})")
+    print(f"receipt: {md.with_suffix('.html')} (also {md.name}, json: {js.name})")
     if receipt["status"] == human_gate.AWAITING:
         print(f"waiting for a person: eda-agent approve {run_id}   or   "
               f"eda-agent reject {run_id} --reason \"...\"")
@@ -182,9 +184,9 @@ async def _review(args: argparse.Namespace) -> int:
     if any(v["reviewer"] == "rules" for v in receipt.get("reviews", [])):
         reviews = [v for v in reviews if v["reviewer"] != "rules"]  # deterministic: once is enough
     receipt["reviews"] = receipt.get("reviews", []) + reviews
-    js, md = write_receipt(receipt, runs_dir)
+    js, md = write_receipt(receipt, runs_dir, args.lang)
     _print_reviews(reviews)
-    print(f"receipt: {md} (json: {js})")
+    print(f"receipt: {md.with_suffix('.html')} (also {md.name}, json: {js.name})")
     return 0
 
 
@@ -197,10 +199,24 @@ def _decide(args: argparse.Namespace, decision: str) -> int:
     except human_gate.ApprovalError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
-    js, md = write_receipt(receipt, runs_dir)
+    js, md = write_receipt(receipt, runs_dir, args.lang)
     a = receipt["approval"]
     print(f"run {args.run_id}: {a['status']} by {a['by']} at {a['at']}")
-    print(f"receipt: {md} (json: {js})")
+    print(f"receipt: {md.with_suffix('.html')} (also {md.name}, json: {js.name})")
+    return 0
+
+
+def _receipt(args: argparse.Namespace) -> int:
+    """Re-render the .md and .html of a receipt from its .json (which is left as it is)."""
+    try:
+        receipt, _ = human_gate.load_receipt(args.run_id, Path(args.runs_dir))
+    except human_gate.ApprovalError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    md, page = render_files(receipt, Path(args.out_dir or args.runs_dir), args.lang)
+    if args.print:
+        print(render_summary_md(summarize(receipt, args.lang)))
+    print(f"receipt: {page} (also {md.name})")
     return 0
 
 
@@ -257,7 +273,14 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--trace")
     p.add_argument("--no-approval", action="store_true",
                    help="end with status done instead of awaiting_approval (no human gate)")
+    _add_lang_arg(p)
     _add_review_args(p, "none")
+
+
+def _add_lang_arg(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--lang", default="en", choices=LANGS,
+                   help="language of the receipt's review summary (default en, or lang in the user config); "
+                        "tool output and quotes stay as they are")
 
 
 def _add_review_args(p: argparse.ArgumentParser, default: str) -> None:
@@ -299,7 +322,15 @@ def main() -> None:
     rev.add_argument("run_id")
     rev.add_argument("--project", help=f"project config (default: {PROJECT_FILE} here or in a parent)")
     rev.add_argument("--runs-dir", default="runs")
+    _add_lang_arg(rev)
     _add_review_args(rev, "I2")
+
+    rec = sub.add_parser("receipt", help="re-render a receipt's .md and .html (review summary on top)")
+    rec.add_argument("run_id")
+    rec.add_argument("--runs-dir", default="runs")
+    rec.add_argument("--out-dir", help="write the rendered files here instead of next to the .json")
+    rec.add_argument("--print", action="store_true", help="also print the review summary")
+    _add_lang_arg(rec)
 
     # Personal defaults apply to run and check; anything on the command line wins.
     try:
@@ -310,6 +341,9 @@ def main() -> None:
     check.set_defaults(**defaults)
     if "provider" in defaults:
         doc.set_defaults(provider=defaults["provider"])
+    lang_default = {"lang": defaults["lang"]} if "lang" in defaults else {}
+    rev.set_defaults(**lang_default)
+    rec.set_defaults(**lang_default)
 
     for name, help_text in (("approve", "approve a run awaiting approval"), ("reject", "reject a run")):
         p = sub.add_parser(name, help=help_text)
@@ -320,12 +354,16 @@ def main() -> None:
         if name == "approve":
             p.add_argument("--override-gate", action="store_true",
                            help="approve a run the evidence gate rejected (needs --reason)")
+        _add_lang_arg(p)
+        p.set_defaults(**lang_default)
 
     args = ap.parse_args()
     if args.cmd == "init":
         sys.exit(_init(args))
     if args.cmd == "doctor":
         sys.exit(_doctor(args))
+    if args.cmd == "receipt":
+        sys.exit(_receipt(args))
     if args.cmd == "check":
         args.preset = "full" if args.full else "check"
         args.task = load_preset(args.preset)
