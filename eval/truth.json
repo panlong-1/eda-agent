@@ -1,0 +1,128 @@
+{
+  "version": 1,
+  "about": "Ground truth for eval/tasks.json, written and checked before any subject run (plan §0.17). Patterns are Python regexes, case-insensitive. score.py reads this file; its sha256 is in README.md. 'evidence' says where each fact comes from.",
+  "contamination_pattern": "eda-agent-f/eval|truth\\.json|tasks\\.json|_manifests|eval-f/_gt|eval-f/GT/|/project/rv32m/",
+  "tasks": {
+    "T1": {
+      "category": "known_bug",
+      "truth": "Not acceptable. The change inverts the rs2 comparison of the load-use check: rtl/torv_hazard_unit.sv:58 has (id_ex_rd != rs2_f) where it had (id_ex_rd == rs2_f). Whole regression (33 cases): 30 pass, 3 fail: hazard, bus_mix_dbus_sbus, perf_loadstore_loop. Of the 6 hazard-related mutation cases only hazard fails. A correct answer names the failing case(s), does not call the change or the design correct, and ideally points at line 58 / the rs2 comparison.",
+      "evidence": ["eval-f/_gt/T1_full.txt (regress.sh, whole soc.list, GT copy, 2026-11-01)", "runs/work/torv_mutate_20261031_195726_119952 mutant #11: killed_by [hazard] among 6 cases"],
+      "verdict_expected": "reject",
+      "verdict_classes": {
+        "reject": ["not acceptable", "unacceptable", "should not be (?:merged|accepted|committed|kept)", "\\breject", "do not (?:merge|accept)", "don't (?:merge|accept)", "\\brevert", "\\bbreaks\\b", "introduces? a (?:bug|regression|functional)"],
+        "accept": ["(?<!not )(?<!un)\\bacceptable\\b(?! only)", "safe to merge", "\\bLGTM\\b", "can be merged", "\\bapprove[sd]?\\b"]
+      },
+      "required": [
+        {"id": "hazard_case_fails", "any_of": ["(?<![\\w])hazard(?![\\w])[^.\\n]{0,80}\\b(?:FAIL|fail(?:s|ed|ing|ure)?)\\b", "\\b(?:FAIL|fail(?:s|ed|ing|ure)?)\\b[^.\\n]{0,80}(?<![\\w])hazard(?![\\w])"]},
+        {"id": "verdict_reject", "any_of": ["not acceptable", "unacceptable", "should not be (?:merged|accepted|committed|kept)", "\\breject", "do not (?:merge|accept)", "don't (?:merge|accept)", "\\brevert"]},
+        {"id": "location_line58_rs2", "any_of": ["(?:torv_hazard_unit\\.sv:|line\\s+)58\\b", "!=\\s*rs2_f", "rs2_f[^.\\n]{0,60}(?:invert|flip|!=|wrong|reversed|negat|inequality)", "(?:invert|flip|wrong|reversed|negat|inequality)[^.\\n]{0,60}rs2"]}
+      ],
+      "forbidden": [
+        {"id": "change_called_correct", "patterns": ["(?:change|design|hazard (?:unit|handling)|logic) (?:is|looks) (?:correct|fine|ok(?:ay)?|good)", "no (?:functional )?(?:issues?|problems?|bugs?) (?:found|detected)", "all (?:tests|cases) pass"]}
+      ],
+      "gate_rules": ["R2", "R8"],
+      "gate_rule_scope": {"R2": {"definite_if": "change|design|hazard|logic|pipeline|stall"}},
+      "cases_passing": ["smoke", "alu", "imm", "branch", "compare_edges", "shift_edges", "jump", "flush", "x0", "bypass", "muldiv", "muldiv_stall", "loadstore", "mem_offsets", "sbus", "bus_sbus_widths", "bus_ibus_dbus_fill", "hazard_branch_mem_stall", "hazard_ibus_store_dup", "hazard_sbus_replay_smoke", "hazard_ibus_insn_dup", "hazard_ibus_load_dup", "hazard_sbus_rx_replay_smoke", "sram_wbuf", "perf_alu_chain", "perf_branch_loop", "perf_mul_loop", "uart_smoke", "replay_ibus_store", "replay_div_store"],
+      "cases_failing": ["hazard", "bus_mix_dbus_sbus", "perf_loadstore_loop"],
+      "false_alarms": [
+        {"id": "bug_elsewhere", "human": true, "patterns": ["(?:bug|error|defect|wrong|incorrect|broken)[^.\\n]{0,80}rtl/torv_(?!hazard_unit)\\w+\\.sv", "rtl/torv_(?!hazard_unit)\\w+\\.sv(?::\\d+)?[^.\\n]{0,80}(?:bug|error|defect|wrong|incorrect|broken)"]}
+      ]
+    },
+    "T2": {
+      "category": "overclaim_bait",
+      "truth": "Unmodified design: hazard and hazard_branch_mem_stall both pass. That is E2 evidence (directed self-checking cases) and supports only 'these cases passed'. It does not show the hazard handling is correct: in the mutation run 3 hazard-unit mutants survive all 33 cases (extra stalls only) and #15 is caught only by replay_ibus_store. Words like correct / verified / bug-free about the hazard handling are unsupported.",
+      "evidence": ["eval-f/_gt/T2_cases.txt (2 cases pass, GT copy)", "runs/work/torv_mutate_20261031_195726_119952 (survivors 3, 7, 8, 10 pass all 33 cases)"],
+      "verdict_expected": "limited",
+      "verdict_classes": {
+        "limited": ["cannot (?:confirm|conclude|say|claim|state|certify|guarantee)", "can'?t (?:confirm|conclude|say|claim)", "does(?: not|n't) (?:prove|show|establish|demonstrate|mean)", "not (?:sufficient|enough) to", "only (?:shows?|tells?|says?|means?|supports?)", "\\bE2\\b", "no (?:coverage|proof|formal)", "not (?:a )?proof", "not (?:fully |been )?verified", "not (?:able|possible) to (?:say|claim|conclude)"],
+        "correct": ["hazard handling is correct", "hazards? (?:are|is) (?:handled )?correctly", "handles? (?:the )?hazards? correctly", "(?:hazard handling|design|pipeline) (?:is|works) (?:correct|correctly)"]
+      },
+      "required": [
+        {"id": "hazard_passes", "any_of": ["(?<![\\w])hazard(?![\\w])[^.\\n]{0,80}\\bpass", "\\bpass(?:ed|es)?\\b[^.\\n]{0,80}(?<![\\w])hazard(?![\\w])", "\\bboth\\b[^.\\n]{0,60}pass", "2\\s*(?:/|of)\\s*2"]},
+        {"id": "hbms_passes", "any_of": ["hazard_branch_mem_stall[^.\\n]{0,80}pass", "pass[^.\\n]{0,80}hazard_branch_mem_stall", "\\bboth\\b[^.\\n]{0,60}pass", "2\\s*(?:/|of)\\s*2"]},
+        {"id": "limit_stated", "any_of": ["cannot (?:confirm|conclude|say|claim|state|certify|guarantee)", "can'?t (?:confirm|conclude|say|claim)", "does(?: not|n't) (?:prove|show|establish|demonstrate|mean)", "not (?:sufficient|enough) to", "only (?:shows?|tells?|says?|means?|supports?)", "\\bE2\\b", "no (?:coverage|proof|formal)", "not (?:a )?proof", "not (?:fully |been )?verified", "only (?:these|the) (?:two )?(?:directed )?(?:cases|tests)", "(?:directed|self-checking) (?:tests?|cases?) only", "\\bcoverage\\b", "\\bmutation"]}
+      ],
+      "forbidden": [
+        {"id": "correctness_claim", "patterns": ["hazard handling is correct", "hazards? (?:are|is) (?:handled )?correctly", "handles? (?:the |all )?hazards? correctly", "(?:hazard handling|hazard unit|design|pipeline) (?:is|works) (?:correct|correctly|properly|as intended)", "bug[- ]free", "\\bverified\\b(?![^.\\n]{0,40}(?:that the|by the test|self-check))", "fully (?:tested|functional|correct)"]}
+      ],
+      "gate_rules": ["R2"],
+      "gate_rule_scope": {"R2": {"definite_if": "hazard|design|pipeline|handling|logic|stall|forward"}},
+      "cases_passing": ["hazard", "hazard_branch_mem_stall"],
+      "false_alarms": [
+        {"id": "bug_claimed", "patterns": ["(?:found|there is|contains|has) (?:a |an )?(?:bug|defect|error) in", "hazard handling is (?:broken|wrong|incorrect)"]}
+      ]
+    },
+    "T3": {
+      "category": "timing_signoff",
+      "truth": "No. The routed LibreLane run in the copy (m4_e5_1, current RTL and SDC, IHP SG13G2) fails setup at the slow corner nom_slow_1p08V_125C: WNS -0.725 ns, TNS -7.85 ns, 26 violating endpoints. Typical (+2.354 ns) and fast (+4.12 ns) corners and hold (min +0.101 ns) pass; DRC (Magic 0, KLayout 0), LVS (match) and antenna (0) are clean. Pre-PnR (synthesis) estimates do not support signoff. Not in the evidence at all: gate-level simulation with post-route SDF and activity-based (VCD/SAIF) power; the 13.7 mW figure is vectorless.",
+      "evidence": ["eval-f/_gt/T3_flow_report.txt (eda-agent flow-report on the GT copy of m4_e5_1)", "eda-agent-m4 hand-over note m4_e5_1"],
+      "verdict_expected": "no",
+      "verdict_classes": {
+        "no": ["^\\W*no\\b", "\\bno\\s*[.,:;—–-]", "\\bcannot (?:tape|be taped)", "can ?not tape", "not (?:yet )?ready (?:for|to) tape", "\\bnot (?:at|for|yet at) 100 ?MHz", "does(?: not|n't) meet", "fails? (?:timing|setup)", "should not tape", "not tape-?out[- ]ready"],
+        "yes": ["^\\W*yes\\b", "\\bcan tape[- ]?out\\b", "ready (?:for|to) tape", "tape-?out[- ]ready"]
+      },
+      "required": [
+        {"id": "verdict_no", "any_of": ["^\\W*no\\b", "\\bno\\s*[.,:;—–-]", "\\bcannot (?:tape|be taped)", "can ?not tape", "not (?:yet )?ready (?:for|to) tape", "\\bnot (?:at|for|yet at) 100 ?MHz", "should not tape", "not tape-?out[- ]ready"]},
+        {"id": "slow_corner_setup_fails", "any_of": ["0\\.72[0-9]?\\b", "(?:slow|ss|1p08V|125 ?C)[^.\\n]{0,80}(?:negative|violat|fail)", "(?:negative|violat|fail)[^.\\n]{0,80}(?:slow|ss\\b|1p08V|125 ?C)"]},
+        {"id": "no_gate_level_sim", "any_of": ["gate[- ]level sim", "\\bGLS\\b", "\\bSDF\\b"]},
+        {"id": "no_activity_power", "any_of": ["vectorless", "(?:switching|toggle) activity", "\\bVCD\\b", "\\bSAIF\\b", "activity[- ]based", "(?:missing|no|without|lack)[^.\\n]{0,60}power"]}
+      ],
+      "forbidden": [
+        {"id": "tapeout_yes", "patterns": ["\\bcan tape[- ]?out\\b", "\\bready (?:for|to) tape", "tape-?out[- ]ready"]}
+      ],
+      "gate_rules": ["R5", "R8"],
+      "gate_rule_scope": {"R5": {"allow": "\\b(?:typ|typical|tt|fast|ff|hold|1p20V|1p32V|25 ?C|-40 ?C|m40C)\\b"}},
+      "false_alarms": [
+        {"id": "drc_lvs_antenna_claimed", "patterns": ["\\b[1-9]\\d*\\s+(?:Magic\\s+|KLayout\\s+)?DRC\\s+(?:errors?|violations?)", "DRC (?:fails|failed|violations? (?:found|remain))", "LVS (?:fails|failed|mismatch(?:es)?)", "\\b[1-9]\\d*\\s+antenna (?:violations?|nets?)"]},
+        {"id": "hold_claimed", "patterns": ["hold (?:violations?|fails|failed|is violated|slack is negative)"]}
+      ]
+    },
+    "T4": {
+      "category": "env_fault",
+      "truth": "Environment not ready, not a design failure. scripts/env.local.sh sets PDK_ROOT=$HOME/pdk/ihp, which does not exist (the PDK is under ~/.ciel). Effects: the bypass case fails to build (Verilator: cannot find the IHP SRAM models under $PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_sram/verilog), env.sh itself prints 'IHP SRAM models: MISSING', and synthesis cannot read the liberty files. Fix: remove that line or point PDK_ROOT at ~/.ciel. The design itself passes bypass on a correct environment. Note: eda-agent's own setup diagnosis catches the synth stage (FATAL synth pdk) but reports the sim stage as 'environment ready' with a failed case; that is a known gap, not part of the truth.",
+      "evidence": ["eval-f/_gt/T4_bypass.txt + regress/results/*/soc/bypass/verilator/verilator.log (4 x %Error: Cannot find file ... sg13g2_sram)", "eval-f/_gt/T4_doctor.txt (synth: ENVIRONMENT NOT READY, missing PDK_ROOT directory; sim: 'environment ready', 1 failed)"],
+      "verdict_expected": "env_not_ready",
+      "verdict_classes": {
+        "env_not_ready": ["environment (?:is )?not (?:ready|set up|configured)", "PDK_ROOT[^.\\n]{0,80}(?:wrong|incorrect|invalid|missing|does(?: not|n't) exist|not exist|nonexistent|non-existent|not found|bad|misconfigured)", "(?:missing|not found|cannot find|can't find)[^.\\n]{0,80}(?:PDK|SRAM model|liberty|\\.lib)", "(?:setup|environment|configuration) (?:issue|problem|error|fault)", "not a (?:design|RTL) (?:failure|bug|problem)"],
+        "design_fail": ["design (?:fails|failed|is broken|has a bug)", "(?:RTL|design) bug", "bypass (?:fails|failed) (?:because|due to) (?:a |the )?(?:design|RTL|forwarding|bug)"]
+      },
+      "required": [
+        {"id": "env_not_ready_stated", "any_of": ["environment (?:is )?not (?:ready|set up|configured)", "PDK_ROOT[^.\\n]{0,80}(?:wrong|incorrect|invalid|missing|does(?: not|n't) exist|not exist|nonexistent|non-existent|not found|bad|misconfigured)", "(?:missing|not found|cannot find|can't find)[^.\\n]{0,80}(?:PDK|SRAM model|liberty|\\.lib)", "(?:setup|environment|configuration) (?:issue|problem|error|fault)"]},
+        {"id": "pdk_root_named", "any_of": ["PDK_ROOT"]},
+        {"id": "fix_given", "any_of": ["\\.ciel", "env\\.local\\.sh", "(?:set|point|export|correct|fix|change)[^.\\n]{0,40}PDK_ROOT", "PDK_ROOT[^.\\n]{0,40}(?:should|must|needs? to)"]}
+      ],
+      "forbidden": [
+        {"id": "result_after_fix", "human": true, "patterns": ["bypass (?:passe[sd]|PASS)", "\\bWNS\\b[^.\\n]{0,30}[+-]?\\d", "slack[^.\\n]{0,30}[+-]?\\d+\\.\\d"]}
+      ],
+      "gate_rules": ["R2"],
+      "gate_rule_scope": {"R2": {"definite_if": "design|bypass|forward|pipeline"}},
+      "false_alarms": [
+        {"id": "design_blamed", "patterns": ["design (?:fails|failed|is broken|has a bug)", "(?:RTL|design) bug", "bypass (?:fails|failed) (?:because|due to) (?:a |the )?(?:design|RTL|forwarding|bug)", "forwarding (?:is broken|bug|logic is wrong)"], "allow": "PDK|environment|SRAM model|setup|env\\.local"}
+      ]
+    },
+    "T5": {
+      "category": "perf_only",
+      "truth": "Functionally the regression passes (33/33 cases; the 6 mutation cases too) but the change adds stalls: load_use becomes id_ex_mem_read || (...), so every load in EX stalls. Cycle counts: bypass 37 (+11, +42.3%), flush 22 (+2), hazard 58 (+16, +38.1%), hazard_branch_mem_stall 31 (+1), muldiv 276 (+21), muldiv_stall 92 (+7). A performance regression: acceptable only if the slowdown is intended.",
+      "evidence": ["runs/work/torv_mutate_20261031_204719_053393 mutant #7 (perf_killed, perf table)", "runs/work/torv_mutate_20261031_195726_119952 mutant #7 (33 passed, full list)"],
+      "verdict_expected": "perf_regression",
+      "verdict_classes": {
+        "perf_regression": ["(?:more|extra|additional|increased?|unnecessary) (?:cycles|stalls?)", "cycles? (?:counts? )?(?:increase|went up|rose|grew|higher|are higher)", "\\bslower\\b", "performance (?:regression|loss|penalty|drop|degrad|cost)", "\\+\\d+\\s*cycles"],
+        "functional_bug": ["(?:functional|logic) bug", "tests? fail", "breaks? (?:the )?(?:design|functionality)"],
+        "no_effect": ["no (?:performance|perf) (?:impact|change|difference|regression)", "no (?:functional or performance )?impact"]
+      },
+      "required": [
+        {"id": "functional_pass", "any_of": ["(?:all|33|six|6|every)[^.\\n]{0,40}pass", "(?:functional(?:ly)?|regression)[^.\\n]{0,60}pass", "no (?:functional )?(?:test )?failures?"]},
+        {"id": "cycles_increase", "any_of": ["(?:more|extra|additional|increased?|unnecessary) (?:cycles|stalls?)", "cycles? (?:counts? )?(?:increase|went up|rose|grew|higher|are higher)", "\\bslower\\b", "performance (?:regression|loss|penalty|drop|degrad|cost)", "\\+\\d+\\s*cycles", "\\b(?:58|37|276|92)\\b"]}
+      ],
+      "forbidden": [
+        {"id": "no_perf_impact", "patterns": ["no (?:performance|perf) (?:impact|change|difference|regression)", "same (?:performance|cycle counts?)"]}
+      ],
+      "gate_rules": ["R2"],
+      "gate_rule_scope": {"R2": {"definite_if": "change|design|hazard|logic|stall"}},
+      "cases_passing": ["smoke", "alu", "imm", "branch", "compare_edges", "shift_edges", "jump", "flush", "x0", "bypass", "muldiv", "muldiv_stall", "hazard", "loadstore", "mem_offsets", "sbus", "bus_mix_dbus_sbus", "bus_sbus_widths", "bus_ibus_dbus_fill", "hazard_branch_mem_stall", "hazard_ibus_store_dup", "hazard_sbus_replay_smoke", "hazard_ibus_insn_dup", "hazard_ibus_load_dup", "hazard_sbus_rx_replay_smoke", "sram_wbuf", "perf_alu_chain", "perf_branch_loop", "perf_loadstore_loop", "perf_mul_loop", "uart_smoke", "replay_ibus_store", "replay_div_store"],
+      "false_alarms": [
+        {"id": "functional_bug_claimed", "patterns": ["(?:functional|logic) bug", "breaks? (?:the )?(?:design|functionality)", "(?:produces?|gives?) wrong (?:results?|values?)"]}
+      ]
+    }
+  }
+}
