@@ -141,8 +141,9 @@ def localise_html(r: dict, link) -> str:
     waves = [c for c in r.get("checks_run", []) if c["tool"] == "waveform_query" and c.get("status") == "pass"]
     if not tables and not waves:
         return ""
-    h = ["<h2>Failure localisation (diagnosis)</h2>", f'<p class="note">{_e(NOTE)}</p>']
-    h += [table_html(tb, link) for tb in tables]
+    h = ["<style>.loc td code{white-space:nowrap}</style>",
+         "<h2>Failure localisation (diagnosis)</h2>", f'<p class="note">{_e(NOTE)}</p>']
+    h += [f'<div class="loc">{table_html(tb, link)}</div>' for tb in tables]
     mark = _failing_time(r)
     for c in waves[-2:]:
         m = c.get("metrics") or {}
