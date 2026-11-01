@@ -42,6 +42,8 @@ RULES = [
     ("mutation: the original checkout changed during the run", "fatal"),
     ("the receipt changed after its decision", "fatal"),
     ("import: the report fails its category's rule, or could not be judged", "fatal"),
+    ("the report cites a lesson or document that does not exist or was not retrieved in this run, or uses "
+     "one as evidence (gate R10), and the gate rejected it", "fatal"),
     ("a reviewer finding of severity high or medium (incl. rule-based errors: multiple drivers, "
      "width truncation, latches, blocking assignment in a clocked block)", "error"),
     ("the gate needed rewrites before it passed", "error"),
@@ -62,6 +64,8 @@ RULES = [
     ("timing is a pre-PnR estimate only", "warning"),
     ("mutation: surviving or likely-equivalent mutants", "warning"),
     ("the model-written summary was rejected by the gate", "warning"),
+    ("lessons or documents were given to the agent as hints (never evidence); the context was compacted "
+     "(the gate and reviewers read the full trace)", "warning"),
     ("import: input files the report names were not found here; waived items; the tool was not run by "
      "eda-agent", "warning"),
     ("a decision made with eda-agent code older than the receipt's own, or that does not meet the approval "
@@ -261,6 +265,21 @@ def assess(r: dict) -> list[Issue]:
                      f"now {content_sha256(saved)[:12]}…)", source="receipt")
     if r["gate"]["status"] == "rejected":
         add("fatal", "The evidence gate rejected the final report", source="gate")
+        last = (r["gate"]["decisions"] or [{}])[-1]
+        r10 = [x for x in last.get("reasons", []) if x.startswith("(R10)")]
+        if r10:
+            add("fatal", "The report cites memory (a lesson or document) that does not exist, was not "
+                         "retrieved in this run, or is used as evidence (R10)", quote=r10[0], source="gate")
+    mem = r.get("memory") or {}
+    if mem.get("used_as_hints"):
+        n = len(mem["used_as_hints"])
+        c = sum(1 for u in mem["used_as_hints"] if u.get("cited"))
+        add("warning", f"{n} lesson(s)/document section(s) were given to the agent as hints ({c} cited in the "
+                       "report); hints are not evidence", source="memory")
+    if mem.get("compactions"):
+        add("warning", f"The context was compacted {len(mem['compactions'])} time(s) (turns replaced by a "
+                       "code-built run-state table); the gate and reviewers read the full trace",
+            source="memory")
     if r["stop_reason"] not in ("end", "gate_rejected"):
         add("fatal", f"The run did not end normally (stop reason {r['stop_reason']})", source="run")
     if r.get("tool_errors"):

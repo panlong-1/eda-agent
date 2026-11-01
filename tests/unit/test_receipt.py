@@ -35,6 +35,7 @@ async def test_receipt_records_checks_gaps_and_gate(tmp_path):
     assert (receipt["stop_reason"], receipt["status"], receipt["gate"]["status"]) == ("end", "done", "passed")
     (check,) = receipt["checks_run"]
     assert check.pop("duration_s") >= 0
+    assert check.pop("result_id") == "r2"
     assert check == {"tool": "regress", "args": {"cases": ["bypass", "hazard"]}, "status": "pass",
                      "evidence_level": "E2", "summary": "2 passed, 0 failed",
                      "claim_scope": "these cases passed", "tool_versions": {},

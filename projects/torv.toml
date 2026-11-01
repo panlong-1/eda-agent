@@ -97,3 +97,12 @@ config = "librelane/config.yaml"
 baseline = "full_p10"
 copy_exclude = [".git", "build", "regress/results", ".torv_last_case_build_dir", "docs"]
 timeout_s = 10800
+
+# Memory (plan §0.16): documents retrieved as cited hints (doc:<id>#<section>), never evidence; the
+# design's lessons are in <[pnr] experience_dir>/torv/lessons.jsonl. Compaction defaults are kept.
+[memory]
+docs = [
+    { id = "torv-spec", path = "spec/RV32IM_Current_Implementation.md" },
+    { id = "torv-flow", path = "docs/open_source_flow.md" },
+    { id = "torv-addrmap", path = "docs/torv_address_map.md" },
+]

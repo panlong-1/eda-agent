@@ -31,8 +31,11 @@ lets an overclaim through.
   R9 category   "lint/CDC/RDC clean", "DFT passed", "test coverage N%", "formally equivalent" cite a
                 result of that category with its numbers; categories never stand in for each
                 other; see r9_categories.py
+  R10 memory    lesson ids and doc:<doc>#<section> citations exist and were retrieved in this run, are
+                marked as hints or sources, and never confirm anything without a tool result of this
+                run named in the same sentence; see r10_memory.py
 
-One module per rule (r1_citations.py .. r9_categories.py), common.py for what they share; this
+One module per rule (r1_citations.py .. r10_memory.py), common.py for what they share; this
 module runs them all (check_report) and keeps every name importable from agent.gate.
 """
 from __future__ import annotations
@@ -51,6 +54,7 @@ from .r6_tests import RISE_CLAIMS, TEST_CLAIMS, check_tests  # noqa: F401
 from .r7_perf import PERF_CLAIMS, PERF_SAME_CLAIMS, check_perf, perf_numbers  # noqa: F401
 from .r8_signoff import check_signoff
 from .r9_categories import check_categories
+from .r10_memory import check_memory
 
 
 def check_report(report: str, results: list[dict]) -> GateDecision:
@@ -62,7 +66,7 @@ def check_report(report: str, results: list[dict]) -> GateDecision:
     reasons = (check_citations(claims, envelopes) + check_strength(claims, envelopes)
                + check_timing(claims, envelopes) + check_tests(claims, envelopes) + check_perf(claims, envelopes)
                + check_signoff(claims, envelopes) + check_categories(claims, envelopes)
-               + check_residual(residual))
+               + check_memory(report, results) + check_residual(residual))
     if not reasons:  # R4 needs the residual-risk section, so it is checked once R1-R3 pass
         reasons = check_skipped(residual, results)
     return GateDecision(passed=not reasons, reasons=reasons, max_level=max_level)

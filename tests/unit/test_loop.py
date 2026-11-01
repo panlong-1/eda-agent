@@ -32,7 +32,7 @@ async def test_tool_round_trip_and_usage(tmp_path):
     assert kinds == ["start", "turn", "tool", "turn", "gate", "end"]
     (check,) = report.checks
     assert check.pop("duration_s") >= 0
-    assert check == {"tool": "lint", "args": {}, "result": {"status": "pass", "evidence_level": "E0"}}
+    assert check == {"id": "r1", "tool": "lint", "args": {}, "result": {"status": "pass", "evidence_level": "E0"}}
 
 
 async def test_retry_budget_stops_after_two_consecutive_errors():

@@ -19,6 +19,7 @@ from pathlib import Path
 from ...core.envelope import EVIDENCE_LEVELS
 from ...core.version import code_version
 from ...core.snapshot import consistency
+from ...core.memory import DOC_REF, LESSON_ID
 from ..gate import described_cases, executed_cases, split_residual, timing_results
 from ..loop import RunReport
 
@@ -40,7 +41,7 @@ def receipt_id(r: dict) -> str:
 
 def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, project: str,
                   all_cases: list[str], trace: str = "", prompt: str = "", sdc_origin: str = "",
-                  project_root: str = "") -> dict:
+                  project_root: str = "", hints: list[dict] | None = None) -> dict:
     envelopes = [c for c in report.checks if c["result"] and c["result"].get("evidence_level") in EVIDENCE_LEVELS]
     others = [c for c in report.checks if all(c is not e for e in envelopes)]
     # Same definitions as gate rule R4, so the receipt and the gate never disagree.
@@ -58,6 +59,7 @@ def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, p
     return {
         "run_id": run_id,
         "task": task,
+        **memory_record(report, hints),
         "provider": provider,
         "model": report.model,
         "prompt": prompt,
@@ -68,6 +70,7 @@ def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, p
         "status": report.status,
         "gate": {"status": gate_status, "rewrites": max(0, len(report.gate) - 1), "decisions": report.gate},
         "checks_run": [{
+            **({"result_id": c["id"]} if c.get("id") else {}),
             "tool": c["tool"],
             "args": c["args"],
             "status": c["result"].get("status"),
@@ -106,6 +109,32 @@ def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, p
         "case_sources": {k["name"]: k["source"] for x in results if x.get("tool") == "describe_case"
                          for k in x.get("cases", []) if isinstance(k, dict) and k.get("name") and k.get("source")},
     }
+
+
+def memory_record(report: RunReport, hints: list[dict] | None) -> dict:
+    """Plan §0.16: the hints the run was given or found (lessons and document sections, as hints, never
+    evidence) and whether the report cites each; the compactions; every get_result fetch."""
+    if hints is None and not report.compactions and not report.fetches:
+        return {}
+    text = report.final_text or ""
+    cited = {m.group(0).lower() for m in LESSON_ID.finditer(text)} | {m.group(0).lower() for m in DOC_REF.finditer(text)}
+    used = [{**{k: h.get(k) for k in ("kind", "id", "status", "source", "note")}, "how": "hint at start"}
+            for h in hints or []]
+    for f in report.fetches:
+        for i in f.get("ids", []):
+            if all(u["id"] != i for u in used):
+                used.append({"kind": "doc" if i.startswith("doc:") else "lesson", "id": i, "status": "",
+                             "source": "", "note": "", "how": f"search_memory at turn {f['turn']}"})
+    for u in used:
+        u["cited"] = u["id"].lower() in cited
+    return {"memory": {
+        "used_as_hints": used,
+        "compactions": report.compactions,
+        "fetches": [f for f in report.fetches if f["tool"] == "get_result"],
+        "searches": [{k: f.get(k) for k in ("turn", "query", "ids")} for f in report.fetches
+                     if f["tool"] == "search_memory"],
+        "note": "lessons and documents are hints, not evidence; the gate and reviewers read the full trace, "
+                "not the compacted context"}}
 
 
 def _timing(result: dict, void: list[dict]) -> dict:
