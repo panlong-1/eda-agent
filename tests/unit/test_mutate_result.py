@@ -30,10 +30,11 @@ def _setup(tmp_path: Path, now: str) -> tuple:
 
 
 def _receipt(env: dict) -> dict:
-    """The smallest agent-run receipt levels.assess accepts, around one mutate result."""
+    """The smallest agent-run receipt levels.assess accepts, around one mutate_result call (the receipt
+    names the check by the tool the agent called)."""
     return {"run_id": "r", "status": "done", "stop_reason": "end", "tool_errors": 0,
             "gate": {"status": "passed", "rewrites": 0, "decisions": []},
-            "checks_run": [{"tool": "mutate", "args": {}, "status": env["status"], "evidence_level": "E0",
+            "checks_run": [{"tool": "mutate_result", "args": {}, "status": env["status"], "evidence_level": "E0",
                             "summary": env["summary"], "metrics": env["metrics"], "tool_versions": {"avl": "1"}}],
             "not_run": {"described_but_not_run": [], "cases_not_run": [], "lint_run": True}}
 

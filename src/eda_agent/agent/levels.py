@@ -383,7 +383,7 @@ def assess(r: dict) -> list[Issue]:
                                  "eat it", source=tool)
             add("warning", f"{tool}: timing is a pre-PnR estimate (no wire parasitics, ideal clocks), not signoff",
                 source=tool)
-        if tool == "mutate":
+        if tool in ("mutate", "mutate_result"):   # mutate_result: a recorded mutate run read back
             rec = m.get("recorded")
             if rec and rec.get("file_changed") is not False:
                 add("error", f"mutate: recorded run {rec.get('mutate_run')} mutated an earlier version of "
