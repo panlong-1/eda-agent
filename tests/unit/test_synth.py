@@ -87,12 +87,14 @@ def test_unknown_flow_key_is_rejected(tmp_path):
         load_project(path)
 
 
-def test_missing_flow_input_is_a_bad_config_error(tmp_path):
+def test_missing_flow_input_is_a_setup_error(tmp_path):
+    # A missing input is "environment not ready" (plan §0.11), with the fix, not a design result.
     (tmp_path / "x").mkdir()
     project = load_project(_flow_project(tmp_path / "x", sdc="nope.sdc"))
     r = run_synth(project, work_base=tmp_path / "runs")
-    assert (r.status, r.error_class, r.evidence_level) == ("error", "bad_config", "E4")
-    assert "nope.sdc" in r.summary
+    assert (r.status, r.error_class, r.evidence_level) == ("error", "setup", "E4")
+    assert "nope.sdc" in r.summary and r.summary.startswith("environment not ready (synth)")
+    assert [i for i in r.metrics["setup_issues"] if "nope.sdc" in i["missing"] and i["who"] == "person"]
 
 
 def test_project_without_flow_refuses_cleanly():

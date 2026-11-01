@@ -19,6 +19,7 @@ from ..tools.perf import run_perf
 from ..tools.testcase import run_score_tests, run_test_context, run_write_case
 from ..tools.regress import run_regress
 from ..tools.rtl_rules import run_rtl_rules
+from ..tools.setup import run_setup as _run_setup
 from ..tools.synth import run_check_sdc, run_synth
 
 INSTRUCTIONS = (
@@ -67,6 +68,19 @@ def build_server(project: Project) -> MCPServer:
     ))
     def rtl_rules(max_diagnostics: int = 30) -> dict:
         return attach(run_rtl_rules(project, max_diagnostics=max_diagnostics), project).to_dict()
+
+    steps = project.setup.steps
+    steps_what = (" && ".join(" ".join(s) for s in steps) if steps else
+                  "none approved for this project: the tool will refuse")
+
+    @server.tool(description=(
+        f"Run the project's approved setup steps ({steps_what}) in the project root, in order, and nothing "
+        "else. Use it when a result says 'environment not ready' and its fix is an approved [setup] step; then "
+        "run the failed check again. Fixes that say 'a person' (installs, downloads not in [setup], SDC, PDK) "
+        "are for the person: report them, do not work around them. Evidence level E0."
+    ))
+    def run_setup() -> dict:
+        return attach(_run_setup(project), project).to_dict()
 
     flow = project.flow
     target = (f"top '{flow.top}', clock {flow.clock_port} at {flow.clock_period:g} ns, SDC {flow.sdc}"

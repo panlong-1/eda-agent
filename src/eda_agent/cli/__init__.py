@@ -2,6 +2,7 @@
 
     eda-agent init ~/project/mydesign --out projects/mydesign.toml       (draft a project config)
     eda-agent doctor --project projects/mydesign.toml                   (is everything there?)
+    eda-agent doctor --deep [--stage sim|synth|pnr]                      (one real run per stage: what is missing)
     eda-agent check  --project projects/torv.toml [--full]              (fixed lint/regress[/synth] task)
     eda-agent mutate --project projects/torv.toml --file rtl/x.sv       (mutation run, no model)
     eda-agent perf --project projects/torv.toml                         (cycle counts, no model)

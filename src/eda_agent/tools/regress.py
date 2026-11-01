@@ -13,7 +13,8 @@ from pathlib import Path
 from ..core.envelope import Diagnostic, ToolResult
 from ..core.proc import check_allowed
 from ..core.project import CaseSpec, Project, RegressConfig, case_specs, project_env, project_versions
-from .formats import exitcode, junit, torv
+from ..core.setup_issues import blocking, classify, context, dedupe, precheck, summary
+from .formats import Outcome, exitcode, junit, torv
 
 FORMATS = {"torv": torv, "junit": junit, "exitcode": exitcode}
 
@@ -33,6 +34,52 @@ def _case_args(cfg: RegressConfig, spec: CaseSpec) -> list[str]:
     if spec.args:
         return list(spec.args)
     return [cfg.case_flag, spec.name] if cfg.case_flag else []
+
+
+def _case_output(outcome: Outcome, name: str) -> str:
+    log = outcome.logs.get(name)
+    if log and Path(log).is_file():
+        return Path(log).read_text(errors="replace")
+    return outcome.diags.get(name, "")
+
+
+def _setup_blocked(project: Project, outcome: Outcome) -> tuple[list[str], list[dict]] | None:
+    """(cases, issues) when failed cases did not get to test anything: their output matches the setup
+    rule table, not the fail pattern, and the testbench printed no summary of its own."""
+    cfg = project.regress
+    ctx = context(project)
+    cases, issues = [], []
+    for name, status, _ in outcome.rows:
+        if status != "FAIL" or name in outcome.subtests:
+            continue
+        text = _case_output(outcome, name)
+        if cfg.fail_regex and re.search(cfg.fail_regex, text, re.M):
+            continue
+        if found := blocking(classify(text, "sim", ctx)):
+            cases.append(name)
+            issues += found
+    return (cases, issues) if cases else None
+
+
+def _not_ready(project: Project, scope: str, versions: dict, issues: list[dict], cases: list[str],
+               outcome: Outcome | str) -> ToolResult:
+    """A regression that could not run its tests: Fatal "environment not ready", never a test failure."""
+    issues = dedupe(issues + blocking(precheck(project, "sim")))
+    rows = outcome.rows if isinstance(outcome, Outcome) else []
+    passed = [r[0] for r in rows if r[1] == "PASS"]
+    failed = [r[0] for r in rows if r[1] == "FAIL" and r[0] not in cases]
+    return ToolResult(
+        "regress", "error", "E2", scope,
+        summary=f"{summary(issues)}. {len(passed)} passed, {len(failed)} failed; "
+                f"{len(cases) or 'all'} case(s) could not run: this is not a test result",
+        metrics={"setup_issues": issues, "setup_blocked_cases": cases, "passed_cases": passed,
+                 "failed_cases": failed, "format": project.regress.format,
+                 "case_logs": outcome.logs if isinstance(outcome, Outcome) else {}},
+        diagnostics=[Diagnostic("error", "SETUP", f"{i['missing']}: {i['suggestion']}") for i in issues[:10]],
+        diagnostics_total=len(issues),
+        artifacts=outcome.artifacts if isinstance(outcome, Outcome) else [],
+        tool_versions=versions, error_class="setup",
+        residual_risk=["the environment was not ready: no conclusion about the design follows from this run"])
 
 
 def run_regress(project: Project, cases: list[str] | None = None, max_diagnostics: int = 10,
@@ -65,8 +112,12 @@ def run_regress(project: Project, cases: list[str] | None = None, max_diagnostic
                           summary=f"regression timed out after {cfg.timeout_s} s",
                           tool_versions=versions, error_class="timeout")
     if isinstance(outcome, str):
+        if issues := blocking(classify(outcome, "sim", context(project))):
+            return _not_ready(project, scope, versions, issues, [], outcome)
         return ToolResult("regress", "error", "E2", scope, summary=outcome,
                           tool_versions=versions, error_class="infra")
+    if blocked := _setup_blocked(project, outcome):
+        return _not_ready(project, scope, versions, blocked[1], blocked[0], outcome)
 
     rows = outcome.rows
     failed = [r for r in rows if r[1] == "FAIL"]

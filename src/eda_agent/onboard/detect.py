@@ -13,6 +13,8 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..core.setup_issues import SETUP_TARGET_NAMES, producer, read_makefile
+
 SKIP_DIRS = {".git", "build", "runs", "node_modules", ".venv", "venv", "__pycache__"}
 MAKE_TEST_TARGETS = ("regress", "regression", "test", "tests", "check", "sim", "test_verilator")
 # What testbenches print at the end; the first one found in tb/ or test sources becomes the pattern.
@@ -35,6 +37,7 @@ class Detection:
     regress: dict[str, Guess] = field(default_factory=dict)
     flow: dict[str, Guess] = field(default_factory=dict)
     versions: dict[str, Guess] = field(default_factory=dict)
+    setup: dict[str, Guess] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
 
 
@@ -135,6 +138,27 @@ def fusesoc_lint_setup(root: Path, core_name: str, fusesoc: str) -> tuple[Path |
     return (vcs[-1] if vcs else None), shown
 
 
+def setup_steps(makefile: Path, regress_cmd) -> list[tuple[list[str], str]]:
+    """Proposed [setup] steps with where each came from: targets with a usual preparation name
+    (vendor, regs, gen, ...; fetching first), and the targets that write a prerequisite of the test
+    target that is neither in the checkout nor built by a rule of its own."""
+    targets = read_makefile(makefile)
+    test = regress_cmd[1] if isinstance(regress_cmd, list) and regress_cmd[:1] == ["make"] and \
+        len(regress_cmd) > 1 else None
+    already = set(targets[test].prereqs) if test in targets else set()
+    out: dict[str, str] = {}
+    for name in SETUP_TARGET_NAMES:
+        if name in targets and name != test:
+            out[name] = (f"Makefile target `{name}` (already a prerequisite of `{test}`)" if name in already
+                         else f"Makefile target `{name}`")
+    for pre in targets[test].prereqs if test in targets else []:
+        if pre in targets or (makefile.parent / pre).exists():
+            continue
+        if found := producer(pre, targets):
+            out.setdefault(found[0], f"`{test}` needs {pre}: {found[1]}")
+    return [(["make", t], why) for t, why in out.items()]
+
+
 def detect(root: Path, run_fusesoc: bool = True) -> Detection:
     root = root.resolve()
     det = Detection(root=root, name=Guess(root.name, "directory name"))
@@ -233,6 +257,13 @@ def detect(root: Path, run_fusesoc: bool = True) -> Detection:
         det.notes.append(f"SDC found ({', '.join(sdcs)}) but no LibreLane config"
                          + (f"; the Makefile sets CLK_PERIOD = {period}" if period else "")
                          + ". To run synth, add a [flow] section by hand (see projects/torv.toml)")
+
+    # --- [setup]: steps that prepare the checkout before the regression can run ---------
+    if makefile.is_file() and (steps := setup_steps(makefile, det.regress["cmd"].value)):
+        det.setup["steps"] = Guess([s for s, _ in steps], "; ".join(why for _, why in steps), confirm=True)
+    if (root / ".gitmodules").is_file():
+        det.notes.append(".gitmodules found: if the submodules are not checked out, a person runs "
+                         "`git submodule update --init --recursive` (a download)")
 
     # --- versions ---------------------------------------------------------------------
     det.versions["verilator"] = Guess(["verilator", "--version"], "every project lints with Verilator")

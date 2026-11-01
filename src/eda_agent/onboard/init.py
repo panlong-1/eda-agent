@@ -44,6 +44,10 @@ def render(det: Detection, date: str, env_script: str | None = None) -> str:
         out += ["", "# Synthesis and timing (synth, check_sdc): read from the LibreLane config;",
                 "# PDK library settings come from the built-in preset for its PDK."]
         out += ["[flow]"] + [_line(k, g) for k, g in det.flow.items()]
+    if det.setup:
+        out += ["", "# Steps that prepare the checkout (fetch IP, generate files). The agent may run these and",
+                "# only these (run_setup, doctor --deep): delete every step you do not approve.",
+                "[setup]"] + [_line(k, g) for k, g in det.setup.items()]
     if det.notes:
         out += ["", "# Notes from init:"] + [f"# - {n}" for n in det.notes]
     return "\n".join(out) + "\n"

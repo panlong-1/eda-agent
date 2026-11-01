@@ -31,6 +31,8 @@ HOLD_MARGIN_NS = 0.10
 # the human gate and the receipt's own facts.
 RULES = [
     ("a check ended in error or timeout, or failed", "fatal"),
+    ("environment not ready: a stage could not run for a setup problem (core/setup_issues.py), shown with "
+     "the rule-based fix; not a test failure", "fatal"),
     ("a tool call of the run ended in an error", "fatal"),
     ("the run stopped early (budget, retries)", "fatal"),
     ("the evidence gate rejected the report after its rewrites", "fatal"),
@@ -50,6 +52,7 @@ RULES = [
     ("a check has no tool versions recorded", "error"),
     ("small timing slack: setup under 10 % of the clock period, or hold under 0.1 ns", "error"),
     ("a timing result is void (the SDC changed later in the run)", "error"),
+    ("a setup issue in a check that still ran (e.g. a flow run with a signoff deck missing)", "error"),
     ("the SDC is not the design's own (sdc_origin, e.g. a hand translation)", "error"),
     ("the run was approved over the gate (--override)", "error"),
     ("a review failed to run", "error"),
@@ -60,6 +63,7 @@ RULES = [
     ("only part of the case list ran; lint was not run; no independent review", "warning"),
     ("pass/fail comes from the testbench's own self-check or exit status", "warning"),
     ("timing is a pre-PnR estimate only", "warning"),
+    ("a non-blocking setup finding, e.g. a behavioural memory synthesized to flip-flops", "warning"),
     ("mutation: surviving or likely-equivalent mutants", "warning"),
     ("the model-written summary was rejected by the gate", "warning"),
     ("import: input files the report names were not found here; waived items; the tool was not run by "
@@ -280,7 +284,16 @@ def assess(r: dict) -> list[Issue]:
         # A perf result that only reports slower cases is not a broken result: a slowdown may be the
         # price of a functional fix. It is an Error (approve with a reason), never Fatal.
         slow_only = tool == "perf" and c["status"] == "fail" and not m.get("failed_cases") and m.get("slower")
-        if c["status"] != "pass" and not slow_only:
+        setup = [i for i in m.get("setup_issues") or [] if isinstance(i, dict)]
+        not_ready = c["status"] in ("error", "timeout") and any(i.get("blocking", True) for i in setup)
+        for i in setup:
+            # A setup problem is not a test failure: the stage could not run. The fix comes from rules.
+            fix = (f"fix ({'approved [setup] step' if i.get('who') == 'setup_step' else 'a person'}): "
+                   f"{i.get('suggestion', '')}; evidence: {i.get('evidence', '')}")
+            level = ("warning" if not i.get("blocking", True) else "fatal" if not_ready else "error")
+            add(level, f"Environment not ready ({i.get('stage', '?')}): missing {i.get('missing', '?')}",
+                quote=fix, source=tool)
+        if c["status"] != "pass" and not slow_only and not not_ready:
             add("fatal", f"{tool} ended with status {c['status']}",
                 quote=c["summary"].splitlines()[0] if c["summary"] else "", source=tool)
         if tool == "perf":
@@ -355,7 +368,9 @@ def assess(r: dict) -> list[Issue]:
             if m.get("likely_equivalent"):
                 add("warning", f"mutate: {m['likely_equivalent']} mutant(s) likely equivalent (not a proof)",
                     source=tool)
-    missing = [c["tool"] for c in r["checks_run"] if not c.get("tool_versions")]
+    # A check that stopped on a setup problem ran no tool, so it has no version to record.
+    missing = [c["tool"] for c in r["checks_run"] if not c.get("tool_versions")
+               and not (c["status"] in ("error", "timeout") and (c.get("metrics") or {}).get("setup_issues"))]
     if missing:
         add("error", f"No tool versions recorded for: {', '.join(missing)}; the result cannot be tied to a "
                      "tool release", source="run")

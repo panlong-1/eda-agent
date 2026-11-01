@@ -30,7 +30,8 @@ def _init(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 2
     print(f"draft written: {path}")
-    confirm = [f"[{s}] {k}" for s, d in (("lint", det.lint), ("regress", det.regress), ("flow", det.flow))
+    confirm = [f"[{s}] {k}" for s, d in (("lint", det.lint), ("regress", det.regress), ("flow", det.flow),
+                                                     ("setup", det.setup))
                for k, g in d.items() if g.confirm]
     if confirm:
         print("check these first: " + ", ".join(confirm))

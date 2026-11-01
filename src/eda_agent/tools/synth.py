@@ -22,6 +22,7 @@ from ..core.hashing import sha256_file
 from ..core.numbers import parse_float
 from ..core.proc import docker_command, image_digest, run
 from ..core.project import FlowConfig, Project, expand_vars, project_env, read_command_file, read_filelist
+from ..core.setup_issues import blocking, classify, context, precheck, summary
 from .lint import source_path
 
 WORK_DIR = Path("runs/flow")
@@ -278,6 +279,9 @@ def _synthesize(project: Project, setup: _Setup, work: Path, tool: str, level: s
         return ToolResult(tool, "timeout", level, scope, summary=f"yosys timed out after {flow.timeout_s} s",
                           error_class="timeout"), {}
     if proc.returncode != 0:
+        if issues := blocking(classify(log + "\n" + proc.output, "synth", context(project))):
+            return not_ready(tool, level, scope, issues, [artifact(work / "yosys.log")]
+                             if (work / "yosys.log").is_file() else []), {}
         errors = [a or b for a, b in _YOSYS_ERROR.findall(log + "\n" + proc.output)]
         if not errors:
             return ToolResult(tool, "error", level, scope, error_class="infra",
@@ -312,9 +316,21 @@ def _sta(project: Project, setup: _Setup, work: Path, corner: str, liberty: Path
     return proc.output if proc.returncode is not None else None
 
 
+def not_ready(tool: str, level: str, scope: str, issues: list[dict], artifacts: list[dict] | None = None
+              ) -> ToolResult:
+    """The stage could not run: Fatal "environment not ready" with the fixes, never a design result."""
+    return ToolResult(tool, "error", level, scope, summary=summary(issues), error_class="setup",
+                      metrics={"setup_issues": issues}, artifacts=artifacts or [],
+                      diagnostics=[Diagnostic("error", "SETUP", f"{i['missing']}: {i['suggestion']}")
+                                   for i in issues[:10]], diagnostics_total=len(issues),
+                      residual_risk=["the environment was not ready: no conclusion about the design follows"])
+
+
 def _prepare(project: Project, tool: str, level: str, scope_t: str) -> tuple[ToolResult | None, _Setup | None, str]:
     if refused := _refuse(tool, level, project):
         return refused, None, scope_t
+    if issues := blocking(precheck(project, "synth")):
+        return not_ready(tool, level, "Nothing was synthesized or timed.", issues), None, scope_t
     setup = _Setup(project)
     sha = sha256_file(setup.sdc) if setup.sdc.is_file() else "missing"
     scope = scope_t.format(top=setup.flow.top, lib=setup.liberty.name, sdc=setup.flow.sdc, sha=sha,
@@ -364,7 +380,9 @@ def run_synth(project: Project, work_base: Path = WORK_DIR) -> ToolResult:
     if not timed or any(d.code == "NO_CLOCK" for d in diags):
         return ToolResult("synth", "error", level, scope, error_class="no_timing",
                           summary="OpenSTA found no constrained path: check the SDC with check_sdc",
-                          diagnostics=diags, tool_versions=versions, metrics={"sdc_sha256": sdc_sha, **facts})
+                          diagnostics=diags, tool_versions=versions, metrics={
+                              "sdc_sha256": sdc_sha, **facts,
+                              "setup_issues": classify("\n".join(d.msg for d in diags), "synth")})
     worst_corner = min(timed, key=lambda c: timed[c]["setup_wns"])
     wns = timed[worst_corner]["setup_wns"]
     hold = min((r["hold_wns"] for r in timed.values() if r["hold_wns"] is not None), default=None)

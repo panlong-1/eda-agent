@@ -194,6 +194,22 @@ class PerfConfig:
 
 
 @dataclass(frozen=True)
+class SetupConfig:
+    """Approved preparation steps ([setup]): commands a person wrote into the config, e.g.
+    steps = [["make", "vendor"], ["make", "regs"]]. The agent may run only these, in this order, from
+    the project root and through the command allowlist (tools/setup.py); each run is recorded."""
+    steps: tuple[tuple[str, ...], ...] = ()
+    timeout_s: int = 1800               # per step
+    probe_case: str = ""                # `doctor --deep`: the smallest regression case; default: the first
+
+    def __post_init__(self) -> None:
+        if any(not s or not all(isinstance(a, str) and a for a in s) for s in self.steps):
+            raise ValueError('[setup] steps must be non-empty lists of strings, e.g. [["make", "regs"]]')
+        if self.timeout_s < 1:
+            raise ValueError("[setup] timeout_s must be positive")
+
+
+@dataclass(frozen=True)
 class Project:
     name: str
     root: Path
@@ -210,6 +226,16 @@ class Project:
     perf: PerfConfig | None = None          # None: perf refuses (no [perf] section)
     pnr: PnrConfig | None = None            # None: flow_report and flow_run refuse (no [pnr] section)
     tests: NewTestsConfig | None = None     # None: write_case / score_tests refuse (no [tests])
+    setup: SetupConfig = field(default_factory=SetupConfig)  # no [setup]: no step may run
+
+
+def _setup(data: dict | None) -> SetupConfig:
+    if data is None:
+        return SetupConfig()
+    unknown = set(data) - set(SetupConfig.__dataclass_fields__)
+    if unknown:
+        raise ValueError(f"unknown [setup] key(s) {sorted(unknown)}")
+    return SetupConfig(**{k: tuple(tuple(s) for s in v) if k == "steps" else v for k, v in data.items()})
 
 
 def _tests(data: dict | None) -> NewTestsConfig | None:
@@ -278,6 +304,7 @@ def load_project(path: str | Path) -> Project:
         perf=_perf(data.get("perf"), Path(path)),
         pnr=load_pnr(data.get("pnr")),
         tests=_tests(data.get("tests")),
+        setup=_setup(data.get("setup")),
         lint=LintConfig(
             top=lint["top"],
             filelists=tuple(lint.get("filelists", ())),
