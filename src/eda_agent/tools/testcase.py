@@ -18,6 +18,7 @@ the [tests] register line in the case list) for a person to apply after approval
 from __future__ import annotations
 
 import difflib
+import hashlib
 import json
 import re
 from collections import Counter
@@ -115,6 +116,44 @@ def run_test_context(project: Project, mutate_run: str, mutant: int, max_lines: 
                      + (f"; output must not match /{cfg.fail_regex}/" if cfg.fail_regex else ""),
         "perf_key": project.perf.key if project.perf else None,
     }
+
+
+def run_mutate_result(project: Project, mutate_run: str, max_diff_lines: int = 40,
+                      work_base: Path = WORK_DIR) -> dict:
+    """A finished mutate run read back (nothing is mutated or run): its recorded result, and whether the
+    file it mutated is still the one in the project root. A run of an earlier version of the file says
+    nothing about the current one, so the change is shown and flagged (levels: Error)."""
+    d = work_base / mutate_run
+    run = load_mutate_run(mutate_run, work_base)
+    if isinstance(run, str) or not (d / "envelope.json").is_file():
+        return {"tool": "mutate_result", "status": "error", "evidence_level": "E0", "error_class": "bad_request",
+                "claim_scope": "Nothing was read.",
+                "summary": run if isinstance(run, str) else f"{mutate_run} has no envelope.json"}
+    env = json.loads((d / "envelope.json").read_text())
+    rel = run["file"]
+    then_file, now_file = d / "w0" / rel, project.root / rel
+    then = then_file.read_bytes() if then_file.is_file() else None
+    now = now_file.read_bytes() if now_file.is_file() else None
+    diff = list(difflib.unified_diff(then.decode(errors="replace").splitlines(), now.decode(errors="replace").splitlines(),
+                                     f"{rel} (mutate run)", f"{rel} (now)", lineterm="", n=0)) \
+        if then is not None and now is not None else []
+    changed = None if then is None or now is None else then != now
+    env["metrics"]["recorded"] = {
+        "mutate_run": mutate_run,
+        "file_sha256_then": hashlib.sha256(then).hexdigest() if then is not None else None,
+        "file_sha256_now": hashlib.sha256(now).hexdigest() if now is not None else None,
+        "file_changed": changed, "diff": diff[:max_diff_lines],
+    }
+    env["claim_scope"] = (f"Read back from the recorded mutate run {mutate_run}; nothing was mutated or run now. "
+                          + ("The file has changed since that run: these facts are about its earlier version, "
+                             "not the current one. " if changed else
+                             "The file could not be compared with the one that run mutated. " if changed is None
+                             else "The file is unchanged since that run. ") + env.get("claim_scope", ""))
+    if changed is not False:
+        env["residual_risk"] = [*env.get("residual_risk", []),
+                                f"{rel} differs from (or could not be compared with) the version mutate run "
+                                f"{mutate_run} mutated: its kill facts do not cover the current file"]
+    return env
 
 
 # ---- running one test in a copy --------------------------------------------------------------
