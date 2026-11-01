@@ -1,0 +1,107 @@
+# secworks/aes (https://github.com/secworks/aes, BSD-2-Clause): AES-128/256 core in Verilog.
+# Second design for eda-agent (plan: generality check). Drafted by `eda-agent init`, completed by
+# hand; see the onboarding notes in docs/ for what init missed.
+name = "aes"
+root = "~/project/aes"
+
+[env_defaults]
+PDK_ROOT = "~/.ciel"
+
+[versions]
+verilator = ["verilator", "--version"]
+iverilog = ["iverilog", "-V"]
+fusesoc = ["fusesoc", "--version"]
+
+# The design's own `make lint` (toolruns/Makefile): the RTL files themselves. init proposed
+# FuseSoC's command file instead, but that lists FuseSoC's copy under build/, which a mutant copy
+# of the design neither has nor changes.
+[lint]
+top = "aes"
+files = [
+    "src/rtl/aes.v", "src/rtl/aes_core.v", "src/rtl/aes_key_mem.v", "src/rtl/aes_sbox.v",
+    "src/rtl/aes_inv_sbox.v", "src/rtl/aes_encipher_block.v", "src/rtl/aes_decipher_block.v",
+]
+flags = ["+1364-2001ext+", "-Wall", "-Wno-fatal", "-Wno-DECLFILENAME"]
+
+# The design's own Makefile (toolruns/), Icarus Verilog. Every testbench exits 0 whatever happens,
+# so the verdict is its summary line: "*** All NN test cases completed successfully" or
+# "*** NN tests completed - NN test cases did not complete successfully." (--- in the encipher tb).
+# Case names are the testbench names, so each case's waveform is toolruns/<name>.vcd (always dumped).
+[regress]
+format = "exitcode"
+cmd = ["make", "-s", "-C", "toolruns"]
+pass_regex = '^(\*\*\*|---) All \d+ test cases completed successfully'
+fail_regex = 'ERROR: (TC \d+|Testcase) NOT successful|did not complete successfully'
+summary_regex = '^(?:\*\*\*|---) (?:All (?P<passed>\d+) test cases completed successfully|(?P<total>\d+) tests completed - (?P<failed>\d+) test cases did not complete successfully)'
+timeout_s = 600
+waves_flag = "WAVES=1"   # make variable, ignored by the Makefile: the testbenches always dump
+waves_file = "toolruns/{name}.vcd"
+
+[[regress.cases]]
+name = "tb_aes_key_mem"
+args = ["sim-keymem"]
+source = "src/tb/tb_aes_key_mem.v"
+description = "Key expansion (aes_key_mem with aes_sbox): round keys for 128- and 256-bit NIST keys against expected values."
+
+[[regress.cases]]
+name = "tb_aes_encipher_block"
+args = ["sim-encipher"]
+source = "src/tb/tb_aes_encipher_block.v"
+description = "Encipher block alone: ECB-mode encryption of NIST test vectors with 128- and 256-bit keys."
+
+[[regress.cases]]
+name = "tb_aes_decipher_block"
+args = ["sim-decipher"]
+source = "src/tb/tb_aes_decipher_block.v"
+description = "Decipher block alone (with aes_inv_sbox): ECB-mode decryption of NIST test vectors with 128- and 256-bit keys."
+
+[[regress.cases]]
+name = "tb_aes_core"
+args = ["sim-core"]
+source = "src/tb/tb_aes_core.v"
+description = "aes_core: key init, then encrypt and decrypt of NIST ECB vectors, 128- and 256-bit keys (20 test cases)."
+
+[[regress.cases]]
+name = "tb_aes"
+args = ["sim-top"]
+source = "src/tb/tb_aes.v"
+description = "Top level aes with its 32-bit register interface: write key/block, start, poll ready, read result; NIST ECB vectors, encrypt and decrypt, 128- and 256-bit keys (20 test cases)."
+
+[mutation]
+files = ["src/rtl/aes_encipher_block.v", "src/rtl/aes_decipher_block.v", "src/rtl/aes_key_mem.v", "src/rtl/aes_core.v"]
+cases = ["tb_aes_key_mem", "tb_aes_encipher_block", "tb_aes_decipher_block", "tb_aes_core", "tb_aes"]
+copy_exclude = [".git", "build", "librelane/runs"]
+jobs = 4
+timeout_s = 600
+
+# Synthesis + pre-PnR timing (synth, check_sdc). Mirrors librelane/config.yaml (added for eda-agent,
+# not part of the upstream repo). The clock period is the upstream sky130 config's 25.9 ns.
+[flow]
+top = "aes"
+files = [
+    "src/rtl/aes_sbox.v", "src/rtl/aes_inv_sbox.v", "src/rtl/aes_key_mem.v",
+    "src/rtl/aes_encipher_block.v", "src/rtl/aes_decipher_block.v", "src/rtl/aes_core.v", "src/rtl/aes.v",
+]
+sdc = "librelane/constraints.sdc"
+clock_port = "clk"
+clock_period = 25.9
+image = "ghcr.io/librelane/librelane:3.0.16"
+pdk = "ihp-sg13g2"
+pdk_root = "${PDK_ROOT}"
+liberty = "${PDK_ROOT}/ihp-sg13g2/libs.ref/sg13g2_stdcell/lib/sg13g2_stdcell_typ_1p20V_25C.lib"
+dont_use_file = "${PDK_ROOT}/ihp-sg13g2/libs.tech/librelane/sg13g2_stdcell/synth_exclude.cells"
+tie_hi = "sg13g2_tiehi/L_HI"
+tie_lo = "sg13g2_tielo/L_LO"
+buffer = "sg13g2_buf_1/A/X"
+abc_driving_cell = "sg13g2_buf_4"
+abc_load = 6.0
+
+[flow.corners]
+typ = "${PDK_ROOT}/ihp-sg13g2/libs.ref/sg13g2_stdcell/lib/sg13g2_stdcell_typ_1p20V_25C.lib"
+slow = "${PDK_ROOT}/ihp-sg13g2/libs.ref/sg13g2_stdcell/lib/sg13g2_stdcell_slow_1p08V_125C.lib"
+fast = "${PDK_ROOT}/ihp-sg13g2/libs.ref/sg13g2_stdcell/lib/sg13g2_stdcell_fast_1p32V_m40C.lib"
+
+[pnr]
+config = "librelane/config.yaml"
+copy_exclude = [".git", "build", "librelane/runs", "toolruns"]
+timeout_s = 10800

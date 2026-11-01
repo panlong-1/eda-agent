@@ -9,6 +9,7 @@ import json
 import os
 import signal
 import subprocess
+import uuid
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
@@ -40,8 +41,20 @@ def run(cmd: list[str], cwd: Path, env: dict[str, str], timeout_s: int) -> ProcR
         return ProcResult(proc.returncode, out)
     except subprocess.TimeoutExpired:
         os.killpg(proc.pid, signal.SIGKILL)
+        _kill_container(cmd)
         out, _ = proc.communicate()
         return ProcResult(None, out)
+
+
+def _kill_container(cmd: list[str]) -> None:
+    """Killing `docker run` leaves its container running under the daemon: kill it by name too."""
+    if cmd[:2] != ["docker", "run"] or "--name" not in cmd:
+        return
+    name = cmd[cmd.index("--name") + 1]
+    try:
+        subprocess.run(["docker", "kill", name], capture_output=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
 
 
 def check_allowed(cmd: list[str], root: Path, extra: tuple[str, ...] = ()) -> str | None:
@@ -77,13 +90,15 @@ def docker_command(image: str, inner: list[str], mounts: list[tuple[Path, bool]]
                    extra_images: tuple[str, ...] = (), env: dict[str, str] | None = None,
                    workdir: str | None = None) -> list[str] | str:
     """`docker run` of an allowed program in an allowed image, as the calling user and without
-    network; else the reason it may not run. mounts: (host path, writable), each at the same path."""
+    network; else the reason it may not run. mounts: (host path, writable), each at the same path.
+    The container gets a unique name so a timeout can kill it (see run)."""
     if image_repo(image) not in ALLOWED_IMAGES | set(extra_images):
         return (f"image {image!r} is not allowed: add its repository to allowed_images in the project "
                 f"config if it should run (built in: {', '.join(sorted(ALLOWED_IMAGES))})")
     if not inner or Path(inner[0]).name not in ALLOWED_COMMANDS:
         return f"command {inner[:1]!r} is not allowed inside the container"
-    cmd = ["docker", "run", "--rm", "--network", "none", "-u", f"{os.getuid()}:{os.getgid()}"]
+    cmd = ["docker", "run", "--rm", "--name", f"eda_agent_{uuid.uuid4().hex[:12]}", "--network", "none",
+           "-u", f"{os.getuid()}:{os.getgid()}"]
     for path, writable in mounts:
         cmd += ["-v", f"{path}:{path}" + ("" if writable else ":ro")]
     for k, v in (env or {}).items():

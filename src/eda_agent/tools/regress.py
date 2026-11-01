@@ -85,15 +85,21 @@ def _not_ready(project: Project, scope: str, versions: dict, issues: list[dict],
 MAX_WAVE_CASES = 2  # waveforms are large: dump them for the failing case(s) only
 
 
-def waves_files(cfg: RegressConfig, logs: dict[str, str], names: list[str]) -> dict[str, str]:
-    """Case -> waveform file the regression wrote for it (only files that exist)."""
+def waves_files(cfg: RegressConfig, logs: dict[str, str], names: list[str], root: Path) -> dict[str, str]:
+    """Case -> waveform file the regression wrote for it (only files that exist). A waves_file
+    without {case_dir} is relative to the design root (e.g. toolruns/{name}.vcd), so it also
+    points into a copy of the design, never back at the original."""
     out = {}
     for name in names:
+        uses_case_dir = "{case_dir}" in cfg.waves_file
         case_dir = str(Path(logs[name]).parent) if name in logs else ""
-        p = Path(cfg.waves_file.format(name=name, case_dir=case_dir))
-        if case_dir or p.is_absolute():
-            if p.is_file():
-                out[name] = str(p)
+        if uses_case_dir and not case_dir:
+            continue
+        p = Path(cfg.waves_file.format(name=name, case_dir=case_dir)).expanduser()
+        if not p.is_absolute():
+            p = root / p
+        if p.is_file():
+            out[name] = str(p)
     return out
 
 
@@ -152,7 +158,7 @@ def run_regress(project: Project, cases: list[str] | None = None, max_diagnostic
                "passed_cases": [r[0] for r in passed], "failed_cases": [r[0] for r in failed],
                "format": cfg.format, "case_logs": outcome.logs}
     if waves:
-        metrics["waves"] = waves_files(cfg, outcome.logs, [r[0] for r in rows])
+        metrics["waves"] = waves_files(cfg, outcome.logs, [r[0] for r in rows], project.root)
     sub_text = ""
     if outcome.subtests:
         totals = {k: sum(s.get(k, 0) for s in outcome.subtests.values()) for k in ("passed", "failed", "total")}
