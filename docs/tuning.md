@@ -96,6 +96,13 @@ a changed knob brings.)
 
 ## Example (TORV)
 
+`tune_torv_d1` (DeepSeek, budget 2 runs, receipt `docs/examples/m41_tune_torv_d1.receipt.md`, awaiting
+approval): from `m4_e5_1` (slow-corner setup WNS -0.725 ns, 26 violating endpoints),
+`PL_TIMING_DRIVEN=true` gave -0.541 ns (8 endpoints); adding `GRT_RESIZER_SETUP_SLACK_MARGIN=0.1` gave
+-0.377 ns (5 endpoints); DRC, LVS and antenna stayed 0. One proposal (`RUN_POST_GRT_DESIGN_REPAIR`) was
+rejected before running. Both hypotheses are supported by one run each; signoff at 100 MHz still fails
+at the slow corner. The patch is `docs/examples/m41_tune_torv_d1.config.patch`.
+
 `examples/tune/forbidden.json` holds two deliberately forbidden proposals (`CLOCK_PERIOD` 11 ns;
 `RUN_MAGIC_DRC` false). `eda-agent tune --proposal-file examples/tune/forbidden.json` rejects both
 as Fatal before anything runs; the receipt records them and needs `--override` to approve.
