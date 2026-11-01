@@ -1,721 +1,92 @@
 # eda-agent
 
-An evidence-gated agent for digital chip design. It drives open-source EDA tools
-(Verilator; Yosys and OpenSTA in the LibreLane container) through an MCP server, and every tool
-answers with a typed envelope that says **what the check proved and what it did not**.
+An evidence-gated agent for digital chip design. It drives open-source EDA tools (Verilator; Yosys,
+OpenSTA and LibreLane in the LibreLane container) through an MCP server, and every tool answers
+with a typed envelope that says **what the check proved and what it did not**: an evidence level
+(E0 lint … E2 simulation … E3 mutation-scored tests … E4 synthesis estimate … E5 signoff), a
+`claim_scope` and a `residual_risk`. Before a run ends, a plain-code evidence gate checks the
+agent's report against those results, so "lint clean" never becomes "works" and "regression
+passes" never becomes "the tests would catch a bug". An independent reviewer (configurable
+independence I0–I3, plus a rule-based reviewer) reads the results, and a person approves or
+rejects the run from a receipt that shows every Fatal / Error / Warning item first. Nothing in
+`src/` is specific to one design: a design is one TOML file.
 
-Status: **M2** — synthesis with a pre-PnR timing estimate under the project's SDC (E4),
-an SDC completeness check, gate rule R5 for timing claims, an independent reviewer with
-configurable independence (I0–I3) plus a rule-based reviewer, and a human gate: a run that
-passes the evidence gate waits in `awaiting_approval` until a person approves it.
-(M1: case descriptions, regression result formats, PicoRV32, evidence gate, receipts.)
+## Status
 
-## Why
+Layer by layer, on the TORV rv32m SoC (the vertical slice every feature is tried on first):
 
-A passing check only proves the property the checker looked at. "Lint clean" is not
-"works", and "regression passes" is not "the tests would catch a bug". The agent
-is built so that it cannot blur these: each result carries an evidence level
-(E0 lint … E2 simulation … E5 signoff), a `claim_scope` and a `residual_risk`, and
-a plain-code gate checks the final report against those results before the run ends.
+| layer | done | not yet |
+|---|---|---|
+| lint (E0) | Verilator lint with parsed diagnostics; fixed RTL rules (blocking/non-blocking, width truncation, latches, multiple drivers, reset polarity) | other linters (planned through import plug-ins) |
+| regression, perf (E2) | the project's own regression read as `torv`, `junit` or `exitcode` (+ the testbench's own summary line); cycle counters per case against a baseline a person approved; gate R7 | coverage; cocotb and UVM log formats |
+| mutation, write-tests (E3, mutation-scored) | source-level mutants (avl-core) run in copies, equivalence check, `perf_killed`; a fixed loop in which a model writes tests that `score_tests` must see kill the mutant twice; gate R6 | one module per mutate run; a new test enters the regression only after a person applies the patch |
+| synth, pre-PnR STA (E4) | Yosys + OpenSTA per corner under the project's SDC (hash recorded), `check_sdc`; gate R5; IHP SG13G2 preset | other PDK presets; it stays an estimate before placement |
+| LibreLane signoff (E5-partial) | `flow_report` / `flow_run`: fixed signoff rules (setup, hold, propagated clock, DRC, LVS, antenna), comparisons, run history; gate R8; flow adapters | gate-level simulation with post-route SDF and VCD power, so no full E5; ORFS and commercial adapters |
+| review, human gate, receipts | rule-based and I0–I3 model reviewers; `approve` / `reject` / `pending` with one Fatal / Error / Warning policy; receipts (.json/.md/.html) for runs, write-tests and imports; a local review page | a cross-vendor I3 needs a second provider's key |
+| lineage, snapshot | a design snapshot on every result; one-design checks for results used together; LibreLane lineage (8 stages, `final/` copies checked) | imported reports name their RTL only with `--rtl-manifest` |
+| plug-ins | importers and flow adapters as entry points; contract tests; human-set waivers and targets; gate R9 | commercial importers live in a private package, not here |
 
-## Layout
+## Results so far
 
-```
-src/eda_agent/
-  core/                  shared parts; depend on nothing else in eda_agent, no tool and no model
-    envelope.py          ToolResult: status, evidence_level, claim_scope, metrics, diagnostics, sha256
-    project.py           per-design TOML: env script, filelists, regression entry point, case list
-    pnr.py               [pnr]: the project's RTL-to-GDS flow; settings no run may override
-    proc.py              subprocess with a hard timeout that also kills child processes; allowlist
-    flow_sources.py      [flow] from a LibreLane config; PDK presets (IHP SG13G2)
-    settings.py          finds eda-agent.toml; personal defaults in ~/.config/eda-agent/config.toml
-    snapshot.py          design snapshots and lineage consistency: do results describe one design?
-    categories.py        check categories of imported results (CDC, DFT, ...): their rules and numbers
-    standards.py         human-set waivers and targets for imported checks
-    hashing.py           sha256 of a file, of bytes, of JSON data (receipt content, snapshot)
-    numbers.py           parsing numbers from tool output, ranking levels, shortening text
-  plugins/               the public plug-in interface (docs/plugins.md); depends on core only
-    __init__.py          importer and adapter discovery (entry points), choose an importer
-    result.py            the neutral result an importer returns, and the core's validation of it
-    contract.py          contract checks every importer must pass
-  onboard/               connecting a new design (no model involved)
-    detect.py, init.py   eda-agent init: guess a draft config, each value with where it came from
-    doctor.py            eda-agent doctor: are the tools, files, image and API key all there?
-  tools/                 one EDA capability per file; each only returns an envelope (facts)
-    lint.py              Verilator --lint-only, parsed diagnostics (E0)
-    describe.py          what a regression case covers: source file + its leading comment
-    regress.py           the project's own regression (E2), read by one of formats/
-    formats/             torv.py | junit.py | exitcode.py: run cases, read results, claim_scope
-    synth.py             synth: Yosys + OpenSTA per corner in the project's container (E4);
-                         check_sdc: OpenSTA check_setup on the netlist (facts, E0)
-    rtl_rules.py         fixed RTL rules: Verilator BLKSEQ/COMBDLY/WIDTHTRUNC/LATCH/MULTIDRIVEN
-                         + a reset-polarity text scan (E0)
-    mutate.py            mutants (avl-core) of one RTL file, each run in a copy of the design
-                         against regression cases: kill matrix, survivors, perf_killed (E0)
-    testcase.py          test_context, write_case, score_tests: new tests against surviving mutants (E3)
-    perf.py              cycle counts and other testbench counters per case, against the
-                         person-approved baseline (E2); recording that baseline (CLI only)
-    flow.py              flow_report: a flow run judged by fixed signoff rules, compared with a
-                         baseline run and synth (E4, signoff_level E5-partial); flow_run (copy, no network)
-    flow_history.py      flow_history: the design's runs in two experience tables, knob effects, lessons (E0)
-    experience.py        the imported and eda_agent experience tables of each design
-    importing.py         eda-agent import: a report made elsewhere, judged by its category's rule
-    backends/            flow adapters: base.py (the neutral result, the adapter registry), librelane.py
-    reports/librelane.py reads one LibreLane run directory: metrics, STA, DRC, LVS, antenna, logs
-  server/mcp_server.py   MCP server (stdio): the tools above, one MCP tool each
-  agent/                 the agent runtime; reaches the tools only through MCP
-    models/              base.py (ModelAdapter protocol), anthropic.py, openai_compat.py (DeepSeek),
-                         scripted.py (for tests)
-    loop.py              tool loop with budgets: turns, tool calls, 2-strike retry stop; JSONL trace
-    gate/                evidence gate on the final report (no LLM), up to 2 rewrites: one module
-                         per rule, r1_citations.py .. r9_categories.py, common.py, and __init__.py
-                         (check_report runs them all)
-    model_output.py      a model's reply -> structured fields -> the evidence gate (reviewer,
-                         write-tests, the receipt summary)
-    reviewer.py          independent review I0-I3 (context assembled by code) + rule-based reviewer
-    testgen.py           write-tests: the fixed loop in which a model writes tests against mutants
-    levels.py            Fatal / Error / Warning: every rule in one table, used everywhere
-    human_gate.py        awaiting_approval / approve / reject / pending, recorded in the receipt
-    receipt/             one pipeline for every receipt (agent runs, write-tests, imports):
-      data.py            layer 1, what the receipt records (built from run report and envelopes)
-      tables.py          layer 2, the data tables (per check, findings, gate, cost)
-      summary.py         layer 2, the review summary a person reads first
-      markdown.py        layer 3, runs/<id>.receipt.md
-      page.py            layer 3, runs/<id>.receipt.html (self-contained)
-      files.py           writes the .json (with its levels) and both pages
-      narrative.py       optional model-written summary, checked by the evidence gate
-    sources.py           file references in a receipt, and which ones the review page may show
-    mcp_client.py        connects the loop to the MCP server
-  cli/                   eda-agent: one module per subcommand (run.py: run and check; decide.py:
-                         approve, reject, pending; flow.py: flow-*; plugins.py: import, plugins,
-                         standard; ...), common.py for what they share
-  review_ui.py           eda-agent review-ui: the receipts in a local page, decide by clicking
-  prompts/               system.v2.md (default; v1 kept), reviewer.v1.md, testgen.v3.md,
-                         testgen-review.v1.md, receipt_summary.v1.md, presets.v1.toml (the fixed
-                         tasks of `check`); names and versions are recorded in every receipt
-projects/torv.toml       TORV rv32m SoC (format torv)
-projects/picorv32.toml   YosysHQ PicoRV32 (format exitcode + pass/fail regex)
-examples/                fake_cdc_importer: a FAKE importer plug-in to copy (made-up format and data)
-tests/unit/              offline and free, a few seconds; test_architecture.py keeps the layers one-way
-tests/eda/               marker "eda": needs Verilator and the design checkouts; the synth test also
-                         needs docker, the LibreLane image and the IHP PDK (skipped otherwise)
-tests/fixtures/          recorded tool output and model replies
-docs/plugins.md          how to write an importer or a flow adapter
-docs/examples/           real run receipts: M1 (PicoRV32, TORV hazard task); M2 TORV end to end
-                         (lint, smoke, synth+STA, check_sdc, reviews rules/I2/I3) awaiting approval,
-                         a copy approved only to demonstrate the human gate; M4 TORV RTL-to-GDS
-runs/                    traces, receipts and logs of your runs (not in git)
-```
+- **Designs.** TORV (rv32m SoC, regression format `torv`, synthesis, timing and RTL-to-GDS on IHP
+  SG13G2) and PicoRV32 (format `exitcode` with pass/fail patterns), both in `projects/`; a third
+  design, a FuseSoC-based accelerator built from PULP IP, was connected with `init` and `doctor`
+  (its config is not in this repository).
+- **Mutation on TORV.** One mutate run of `rtl/torv_hazard_unit.sv`, 16 scored mutants: the
+  regression kills 75 % of them by results, 94 % counting cycle-count changes. The last gap,
+  mutant 3 (the `op` field cut from 7 to 6 bits, which only adds stalls), was closed by a
+  model-written timing test (`kind=perf`) that `score_tests` saw kill it in 2 of 2 runs and pass
+  2 of 2 on the unmodified design: kill rate with perf 94 % → 100 %, approved by a person.
+  Receipt: [docs/examples/m25_torv_write_tests.receipt.md](docs/examples/m25_torv_write_tests.receipt.md).
+- **RTL-to-GDS on TORV.** A fresh `flow_run` (`m4_e5_1`) gives signoff FAIL on setup only:
+  WNS −0.725 ns at the slow corner (26 endpoints), hold +0.101 ns, DRC (Magic, KLayout) 0, LVS
+  clean, antenna 0, 18,824 cells, die 508,267 µm², lineage complete over 8 stages. Every compared
+  metric equals the earlier run `full_p10_fwd` (delta 0, asserted by `tests/eda/test_flow_torv.py`).
+  Receipt: [docs/examples/m4_torv_e5_1.receipt.md](docs/examples/m4_torv_e5_1.receipt.md).
 
-Dependencies point one way, and `tests/unit/test_architecture.py` checks it on every run:
-`core` ← `plugins` ← `tools` ← `server`, `core` ← `agent`, `core` ← `onboard`; `cli` and
-`review_ui` sit on top. The agent never imports `tools`, so the MCP server can serve any other
-agent too. Plug-ins use only `eda_agent.plugins` and `eda_agent.tools.backends`. One import goes
-the other way on purpose: `plugins.load_adapters()` registers installed adapters in
-`tools/backends` (both are the public plug-in interface). Nothing in `src/` is specific to one
-design; that lives in `projects/*.toml`. Older module paths (`agent/receipt_view.py`,
-`agent/gate_signoff.py`, `cli_flow.py`, ...) still import; they only re-export the modules above.
-
-## Use
+## Quickstart
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/pytest -q -m "not eda"         # unit tests, no tools or API needed
-.venv/bin/pytest -q                      # + TORV and PicoRV32 integration (skipped if missing)
+python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # add ,mutation for mutate
+.venv/bin/pytest -q -m "not eda"                               # unit tests, no tools or API needed
 
-# MCP server alone (e.g. for Claude Code or another MCP client)
-.venv/bin/eda-mcp --project projects/torv.toml
-
-# the agent on Claude (needs ANTHROPIC_API_KEY)
-.venv/bin/eda-agent run --project projects/torv.toml "Lint the design and run the smoke case"
-
-# the agent on DeepSeek (needs DEEPSEEK_API_KEY)
-.venv/bin/eda-agent run --provider deepseek --project projects/torv.toml "Lint the design and run the smoke case"
-
-# ... with an independent review (rule-based + an I2 model reviewer), then a person decides
-.venv/bin/eda-agent run --provider deepseek --review I2 --project projects/torv.toml \
-    "Lint, run smoke, synthesize and estimate timing at the project clock"
-.venv/bin/eda-agent approve <run_id>                       # or:
-.venv/bin/eda-agent reject <run_id> --reason "slow corner too close"
-
-# review a finished run again, e.g. at I3 (another model), without re-running the author
-.venv/bin/eda-agent review <run_id> --review I3 --project projects/torv.toml
-
-# re-render a receipt's .md and .html from its .json, with the review summary in Chinese
-.venv/bin/eda-agent receipt <run_id> [--print] [--out-dir DIR]
-# ... and add a model-written summary (needs the API key)
-.venv/bin/eda-agent receipt <run_id> --narrate
-
-# decide by clicking: a local page with Approve / Pending / Reject (open the URL it prints)
-.venv/bin/eda-agent review-ui
-```
-
-Each run writes `runs/<id>.jsonl` (every model turn, tool call, gate decision, token
-count and wall time) and a receipt `runs/<id>.receipt.json`, rendered for people as
-`runs/<id>.receipt.html` and `.md` (see [Reading a receipt](#reading-a-receipt)): task, model,
-stop reason and gate status, the checks run (args, status, evidence level,
-claim_scope, artifact sha256), cases that were described or listed but not run,
-the final claims, residual risk, tokens and wall time. The CLI prints the receipt path
-and exits 0 only when the gate passed.
-
-### A second design: PicoRV32
-
-```bash
-git clone https://github.com/YosysHQ/picorv32 ~/project/picorv32
-.venv/bin/eda-agent run --provider deepseek --project projects/picorv32.toml \
-    "Lint the core and run the regression; report what passed"
-```
-
-Needs Verilator, `make` and `riscv64-unknown-elf-gcc` (the firmware is built for
-rv32imc with `TOOLCHAIN_PREFIX=riscv64-unknown-elf-`). Nothing in `src/` is specific to
-PicoRV32: `projects/picorv32.toml` names the top, the RTL file, the `make test_verilator`
-command and the pass/fail patterns, and describes its one case (`firmware`).
-
-### Adding a project
-
-Start from a draft instead of an empty file:
-
-```bash
-.venv/bin/eda-agent init ~/project/mydesign --out projects/mydesign.toml   # writes a DRAFT
+.venv/bin/eda-agent init ~/project/mydesign --out projects/mydesign.toml   # a DRAFT: read it, fix CHECK lines
 .venv/bin/eda-agent doctor --project projects/mydesign.toml --provider deepseek
-.venv/bin/eda-agent check  --project projects/mydesign.toml --provider deepseek    # lint + one case
-.venv/bin/eda-agent check  --project projects/mydesign.toml --provider deepseek --full
+.venv/bin/eda-agent check  --project projects/mydesign.toml --provider deepseek   # lint + one case
+.venv/bin/eda-agent review-ui                                  # open the URL it prints, or:
+.venv/bin/eda-agent approve <run_id>                           # what approve needs is in the receipt
 ```
 
-`init` reads what the repository already has: a FuseSoC `.core` (lint top and options; it
-runs `fusesoc run --setup --target lint` so Verilator gets FuseSoC's own command file), a
-LibreLane `config.yaml` (top, files, clock, SDC), `*.f` filelists, Makefile test targets or a
-regress script, and the pass/fail lines the testbench prints. Every value in the draft says
-where it came from; the ones marked `CHECK` are guesses a person must confirm. The draft is
-not used until a person has read it: the config decides what each check means. `doctor`
-then checks that every tool, file, container image and API key it names is there (key
-values are never printed). Put the file in the design directory as `eda-agent.toml` and
-`--project` can be left out; `~/.config/eda-agent/config.toml` holds personal defaults such
-as `provider = "deepseek"`, `review = "I2"` and `narrate = true` (a model-written summary in
-each receipt).
-
-Left out, a project gets defaults: lint flags `-Wall -Wno-fatal`, `[versions]` with
-Verilator, regress format `exitcode` with no case flag, and with no case list one case,
-`all`, that runs the whole command. The smallest config is seven lines:
-
-```toml
-name = "mycore"
-root = "~/project/mycore"
-[lint]
-top = "mycore"
-files = ["rtl/mycore.v"]
-[regress]
-cmd = ["make", "test"]
-```
-
-For a FuseSoC project `[lint]` can take `command_files` (Verilator `-f` files; lint runs
-from the file's directory, because its paths are relative to it), `external` (path prefixes
-of third-party code: their warnings are left out and counted in `external_warnings_dropped`)
-and `copy_of_root` (FuseSoC's copy of the core's own files under `build/`, mapped back to the
-original files so their warnings stay ours and point at the real lines).
-
-A project is one TOML file. `[lint]` gives the top and the files (`filelists` and/or
-`files`). `[regress]` gives the command and how to read its result:
-
-| `format` | reads | per-case detail | config |
-|---|---|---|---|
-| `torv` | `Result directory: <dir>` in the output, `<dir>/<summary_file>` rows `name,STATUS,detail` | yes | `case_list`, `case_flag`, `summary_file` |
-| `junit` | a JUnit XML file the run writes (rejected if not rewritten by this run) | yes, per `<testcase>` | `junit_file` |
-| `exitcode` | the exit status of one command per case, optionally confirmed by `pass_regex` / `fail_regex` | no: one status may cover many tests | `pass_regex`, `fail_regex` |
-
-An `exitcode` project can also name the testbench's own summary line with `summary_regex`,
-using named groups `passed`, `failed`, `total` (e.g. `scenario \S+: (?P<passed>\d+)/(?P<total>\d+)
-cases ok`). The counts then decide too: exit 0 and the pass pattern are not enough when the
-testbench reports a failure or prints no summary. They are reported as `subtests_passed` /
-`subtests_failed` / `subtests_total`, the gate accepts them as counts a report may cite, and
-the claim scope says they are the testbench's own count. `init` proposes the regex from a
-`$display("... %0d/%0d cases ok ...")` it finds in the testbench.
-
-Cases come from a `case_list` file (first column = name; the first later column that
-is an existing file is taken as the source for `describe_case`) or from inline
-`[[regress.cases]]` entries with `name`, `args`, `source` and `description`. Each format's
-`claim_scope` and `residual_risk` say what it can and cannot tell.
-
-Two optional top-level keys make results repeatable and keep the tools on a short leash:
-
-- `[versions]` maps a tool name to the command that prints its version, e.g.
-  `verilator = ["verilator", "--version"]`. Every regress result records them in
-  `tool_versions` (lint records Verilator's), and the receipt lists them.
-- `allowed_commands` adds programs a check may start. Tools only run commands from the
-  project config, never text from the model, and `core/proc.py` refuses anything that is
-  neither an open-source EDA program it knows (verilator, make, yosys, iverilog, sby, …)
-  nor an executable script inside the project root (`error_class: not_allowed`).
-
-Every trace (`runs/<id>.jsonl`) keeps each tool result whole, so a finished run can be
-replayed through a changed gate.
-
-### Synthesis and timing: `[flow]`
-
-`synth` runs Yosys (`read_slang` or `read_verilog -sv`, `synth -flatten`, `dfflibmap`, `abc`
-with fanout buffering) and then OpenSTA on the netlist under the project's own SDC, once per
-Liberty corner, inside the container image named in `[flow] image` (docker, as the calling
-user, no network, the design and PDK mounted read-only). It reports cells, area, latches,
-setup WNS/TNS, hold WNS and the worst path per corner; the worst corner decides `status`.
-The envelope records the SDC's sha256 (also as an artifact), the image digest and the
-Yosys/OpenSTA versions, and its `claim_scope` says: an estimate under this SDC, before
-placement and routing. `check_sdc` runs OpenSTA `check_setup` (clocks on the configured
-port, unconstrained endpoints, loops) and reports facts at E0: a complete SDC raises no level.
-
-The SDC is a design input written by people; the tools only read it. `[flow]` names it with
-`top`, `files`/`filelists`, `sdc`, `clock_port`, `clock_period` (also handed to the SDC as
-`$::env(CLOCK_PERIOD)`, as LibreLane does), `liberty`, `[flow.corners]`, `image`, `pdk_root`
-and PDK details (`dont_use_file`, tie and buffer cells, ABC driving cell and load). Most of this
-need not be copied: `librelane = "librelane/config.yaml"` reads top, files, include dirs,
-frontend, Booth multiplier, clock and SDC from the LibreLane config, and a known PDK
-(`ihp-sg13g2` today) fills the library, corner and cell settings; keys written in `[flow]`
-win. A test checks that these two lines give exactly the same setup as the hand-written
-section in `projects/torv.toml`. For a FuseSoC design, `command_files` takes the synth
-target's file list as a Verilator command file (`fusesoc run --setup --target synth --tool
-verilator <core>`); the design's own files are read from the checkout through
-`lint.copy_of_root`, because FuseSoC rewrites its copy for whichever target was set up last.
-Library cells instantiated in the RTL (an integrated clock gate, say) come from the Liberty
-file as blackboxes; any other unknown module still fails `hierarchy -check`. TORV's section mirrors its `librelane/config.yaml`; on TORV the estimate is within about 0.7 ns of
-LibreLane's own pre-PnR STA per corner. A project without `[flow]` (PicoRV32 today) gets a
-clean `not_configured` refusal. Containers come from an allowlist (`ghcr.io/librelane/librelane`
-built in; `allowed_images` adds more) and may only start allowlisted programs.
-When the SDC is not the design's own (a hand translation of other constraints, say), write
-that in `[flow] sdc_origin = "..."`: every receipt copies it and the review summary asks
-the approver to look at it.
-
-### Mutation runs: `[mutation]`
-
-`mutate` asks which small bugs the project's own regression would miss. It makes `count`
-mutants of one RTL file, each a single source-level change (an operator swapped, a branch
-forced open or shut, a register update dropped, a signal delayed one cycle, …), applies each
-alone in a copy of the design and runs the chosen regression cases on it. A mutant is
-*killed* when at least one case fails and *survives* when all pass; the result lists, per
-mutant, `file:line`, the line before → after, and which cases killed it (also as
-`kill_matrix.csv` and `report.md` in the run's work directory). Survivors are test gaps, not
-design bugs, so the level is E0: facts for the later `score_tests` step (E3).
-
-```bash
-.venv/bin/pip install -e ".[mutation]"     # avl-core, which generates the mutants
-eda-agent mutate --project projects/torv.toml --file rtl/torv_hazard_unit.sv --count 20 --confirm-full
-```
-
-- **Mutants** come from [avl-core](https://github.com/projectapheleia/avl)'s
-  `avl-mutation-testing` (MIT): sites found in the slang syntax tree, the change spliced into
-  the source, so the diff reads like a code review. avl-core uses pyslang's byte offsets as
-  string offsets, which garbles every mutant of a file with a non-ASCII character (TORV's
-  comments have `→`); `mutate` hands it an ASCII stand-in with the same byte positions and
-  carries each change back to the real file.
-- **Copies.** `[mutation] copy_exclude` lists what is not copied (build and result
-  directories) and is emptied after each mutant; `jobs` copies run in parallel. The run
-  refuses if any environment variable still points into the original checkout, and records
-  whether the checkout's git status and the target file stayed the same (`root_unchanged`).
-- **Golden first.** The unmodified design must pass the same cases in the copy; otherwise
-  nothing is judged. Each mutant is linted first: one that does not compile is `invalid`,
-  not counted as caught.
-- **Equivalent mutants.** Some changes cannot be seen from outside (reversing a port's bit
-  numbering, say). Survivors are checked with a bounded Yosys SAT miter of the mutated module
-  against the original (the same check avl-core uses, run in the `[flow]` image with slang);
-  one with no difference is `likely_equivalent` and left out of the kill rate. Module-level and
-  bounded, so neither verdict is a proof.
-- `--confirm-full` re-runs the survivors on the whole case list, so a survivor is reported as
-  missed by the entire regression, not only by the chosen cases.
-- **Slower but still right.** A self-checking test only looks at results, so a mutant that just
-  adds pipeline stalls passes everything. With a `[perf]` section, a mutant whose cases all
-  pass but whose cycle count moves (against the unmodified design in the same copy) is
-  `perf_killed`, reported apart from functional kills; the kill rate is given both ways.
-
-### New tests against surviving mutants: `[tests]`, `write-tests`
-
-```bash
-eda-agent write-tests --project projects/torv.toml --mutate-run <runs/work dir of a mutate run> \
-    --mutants 3 --provider deepseek
-```
-
-A fixed loop in code (`agent/testgen.py`); the model only writes the test text. Per mutant:
-`test_context` (the change, the module, two example tests) → the model writes one test →
-`write_case` puts it in `generated/<run_id>/` and runs it on the unmodified design in a copy
-(a failure goes back to the model, at most twice) → `score_tests` → if the target survives,
-a new attempt (at most three). `score_tests` gives E3 only when the test passes twice on the
-unmodified design, fails on the target in both of two runs, and lists every other mutant of
-that mutate run it kills (or only slows), with the kill rate before and after; then it writes
-a patch (the test file plus a case-list line). A fresh model call reviews the test (it sees
-the test, the diff and the measured facts, not the author's reasoning), and the run waits for
-a person: `eda-agent approve <run_id>`, then `git apply` the patch in the design. eda-agent
-never writes into the design. A gap that could not be closed is reported as such.
-
-`[tests]` needs one line, `run` (runs one test file: `{file}`, `{name}`); optional `log` (where
-the detailed output is), `register` (the case-list line in the patch) and `examples`. Pass/fail
-is judged as for the regression. New tests check results the specification defines (registers,
-memory), not timing; a test whose header says `kind=perf` checks cycles and is counted apart.
-The same loop fits a UVM bench (a test class run with `+UVM_TESTNAME={name}`, judged by
-UVM_ERROR/UVM_FATAL counts). eda-agent currently runs on open-source simulators; commercial
-simulators (needed for full UVM) are planned, and need only a different `run` command.
-
-### Performance: `[perf]`
-
-`perf` runs regression cases and reads the counters the testbench already prints, with the
-regexes in `[perf] patterns` (named groups: `cycles`, `instr`, `ipc`, stall counts, …); `key`
-picks the number that decides slower / same / faster. Each case's output comes from the
-regression format (TORV: the case's `.sim.log`; exitcode: its log), or from `log = "...{case}..."`.
-
-```bash
-eda-agent perf --project projects/torv.toml                  # table per case, kept in runs/perf/
-eda-agent perf-baseline runs/perf/torv_<time>.json --by NAME   # a person makes it the baseline
-```
-
-"Slower" needs a reference, and like the SDC it is a human decision: the baseline
-(`projects/<name>.perf-baseline.json`, case → expected value, tolerance) is written only by
-`eda-agent perf-baseline`; no MCP tool can touch it, and `perf` records its sha256. Tightening
-is recorded as is; anything that loosens it (a case slower, a larger tolerance, a dropped case)
-needs `--allow-loosen --reason`, and the old baseline stays in its `history`. `perf` is E2:
-numbers for these programs in RTL simulation, nothing about clock frequency or other workloads.
-
-### RTL-to-GDS: `[pnr]`
-
-`flow_report` reads a finished LibreLane run (the design's own `runs/<tag>/`) and runs nothing
-heavy; `flow_run` makes a new run. `[pnr]` names the LibreLane config; everything else defaults.
-
-```toml
-[pnr]
-config = "librelane/config.yaml"
-baseline = "full_p10"          # run compared with by default
-# signoff_corners = [...]      # default: the run's STA_CORNERS
-# agent_may_run = false        # the MCP flow_run tool refuses unless true (about an hour of CPU)
-```
-
-```bash
-eda-agent flow-report full_p10_fwd --project projects/torv.toml [--baseline full_p10] [--with-synth]
-eda-agent flow-run --project projects/torv.toml --tag mytag [--dry-run]
-```
-
-**Signoff rules** (one table, `SIGNOFF_RULES` in `tools/flow.py`): post-route setup and hold
-worst slack ≥ 0 on every signoff corner, the post-route path reports time a propagated clock (no
-ideal clock left; a non-zero clock source latency is flagged, since one applied to one side only
-shifts every slack), DRC = 0 for every signoff DRC tool of the run (LibreLane: Magic and
-KLayout), LVS errors = 0 with a matching report, antenna-violating nets and pins = 0. Any rule failing → `fail`; a
-check that did not run → `error` (incomplete); else `pass`. Max slew/cap/fanout, IR drop and
-detailed-router DRC are reported as warnings. Metric counts are cross-checked against the
-report files they come from.
-
-**Evidence level.** E5 means post-route multi-corner STA + DRC/LVS + gate-level simulation +
-VCD power. LibreLane gives the first two, with vectorless power and no gate-level simulation of
-the routed netlist, so `metrics.signoff_level` is `E5-partial` and the envelope stays **E4**.
-`e5_parts` is the checklist: multi-corner post-route STA, propagated clock, all nets with
-parasitics, DRC, LVS, antenna, then the two a flow cannot give, gate-level simulation of the
-routed netlist with post-route SDF at slow and fast corners **with timing checks on**, and power
-from that simulation's activity with its annotation coverage and corners named. The envelope
-stays E4: the gate treats E5 as a functional level (R2), and a
-physical flow says nothing about function.
-
-**Which SDC.** A timing result is tied to its SDC (R5). LibreLane does not record the SDC's
-content, so `flow_report` decides how sure it is: `recorded` (flow_run wrote the hash next to
-the run), `unchanged_since_run` (git: no commit and no edit of the SDC since the run started),
-`mtime_before_run` (no git), else `changed_since_run` / `unknown`. Only the first three put an
-`sdc_sha256` in the result; otherwise no timing claim can cite it. The same check is done for
-the RTL files the run read (`inputs_changed`) and for the top (`OTHER_TOP`).
-
-**Comparisons**: against a baseline run (deltas, plus LibreLane keys that differ and what
-makes the two not comparable), against the same run's own pre-PnR STA, and against `synth`.
-**Setup diagnosis**: PDK and macro views, corner data and signoff decks the config names but
-that are missing, signoff steps switched off, and floorplan/PDN/macro/image errors in the logs
-(`setup_issues`, plan §0.11).
-
-**Back ends.** `[pnr] backend` picks a flow adapter (`tools/backends/`); `librelane` is the
-default and the only one so far. The adapter says how to run the flow (here in a container; a
-`remote` mode, e.g. a licensed server over SSH, or an `import` mode that only reads reports made
-elsewhere, fit the same interface), where its reports are, and how to read them into a
-back-end-neutral result. The signoff rules, E5 checklist, comparisons, run history, gate R8 and
-receipts read only that neutral result; a unit test drives all of them with a tiny fake
-adapter and no LibreLane file. Knob names stay the flow's own; runs of different back ends are
-compared on neutral numbers only and labelled "different backend". A second open-source adapter
-would most likely be OpenROAD-flow-scripts (both use OpenROAD; its `metrics.json` and reports
-look alike; LVS is not a default ORFS step, so it would show as missing). Currently open-source
-only; commercial adapters (place-and-route, STA, DRC/LVS, synthesis) are planned.
-
-**Design snapshot and lineage** (`core/snapshot.py`, plan §0.18). Every result carries a
-`snapshot`: `design_id` hashes the RTL files (per-file sha256, paths relative to the design root),
-the SDC and the PDK version; `id` adds defines, include directories, the flow config, tool versions
-and the image digest. The MCP server attaches the checkout's snapshot to every result that has no
-own one (lint, regress, synth, mutate, perf); a flow result carries the snapshot of the run's own
-inputs, `state: older` when its RTL or SDC changed after it ran. A flow result also carries its
-`lineage`: for LibreLane, the stages synthesis → place and route → RC extraction → post-route STA
-→ GDS streamout → DRC → LVS extraction → LVS with each stage's input and output files (sha256, and
-which stage produced each input), the check that every step started from the previous step's
-output, and that every `final/` file equals the step output it copies. Gate-level simulation,
-activity and power from it are listed as not part of the flow. `consistency()` checks results used
-together: same design where their RTL overlaps, same SDC, PDK, clock period and corner set, no
-older snapshot, no lineage break. synth's Yosys netlist and the flow's own synthesis are labelled
-"different netlist". Gate R8 refuses a multi-stage conclusion ("signoff passed", "ready for
-tapeout", "timing and power both met") unless its results are one snapshot with an unbroken lineage;
-the receipt shows the snapshots, the consistency facts and a lineage table with breaks marked.
-
-**Experience tables** (per design, never mixed): **imported** = runs found in the design's own
-runs directory, made outside eda-agent (provenance "imported, maker unknown", files with
-sha256); **eda_agent** = runs `flow_run` made for this design, one line each in
-`<[pnr] experience_dir>/<project>/eda_agent_runs.jsonl` (run id, config patch, image digest, SDC
-hash, source commit, the agent run that asked). A new design starts with an empty eda_agent
-table. A lesson from the imported table, or from another design, is a hypothesis ("from
-<design>, not verified here") until an eda-agent run of this design confirms it. `flow_report`
-says which table its run belongs to.
-
-**Run history** (`flow_history`, `eda-agent flow-history`, E0, plan §0.15 step 1): each table's
-runs (stage reached, config differences from the baseline,
-synthesis/pre-PnR and post-route numbers, runtime, provenance, source files with sha256). A knob's effect is
-reported only from two runs that differ in that key alone **and** read the same RTL, shown by an
-identical synthesized netlist or, for a synthesis knob, by the two runs starting within 15
-minutes; git alone cannot see uncommitted edits between runs. Anything else is "confounded",
-with every other difference listed. The comments above keys in the LibreLane config are checked
-against those pairs: a stated "N% area" is confirmed or contradicted numerically; otherwise the
-lesson is testable (numbers given), confounded (with indirect per-run numbers), or cannot be
-tested (the key never changed).
-
-`flow_run` copies the project root (minus `.git`, the design's runs and `copy_exclude`) under
-`[pnr] work_dir`, runs `librelane --manual-pdk` in the image with `--network none`, the PDK
-read-only and only the copy writable, writes the image digest, SDC sha256 and source commit
-next to the run, and reports it. One flow at a time (a lock file). Config overrides are limited
-to `allowed_overrides`; the SDC, clock port and period can never be overridden.
-
-## Evidence gate
-
-When the model ends its turn, `agent/gate/` checks the report against the tool
-results of this run. All rules are in that one file:
-
-- **R1 citations.** Every status/evidence-level pair the report cites ("regress: pass (E2)")
-  and every "N passed / N failed" count must come from a tool result of this run. A level
-  named as a requirement ("that would need E3") is not a citation.
-- **R2 strength.** Words that claim functional correctness (handles, correct, verified,
-  works, bug-free, … and Chinese equivalents such as 正确, 已验证) need a passing result at a
-  level that speaks about function, E3 (bit-exact comparison or mutants) or E5 (signoff with
-  gate-level simulation), and the same sentence must name that result (its tool or a case it
-  passed), so evidence on one check cannot vouch for another. E4 (synthesis, PPA) is above E3
-  on the ladder but never vouches for function. A sentence of the form "does not prove: A, B,
-  or gate-level functional correctness" lists limits after its colon, not claims. With E2 the report may only say which cases passed. A negation earlier in
-  the same clause ("does not show … correct") makes it a stated limit, not a claim, and so
-  are the list items that follow it ("not … handled, correct, or bug-free"); a clause with
-  more than a list connector before the word ("…, but the design is correct") is a new claim.
-- **R3 residual risk.** The report must have a section headed "Residual risk" with content.
-- **R4 skipped cases.** A case the agent read with `describe_case` but did not run must be
-  named in that section, so that leaving out a relevant test is stated, not silent.
-- **R5 timing.** A timing claim ("meets 100 MHz", "positive slack", "timing met", "no setup
-  violations", 满足时序 …) must name, in the same sentence, a result of this run that carries
-  an SDC sha256 (`synth`, `STA`, `E4` or the hash), and agree with it: the result must say
-  timing is met, a stated frequency must match its clock period, and every WNS/TNS/slack
-  number must be one the result reports (rounding allowed). If the SDC hash changes during a
-  run, timing results measured under the earlier SDC are void and cannot be cited.
-
-- **R6 tests.** A claim that a test catches / detects / kills a bug or mutant, or that the kill
-  rate rose, must name a `score_tests` result in the same sentence (`mutate` also counts for
-  plain facts about mutants, never for a rise); its percentages must be ones those results
-  report, and every mutant it names must have been killed there.
-- **R7 performance.** A performance claim (faster, slower, speed-up, "N cycles", IPC/CPI,
-  throughput, 更快/更慢/周期数 …) must name a `perf` result (or `mutate`, for a mutant) in the
-  same sentence, and its cycle, IPC/CPI and percentage numbers must be ones those results
-  report. "No performance regression" / "not slower" needs a `perf` result compared with the
-  approved baseline and slower on no case. A negation earlier in the clause makes it a limit.
-- **R8 signoff** (`agent/gate/r8_signoff.py`). "DRC clean", "LVS clean", "antenna clean",
-  "post-route timing met", "signoff passed", "tapeout-ready" (and 签核通过, 可以流片 …) must name
-  a `flow_report`/`flow_run` result (or its run tag) in the same sentence, and a flow result of
-  this run must show exactly that fact. "Tapeout-ready" needs every signoff rule passing **and**
-  E5 (gate-level simulation and VCD power), which a LibreLane run alone does not give. Counts
-  ("0 DRC errors") must be counts a flow result reports. (R6 is reserved for test scores.)
-
-A rejected report goes back to the model with the reasons, at most twice; then the run
-stops with `stop_reason: gate_rejected` and `status: pending` for a human to judge. The
-checks are deliberately conservative and explainable: they can reject a fair sentence,
-which costs a rewrite, but they do not try to understand the design.
-
-## Independent review
-
-`--review` adds a review after the run; the program, not a model, assembles what the
-reviewer sees, from the author's trace:
-
-| level | the reviewer sees | tools |
-|---|---|---|
-| I0 | the author's whole history: task, turns, tool calls and results, final report | no |
-| I1 | a fresh conversation with the final report only | no |
-| I2 | the task and the tool results, none of the author's text or conclusions | may re-run the project's tools |
-| I3 | as I2, on a different model | as I2 |
-
-The reviewer first writes a checklist in a turn of its own, then goes through it and
-writes findings (`[high|medium|low|info] … — evidence: …`) and a verdict (accept,
-accept_with_findings, reject); a tool call before the checklist, or a missing section,
-is marked `format_ok: false`. Whenever any review is asked for, a **rule-based reviewer**
-(no model) also runs: the `rtl_rules` tool (blocking assignments in clocked blocks,
-non-blocking in combinational logic, width truncation, latches, multiple drivers, reset
-polarity against edge and name) plus plain checks of the author's results (errors, failing
-cases, latches, timing not met, mixed SDC hashes). `--review rules` runs it alone. All
-reviews go into the receipt.
-
-**On I3 here.** Only a DeepSeek key is available, so I3 uses DeepSeek's other model
-(`deepseek-v4-flash` reviewing `deepseek-v4-pro`, or the reverse). Two models of one vendor
-likely share training data and blind spots, so this is weaker independence than a reviewer
-from a different vendor; the receipt says so in the review's `note`. With an Anthropic key,
-`--review-provider anthropic` gives a cross-vendor I3.
-
-## Human gate
-
-A run whose report passes the evidence gate does not end as `done`: its receipt has
-`status: awaiting_approval` (the agent's own outcome is kept as `agent_status`) and an
-`approval` record `pending`. Nothing waits on a prompt. A person decides later, on the
-command line or by clicking in `eda-agent review-ui`:
-
-```bash
-eda-agent approve <run_id> [--reason "..."] [--override] [--by NAME]
-eda-agent reject  <run_id> --reason "..."
-eda-agent pending <run_id> --note "..."      # decide later: a note, the run stays open
-```
-
-What `approve` needs depends on the receipt's issue levels (below):
-
-| the receipt has | `approve` needs |
-|---|---|
-| Fatal items | `--override` and `--reason`; the override is recorded |
-| Error items (no Fatal) | `--reason`: why they are acceptable |
-| Warnings only | nothing more |
-
-A gate-rejected run (status `pending`) has a Fatal item, so approving it is an override too
-(`--override-gate` still works as another name for `--override`). The receipt records who
-decided (`--by`, else `git config user.name`, else the login name; "via review-ui" when
-clicked), when, the reason, the levels at that moment, and the sha256 of the receipt content
-they decided on. Decisions are final; a rejected run is fixed by a new run. `--no-approval`
-skips the gate (status `done`).
-
-### Fatal, Error, Warning
-
-Everything the approver must weigh gets one of three levels, by the rules in
-`agent/levels.py` (plain code over the receipt's own data). The summary, the "look at these"
-list, every findings table, the `levels` field of the receipt's JSON, `approve` and the review
-page all use the same list.
-
-| level | means | from |
-|---|---|---|
-| **Fatal** | the result cannot be trusted or used as it stands | a check ended in error, timeout or fail; a tool call errored; the run stopped early; the gate rejected the report; a failing case or testbench sub-test; lint errors; latches in synthesis; timing not met; a reviewer said reject; mutation changed the original checkout; the receipt changed after its decision; an imported report that fails its category's rule or could not be judged |
-| **Error** | a real problem the approver accepts knowingly | reviewer findings `high`/`medium` (incl. the rule-based reviewer's multiple drivers, width truncation, latches, blocking assignments); gate rewrites; a case read but not run; a skipped case; no tool versions; small slack (setup under 10 % of the period, hold under 0.1 ns); a void timing result; an SDC that is not the design's own (`sdc_origin`); an override; a review that failed; mutants that errored; an imported report that does not identify its design |
-| **Warning** | worth knowing, does not block | lint warnings; reviewer findings `low`/`info`, reviewer notes; part of the case list not run; lint not run; no independent review; pass/fail from the testbench's own self-check; timing pre-PnR only; surviving or likely-equivalent mutants; a model-written summary the gate rejected; an imported report's missing input files, waived items, and that eda-agent did not run the tool; a decision made with eda-agent code older than the receipt's own, or one the current approval policy would not allow (e.g. Fatal approved without `--override` and a reason) |
-
-Tool diagnostics map `error` to Fatal and `warning` to Warning; reviewer severities map
-`high`/`medium` to Error and `low`/`info` to Warning. The receipt's `levels` field holds the
-counts and every item (level, text, quote, source); like the model-written summary it is
-derived, and left out of the sha256 a decision records.
-
-### Deciding by clicking: `eda-agent review-ui`
-
-```bash
-eda-agent review-ui [--port 8799] [--runs-dir runs]
-```
-
-prints a URL such as `http://localhost:8799/?t=<token>`; open it in the browser (under WSL2 the
-Windows browser reaches it at localhost). The first page lists every receipt in `runs/` with its
-status and Fatal / Error / Warning counts, open runs first. A run's page is its receipt with a
-decision panel under the summary:
-
-- **Approve**: Warnings only, one click. With Error items, tick each one you accept (the
-  ticked items become the reason) or write a reason. With Fatal items, tick the override and
-  type a reason; that friction is on purpose.
-- **Pending**: decide later; an optional note is recorded and the run stays open.
-- **Reject**: tick what is wrong, or write a reason.
-
-Every file the receipt refers to is a link: a finding's or a lint diagnostic's `file:line`,
-the artifacts (reports, logs, netlist), the SDC, the trace and the source of each case the run
-read. It opens a read-only view inside the review page, with line numbers and the line
-highlighted (40 lines around it, or the tail of a long log, and "show whole file"). Relative
-paths are taken from the run's project root (`project_root` in new receipts, else the
-`projects/*.toml` of that name, `--projects-dir`); a bare name such as `apb_uart.sv:195` is the
-project's only file of that name. The view shows only files under the project root or the runs
-folder, or listed in the receipt, after following symlinks; never dotfiles such as `.bashrc` or
-`.env`, `.git`, keys, binaries, or a file with an API-key-shaped string. Nothing opens in
-another program. The static `.html` shows the same references as plain, copyable text (the
-absolute path as a tooltip) and marks a missing file "(file not found)".
-
-A click calls the same `human_gate` functions as the command line, so the same rules hold,
-then re-renders the receipt files. The server binds 127.0.0.1 only, answers only to
-`Host: localhost`/`127.0.0.1`, needs a random token made at each start (in the URL and in every
-form), sends a strict Content-Security-Policy, and reads and writes nothing but
-`runs/<id>.receipt.*` (plus the run's trace, read only). It uses only the standard library.
-The static `.html` receipts show the exact commands instead.
-
-### Reading a receipt
-
-The person who approves should not have to read tables of claim scopes, checklists and three
-reviews to find out what they are deciding. So every rendered receipt (`.html`, and `.md`)
-is laid out for that person:
-
-1. **Review summary**, about one screen, written by plain code from the receipt's own data:
-   - the counts, coloured: **Fatal · Error · Warning**, then one line: how many checks passed,
-     the gate, the reviewers' verdicts;
-   - the task, **what you decide** (or who already decided, when, and the levels then), what
-     approving needs, and the exact `approve` / `reject` / `pending` commands for this run;
-   - **look at these before approving**: every Fatal and Error item, most serious first, one row
-     per issue: a level badge, one plain line, then who raised it and where (`file:line`), with
-     the full texts one click away. Findings that name the same first `file:line` (or say the
-     same thing) are one row at the highest level any reviewer gave; the warnings fold under;
-   - each check with pass/fail, its evidence level in words (E0 "parses / structural facts",
-     E2 "these tests passed", E4 "synthesis estimate", …) and how long it took; the highest
-     level reached and what each level does and does not let you say; what was **not**
-     checked; the gate, one line per reviewer with its worst finding, the approval status and
-     any pending notes.
-2. **Summary written by a model** (optional, marked "AI"): see below.
-3. **Data**, as tables: regression (cases asked/run/passed/failed/skipped, testbench sub-tests,
-   failed cases); lint (warnings by code, by file, and the diagnostics kept, with their level);
-   synthesis (cells, area, latches, library, clock, timing met, SDC and its hash), timing per
-   corner (setup WNS/TNS, hold WNS/TNS), the worst path and the most used cells; the SDC check
-   (clocks, unconstrained endpoints); plain numbers of any other tool; every reviewer finding
-   (level, severity, reviewer, text, file:line); the gate's decisions and reasons; and the cost
-   (turns, tool calls, tokens, wall time of the author, each reviewer and the summary).
-4. **Details**: the whole receipt as before, unchanged (in the HTML, sections that open on a click).
-
-The HTML page is a single file with no scripts or external links, so it opens offline.
-`approve`, `reject` and `pending` re-render the files; `eda-agent receipt <run_id>` re-renders
-any receipt and brings its `levels` up to date without touching anything else in its `.json`.
-Receipts keep each check's metrics, diagnostics (up to 50) and duration; for receipts written
-before that, the tables take the numbers from the run's own trace when it is still there,
-marked †.
-
-**The model-written summary.** `--narrate` on `run`/`check`/`receipt` (or `narrate = true`)
-asks a model (by default the run's own) for a short summary. It gets the receipt data only:
-no trace, no files, no tools, and not the approval status or the levels. Its text goes through
-the same evidence gate as the agent's report (citations must match the run's results, no
-functional-correctness words without E3/E5 evidence, timing claims must name the synth result
-and its numbers, a residual-risk section that names the cases read but not run), with one
-rewrite. The receipt keeps the text with provider, model, prompt
-(`prompts/receipt_summary.v1.md`), the gate's decisions, cost and time under `narrative`. The
-page shows it in a box marked "AI", with whether it passed the gate, and says the tables are
-the record; a rejected text is folded away and listed as a Warning. The summary is outside the
-sha256 a decision records, so one added later does not change what was decided (the page says
-it was written after the decision). Without an API key the receipt renders as before. In the
-first runs the gate caught the same slip twice: the model cited a reviewer's
-`rtl_rules fail (E0)` as if it were a result of the run, and the rewrite fixed it.
-
-Example: [docs/examples/m2_torv_e2e.receipt.html](docs/examples/m2_torv_e2e.receipt.html).
-
-## Related work: what we borrowed
-
-Ideas only, unless marked as a dependency; no code was copied.
-
-| Project | What we took | Where we differ |
-|---|---|---|
-| [MCP4EDA](https://github.com/NellyW8/MCP4EDA), [mcp-verilog](https://github.com/zesun33/mcp-verilog) | EDA tools behind an MCP server; record tool versions so a result can be repeated | their tools return raw logs; ours return an envelope with an evidence level, claim scope and residual risk |
-| [fpgaZeroMCP](https://github.com/lcapossio/fpgaZeroMCP) | only a fixed set of EDA commands may run | the allowlist sits under project configs, not under model input, which never reaches a command line |
-| [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) | a small hand-written loop with step and cost limits and a linear, fully logged trajectory | stop rules from the methodology: the same tool failing twice ends the run; a gate checks the final report |
-| [SWE-agent](https://github.com/SWE-agent/SWE-agent) | short, stable tool feedback written for a model to read | |
-| [OpenAI Agents SDK](https://github.com/openai/openai-agents-python) guardrails | an output check that can stop a run and say why | our gate is plain code over this run's tool results, and sends the reasons back for a bounded number of rewrites |
-| [VerilogCoder](https://github.com/NVlabs/VerilogCoder), [MAGE](https://github.com/stable-lab/MAGE) | (planned, M3) trace a failing signal back to its drivers; debug with checkpoints | |
-| [wave-mcp](https://github.com/Tencent/wave-mcp), [wavepeek](https://github.com/kleverhq/wavepeek) | (planned, M3, dependency) read waveforms | wrapped as two diagnostic tools that report values, not causes |
-| [avl-core](https://github.com/projectapheleia/avl) | (dependency, `[mutation]` extra) source-level SystemVerilog mutants from the slang syntax tree; its Yosys miter for equivalent mutants | only its generator: we run the project's own regression per mutant in a copy (avl grades cocotb only), lint each mutant, and work around its byte/character offset bug |
-| [MCY](https://github.com/YosysHQ/mcy) | considered for M2.5 and kept as an alternative | it mutates the synthesized netlist, so a mutant is not a readable RTL diff and the RTL regression cannot run it as is |
-| [LibreLane](https://github.com/librelane/librelane) | (dependency) its container image with Yosys and OpenSTA; its ABC script, driving cell and corners for IHP SG13G2 | we run only synthesis + pre-PnR STA, and record the SDC hash and image digest in an envelope |
-| [OpenROAD-MCP](https://github.com/The-OpenROAD-Project/OpenROAD-MCP), [ORFS-Agent](https://github.com/ABKGroup/ORFS-Agent) | back-end tools split into run and report; a flow iteration is a unit with its own budget | we read LibreLane's own run directory into fixed signoff rules and an envelope; parameter tuning is not done |
-| [mcp-rtl-review](https://github.com/zesun33/mcp-rtl-review) | deterministic RTL review rules (blocking assignments, reset polarity, width truncation) as a reviewer without an LLM | it walks an AST; our rules come from Verilator's own warnings plus one text scan; findings feed the receipt next to a model reviewer |
-| [Agent-as-a-Judge](https://github.com/metauto-ai/agent-as-a-judge) | a judge that uses tools to check the work instead of reading the author's account | the I2/I3 reviewer gets the task and raw tool results, never the author's conclusions, and re-runs the same MCP tools |
+`check` needs the provider's API key in the environment (`DEEPSEEK_API_KEY`, or
+`ANTHROPIC_API_KEY` with `--provider anthropic`). Each run writes `runs/<id>.jsonl` (the whole
+trace) and a receipt `runs/<id>.receipt.json`, rendered as `.html` and `.md`.
+
+## Documentation
+
+- [docs/usage.md](docs/usage.md): every command, a second design, adding a project
+- [docs/project-config.md](docs/project-config.md): the project TOML, incl. `[flow]`, with links for `[mutation]`, `[tests]`, `[perf]`, `[pnr]`
+- [docs/evidence-gate.md](docs/evidence-gate.md): evidence levels E0–E5 and gate rules R1–R9
+- [docs/review-and-approval.md](docs/review-and-approval.md): reviewers I0–I3, the human gate, Fatal / Error / Warning, `review-ui`, reading a receipt
+- [docs/mutation-and-tests.md](docs/mutation-and-tests.md): `mutate`, `write-tests`, `perf`
+- [docs/flow-signoff.md](docs/flow-signoff.md): `flow_report`, `flow_run`, signoff rules, run history, flow adapters
+- [docs/lineage.md](docs/lineage.md): design snapshots and flow lineage
+- [docs/plugins.md](docs/plugins.md): importers and flow adapters
+- [docs/architecture.md](docs/architecture.md): source layout and the one-way layers
+- [docs/related-work.md](docs/related-work.md): what we borrowed, and where we differ
+- [docs/examples/](docs/examples/): real receipts (M1 PicoRV32 and TORV, M2 TORV end to end, M2.5 TORV write-tests, M4 TORV RTL-to-GDS)
 
 ## Roadmap
 
-M1 case descriptions, evidence gate, receipts · M1.1 tool versions, command allowlist,
-whole tool results in traces · M2 (done) synth + pre-PnR STA under the SDC, check_sdc, gate
-R5, reviewer I0–I3 + rule-based reviewer, human gate · M1.2 (done) init, doctor, check
-presets, defaults, LibreLane/FuseSoC inputs; tried on a third design, an INT8 linear-layer
-accelerator (FuseSoC, pulp IP) · M2.5 test generation scored by mutants (step 1 done:
-`mutate`, plus `perf` with a human baseline and gate R7; next `write_case`, `score_tests`,
-gate R6) · M3
-simulation-failure localisation (logs, waveforms), lessons store · M4 LibreLane flow tool
-(step 1 done: `flow_report`, signoff rules, gate R8, `flow_run` written; next: a fresh TORV run
-with `flow_run`, gate-level simulation for a full E5).
+Done: M1 (case descriptions, regression formats, evidence gate, receipts), M1.1 (tool versions,
+command allowlist), M1.2 (`init`, `doctor`, `check`, FuseSoC/LibreLane inputs), M2 (synthesis and
+pre-PnR STA, `check_sdc`, reviewers, human gate), M2.5 (mutation, `perf`, `write-tests`, gates
+R6/R7), M4 step 1 (LibreLane `flow_report`/`flow_run`, signoff rules, gate R8, lineage, run
+history, flow adapters), plug-ins (importers, gate R9).
+
+Next: setup diagnosis and failure localisation (logs, waveforms), a lessons store; a vertical acceptance run on TORV; a comparison
+experiment; later gate-level simulation for a full E5, more PDKs and simulators, and commercial
+tools through adapters and importers.
+
+## License
+
+Apache-2.0, see [LICENSE](LICENSE).
