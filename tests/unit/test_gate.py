@@ -152,3 +152,15 @@ def test_missing_residual_risk_is_rejected():
     assert d.reasons == ["no residual-risk section: add a section headed 'Residual risk' that says what "
                          "the checks did not cover"]
     assert check_report(report + "## 剩余风险\n没有覆盖率或变异测试, 不知道测试能否发现错误。", RESULTS).passed
+
+
+def test_work_as_a_noun_or_in_a_path_is_not_a_claim():
+    # Found in two live runs: "runs/work/..." and "before any synthesis/timing work ran" were rejected.
+    for sentence in ("The copy lives in runs/work/b_torv_mut17 and was not changed.",
+                     "This was found before any synthesis/timing work ran.",
+                     "The log is in case_working/verified.log."):
+        report = SCOPED.replace("These three directed cases passed under the testbench\x27s own self-check.", sentence)
+        assert check_report(report, RESULTS).passed, (sentence, check_report(report, RESULTS).reasons)
+    for claim in ("The forwarding logic works.", "The pipeline will work for all hazards.", "It is working."):
+        report = SCOPED.replace("These three directed cases passed under the testbench\x27s own self-check.", claim)
+        assert not check_report(report, RESULTS).passed, claim

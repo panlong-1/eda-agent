@@ -18,12 +18,14 @@ FUNCTIONAL_LEVELS = ("E3", "E5")
 
 STRONG_CLAIM_WORDS = [
     r"handles?", r"handled", r"correct(?:ly|ness)?", r"verified", r"verifies", r"proven",
-    r"works?", r"working", r"functional(?:ly)? correct", r"bug[- ]free", r"no bugs?", r"guarantee[sd]?",
+    # "work" alone is usually the noun ("synthesis/timing work"); only the verb claims function
+    r"works", r"working", r"(?:will|does|do|did|can|should|must) work", r"functional(?:ly)? correct", r"bug[- ]free", r"no bugs?", r"guarantee[sd]?",
     r"robust", r"fully (?:tested|functional)",
     "正确", "已验证", "验证通过", "没有\\s*bug", "无\\s*bug", "正常工作", "保证", "可靠",
 ]
 
-_STRONG = re.compile(r"(?<![A-Za-z])(?:" + "|".join(STRONG_CLAIM_WORDS) + r")(?![A-Za-z])", re.I)
+# Not inside a path or identifier: runs/work/x, case_working, verified.log are not claims.
+_STRONG = re.compile(r"(?<![A-Za-z/_.])(?:" + "|".join(STRONG_CLAIM_WORDS) + r")(?![A-Za-z/_])", re.I)
 
 # What may stand before the strong word in a later item of a list: "correct", "or bug-free",
 # "fully correct", "或无 bug". Anything more ("but the design is correct") starts a new claim.
