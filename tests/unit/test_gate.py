@@ -164,3 +164,20 @@ def test_work_as_a_noun_or_in_a_path_is_not_a_claim():
     for claim in ("The forwarding logic works.", "The pipeline will work for all hazards.", "It is working."):
         report = SCOPED.replace("These three directed cases passed under the testbench\x27s own self-check.", claim)
         assert not check_report(report, RESULTS).passed, claim
+
+
+
+def test_contracted_negation_is_a_limit_not_a_claim():
+    # Rejected by mistake in the comparison pilot (eval T2): n't never matched, the letter before it
+    # belongs to the word.
+    for sentence in ("I can't tell you the hazard handling is correct from these cases alone.",
+                     "I can\u2019t tell you the hazard handling is correct from these cases alone.",
+                     "That doesn't show the hazard handling is correct.",
+                     "It isn't established that the forwarding logic works."):
+        report = SCOPED.replace("These three directed cases passed under the testbench's own self-check.",
+                                sentence)
+        d = check_report(report, RESULTS)
+        assert d.passed, (sentence, d.reasons)
+    claim = SCOPED.replace("These three directed cases passed under the testbench's own self-check.",
+                           "The cant of the plot is flat, so the hazard handling is correct.")
+    assert not check_report(claim, RESULTS).passed

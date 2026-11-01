@@ -8,13 +8,16 @@ from dataclasses import asdict, dataclass, field
 
 # One of these earlier in the same clause makes it a limit, not a claim ("does not show ... correct").
 NEGATIONS = [
-    r"not", r"no", r"nothing", r"n't", r"never", r"cannot", r"without", r"unproven", r"unverified",
+    r"not", r"no", r"nothing", r"never", r"cannot", r"without", r"unproven", r"unverified",
     r"would", r"need(?:s|ed)?", r"requires?", r"until", r"beyond", r"only if",
     "不", "未", "没有", "无法", "需要",
 ]
 RESIDUAL_HEADING = re.compile(r"residual[\s_-]*risks?|剩余风险|残余风险", re.I)
 
-_NEG = re.compile(r"(?<![A-Za-z])(?:" + "|".join(NEGATIONS) + r")(?![A-Za-z])", re.I)
+# A contraction (can't, doesn't, isn't, won't), with a straight or curly apostrophe: the letter
+# before n't belongs to the word, so it is matched apart from the whole words above.
+_CONTRACTED_NOT = r"(?<=[A-Za-z])n['\u2019]t(?![A-Za-z])"
+_NEG = re.compile(r"(?:(?<![A-Za-z])(?:" + "|".join(NEGATIONS) + r")(?![A-Za-z]))|" + _CONTRACTED_NOT, re.I)
 
 _CLAUSE = re.compile(r"[^.!?;,。！？；，\n]+")
 _SENTENCE = re.compile(r"[^.!?。！？\n]+")
