@@ -27,7 +27,7 @@ results of this run. One module per rule (`r1_citations.py` .. `r11_memory.py`):
   passed), so evidence on one check cannot vouch for another. E4 (synthesis, PPA) is above E3
   on the ladder but never vouches for function. A sentence of the form "does not prove: A, B,
   or gate-level functional correctness" lists limits after its colon, not claims. With E2 the report may only say which cases passed. A negation earlier in
-  the same clause ("does not show … correct") makes it a stated limit, not a claim, and so
+  the same clause ("does not show … correct", also "can't" or "doesn't") makes it a stated limit, not a claim, and so
   are the list items that follow it ("not … handled, correct, or bug-free"); a clause with
   more than a list connector before the word ("…, but the design is correct") is a new claim.
 - **R3 residual risk.** The report must have a section headed "Residual risk" with content.

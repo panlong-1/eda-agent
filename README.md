@@ -76,6 +76,7 @@ trace) and a receipt `runs/<id>.receipt.json`, rendered as `.html` and `.md`.
 - [docs/plugins.md](docs/plugins.md): importers and flow adapters
 - [docs/architecture.md](docs/architecture.md): source layout and the one-way layers
 - [docs/related-work.md](docs/related-work.md): what we borrowed, and where we differ
+- [eval/README.md](eval/README.md): comparison experiment against plain Claude Code (tasks with ground truth, fixed scorer, arms A/B/D; in Chinese)
 - [docs/examples/](docs/examples/): real receipts (M1 PicoRV32 and TORV, M2 TORV end to end, M2.5 TORV write-tests, M4 TORV RTL-to-GDS)
 
 ## Roadmap

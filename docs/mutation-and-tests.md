@@ -43,6 +43,12 @@ eda-agent mutate --project projects/torv.toml --file rtl/torv_hazard_unit.sv --c
   pass but whose cycle count moves (against the unmodified design in the same copy) is
   `perf_killed`, reported apart from functional kills; the kill rate is given both ways.
 
+A recorded run can be read back with the MCP tool `mutate_result(mutate_run)` instead of being
+run again, e.g. when the design no longer passes its regression and `mutate` would refuse. The
+result gives the recorded kill facts, the file's sha256 then and now and, when they differ, the
+diff. A changed file is an Error in the receipt: the recorded kills cover the old file, not the
+one under review.
+
 ## New tests against surviving mutants: `[tests]`, `write-tests`
 
 ```bash
