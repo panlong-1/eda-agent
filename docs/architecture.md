@@ -14,6 +14,8 @@ src/eda_agent/
     standards.py         human-set waivers and targets for imported checks
     hashing.py           sha256 of a file, of bytes, of JSON data (receipt content, snapshot)
     numbers.py           parsing numbers from tool output, ranking levels, shortening text
+    setup_issues.py      setup diagnosis: the rule table on tool output per stage (sim/synth/pnr), file
+                         checks (vendored IP, FuseSoC, generated files, ${VAR} paths), which [setup] step fixes it
   plugins/               the public plug-in interface (plugins.md); depends on core only
     __init__.py          importer and adapter discovery (entry points), choose an importer
     result.py            the neutral result an importer returns, and the core's validation of it
@@ -21,10 +23,13 @@ src/eda_agent/
   onboard/               connecting a new design (no model involved)
     detect.py, init.py   eda-agent init: guess a draft config, each value with where it came from
     doctor.py            eda-agent doctor: are the tools, files, image and API key all there?
+                         (--deep, per stage with one real run, is in cli/doctor.py: it runs tools)
   tools/                 one EDA capability per file; each only returns an envelope (facts)
     lint.py              Verilator --lint-only, parsed diagnostics (E0)
     describe.py          what a regression case covers: source file + its leading comment
-    regress.py           the project's own regression (E2), read by one of formats/
+    regress.py           the project's own regression (E2), read by one of formats/; a run that could not
+                         build or start is "environment not ready" (error_class setup), not a failure
+    setup.py             run_setup: the approved [setup] steps only, each recorded (E0)
     formats/             torv.py | junit.py | exitcode.py: run cases, read results, claim_scope
     synth.py             synth: Yosys + OpenSTA per corner in the project's container (E4);
                          check_sdc: OpenSTA check_setup on the netlist (facts, E0)

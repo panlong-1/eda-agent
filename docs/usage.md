@@ -64,6 +64,7 @@ Start from a draft instead of an empty file:
 ```bash
 .venv/bin/eda-agent init ~/project/mydesign --out projects/mydesign.toml   # writes a DRAFT
 .venv/bin/eda-agent doctor --project projects/mydesign.toml --provider deepseek
+.venv/bin/eda-agent doctor --project projects/mydesign.toml --deep     # one real run per stage
 .venv/bin/eda-agent check  --project projects/mydesign.toml --provider deepseek    # lint + one case
 .venv/bin/eda-agent check  --project projects/mydesign.toml --provider deepseek --full
 ```
@@ -89,6 +90,7 @@ each receipt).
 |---|---|---|
 | `eda-agent init <design dir> [--out FILE]` | draft a project config from what the repository holds | [above](#adding-a-project) |
 | `eda-agent doctor [--project P] [--provider deepseek]` | are the tools, files, image and API key all there? | [above](#adding-a-project) |
+| `eda-agent doctor --deep [--stage sim\|synth\|pnr] [--no-setup]` | per stage: prerequisites, the approved `[setup]` steps if needed, one minimal real run; what is missing and how to fix it | [project-config.md](project-config.md#setup-diagnosis-and-setup-steps-setup) |
 | `eda-agent check [--project P] [--full]` | a fixed task: lint + one case (`--full`: whole regression + synth) | [above](#adding-a-project) |
 | `eda-agent run "<task>" [--project P] [--provider ...] [--review rules\|I0..I3] [--narrate]` | one task, then the receipt and the human gate | [review-and-approval.md](review-and-approval.md) |
 | `eda-agent review <run_id> [--review I3]` | review a finished run again | [review-and-approval.md](review-and-approval.md#independent-review-i0-i3) |
