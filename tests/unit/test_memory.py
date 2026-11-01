@@ -107,3 +107,11 @@ def test_review_page_lists_searches_and_voids(tmp_path):
     assert st.entries()[-1]["by"] == "pan (via review-ui)"
     assert not app.void_lesson({"id": [a["id"]], "design": ["../x"], "reason": ["r"]})[1]
     assert Path(st.file).read_text().count("\n") == 3
+
+
+def test_design_name_is_not_a_search_term(tmp_path):
+    st = LessonStore(tmp_path, "torv")
+    st.add("torv_bus_types.sv is typedef-only", sources=SRC)
+    hit = st.add("hazard and bypass cases pass", sources=SRC)
+    hits = search("Check TORV hazard handling", design="torv", stores=[st])
+    assert [h.id for h in hits] == [hit["id"]]

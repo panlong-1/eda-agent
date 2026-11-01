@@ -62,3 +62,27 @@ def test_lessons_section_is_new_lessons_not_citations():
     assert proposed_lessons(text + RISK) == ["lint of torv_soc gives 0 errors with -Wall (lint result of this run)",
                                              "refines lesson-torv-001"]
     assert any("lesson-torv-077" in x for x in reasons(text + "- also lesson-torv-077\n"))
+
+
+async def test_run_citing_a_nonexistent_lesson_ends_rejected_and_fatal():
+    import json
+
+    from eda_agent.agent.levels import assess
+    from eda_agent.agent.loop import run_agent
+    from eda_agent.agent.models import ScriptedAdapter, ToolCall, ToolSpec, Turn
+    from eda_agent.agent.receipt import build_receipt
+
+    bad = "lint: pass (E0). Hint: lesson-torv-099 says the forwarding unit is fine." + RISK
+    model = ScriptedAdapter([Turn(stop="tool_use", tool_calls=[ToolCall("c", "lint", {})])]
+                            + [Turn(stop="end", text=bad)] * 3)
+
+    async def execute(name, args):
+        return json.dumps(LINT), False
+
+    mem = RunMemory(hints=[{"kind": "lesson", "id": "lesson-torv-001"}], known=KNOWN)
+    rep = await run_agent(model, [ToolSpec("lint", "", {})], execute, "t", "s", memory=mem)
+    assert rep.stop_reason == "gate_rejected" and all("(R10)" in d["reasons"][0] for d in rep.gate)
+    r = build_receipt(rep, run_id="x", task="t", provider="p", project="torv", all_cases=[], hints=mem.hints)
+    fatal = [i.text for i in assess(r) if i.level == "fatal"]
+    assert any("(R10)" in t for t in fatal)
+    assert r["memory"]["used_as_hints"][0]["id"] == "lesson-torv-001"

@@ -267,7 +267,8 @@ def search(query: str, *, design: str, stores: list[LessonStore], docs: list[dic
     Ranking: bm25 over text and scope, plus 1.0 for this design, 0.5 for a verified lesson and 0.5
     for each scope value (module, tool, pdk, corner, problem) the query names. Lessons of other designs
     come back as hypotheses with a note."""
-    terms = query_terms(query)
+    # the design name matches almost every lesson of the design; it is a boost below, not a search term
+    terms = [t for t in query_terms(query) if t != design.lower()]
     if not terms:
         return []
     db = sqlite3.connect(":memory:")
@@ -324,8 +325,9 @@ def hints_block(hits: list[Hit]) -> str:
            "They are hints: a conclusion still needs a tool result of this run. When you use one, cite its "
            "id exactly (lesson-<design>-NNN, or doc:<doc>#<section>) and mark it as a hint or source, e.g. "
            "'(hint: lesson-torv-003)'. Never cite an id that is not listed here or returned by "
-           "search_memory. You may end the report with a section '## Lessons (hypotheses)' of at most 3 "
-           "short lessons for later runs, each citing the tool result of this run it rests on.", ""]
+           "search_memory. End the report, before the residual risk, with a section '## Lessons (hypotheses)': "
+           "1 to 3 short bullet points a later run on this design could use (a fact this run measured, with the "
+           "tool and case or number it rests on); leave it out only if the run learned nothing new.", ""]
     for h in hits:
         tag = h.status + (f"; {h.note}" if h.note else "")
         out.append(f"- [{h.id}] ({tag}) {' '.join(h.text.split())[:MAX_HINT_CHARS]}  — source: {h.source}")

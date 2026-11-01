@@ -51,7 +51,7 @@ def run_memory(project, task: str, enabled: bool) -> RunMemory | None:
     def find(query: str, lessons: int = mem.lessons, doc_hints: int = mem.doc_hints) -> list[dict]:
         return [h.to_dict() for h in search(query, design=project.name, stores=stores, docs=docs,
                                             lessons=lessons, doc_hints=doc_hints)]
-    return RunMemory(hints=find(f"{project.name} {task}"), known=known_ids(stores, docs), search=find)
+    return RunMemory(hints=find(task), known=known_ids(stores, docs), search=find)
 
 
 def compaction_of(project, args: argparse.Namespace) -> Compaction | None:
