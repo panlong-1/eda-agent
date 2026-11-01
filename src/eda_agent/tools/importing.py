@@ -153,7 +153,7 @@ def run_import(project: Project, src: Path, plugin: str | None = None, write: bo
         d.mkdir(parents=True, exist_ok=True)
         with (d / REPORTS_FILE).open("a") as fh:
             fh.write(json.dumps(rec) + "\n")
-        env.metrics["receipt"] = str(write_receipt(rec))
+        env.metrics["receipt"] = str(write_receipt_data(rec))
     return env
 
 
@@ -164,7 +164,7 @@ def imported(project: Project, category: str | None = None) -> list[dict]:
     return [r for r in recs if category is None or r["envelope"]["metrics"].get("category") == category]
 
 
-def write_receipt(rec: dict) -> Path:
+def write_receipt_data(rec: dict) -> Path:
     """The receipt data of one import (runs/imports/<design>_<id>.receipt.json). Its .md and .html
     are drawn by the receipt pipeline (agent/receipt), which `eda-agent import` runs next."""
     RECEIPTS_DIR.mkdir(parents=True, exist_ok=True)

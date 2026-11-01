@@ -21,7 +21,6 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from .loop import Budget, Executor, run_agent
-from .model_output import VERDICTS  # noqa: F401  (kept importable from here)
 from .model_output import parse_checklist_review as parse_review
 from .models import ModelAdapter, ToolSpec
 
@@ -36,7 +35,6 @@ CONTEXT = {
 # Tools an I2/I3 reviewer may call: all of them only read the design and write under runs/.
 REVIEW_TOOLS = ("lint", "list_regress_cases", "describe_case", "regress", "rtl_rules", "synth", "check_sdc",
                 "flow_report", "flow_history")
-SEVERITIES = ("high", "medium", "low", "info")
 
 CHECKLIST_STEP = (
     "Step 1 of 2. Before judging anything, write the checklist you will review against: the "

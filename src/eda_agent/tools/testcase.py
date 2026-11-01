@@ -20,7 +20,6 @@ from __future__ import annotations
 import difflib
 import json
 import re
-import shutil
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace

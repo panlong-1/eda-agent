@@ -14,5 +14,5 @@ One pipeline for every kind of receipt (agent runs, write-tests runs, imports), 
 """
 from .data import (MAX_DIAGNOSTICS, _flow, build_receipt, receipt_id, receipt_kind,  # noqa: F401
                    testgen_receipt, with_trace_data)
-from .files import render_files, write_import_receipt, write_receipt  # noqa: F401
+from .files import render_files, write_receipt  # noqa: F401
 from .markdown import render_details, render_markdown  # noqa: F401

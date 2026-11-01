@@ -27,9 +27,6 @@ def _h(obj) -> str:
     return sha256_json(obj, default=str)
 
 
-sha256_path = sha256_file  # the old name, kept for callers outside this package
-
-
 def rel_to(path: str | Path, roots: list[Path]) -> str:
     """A path relative to the first root it is under (resolved), else as given."""
     p = Path(path)

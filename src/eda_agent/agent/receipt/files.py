@@ -14,8 +14,6 @@ from .data import receipt_id, receipt_kind, with_trace_data
 from .markdown import render_markdown
 from .page import render_html, static_linker
 
-IMPORT_RECEIPTS = Path("runs/imports")
-
 
 def _dump(receipt: dict) -> str:
     """Import receipts keep the compact form the imported table uses; the others are indented."""
@@ -33,11 +31,6 @@ def write_receipt(receipt: dict, out_dir: Path, base: Path | None = None) -> tup
     js.write_text(_dump(receipt), encoding="utf-8")
     md, _ = render_files(receipt, out_dir, base=base)
     return js, md
-
-
-def write_import_receipt(rec: dict, out_dir: Path = IMPORT_RECEIPTS) -> tuple[Path, Path]:
-    """The receipt of one import (runs/imports/<design>_<id>.receipt.*)."""
-    return write_receipt(rec, out_dir)
 
 
 def render_files(receipt: dict, out_dir: Path, *, base: Path | None = None) -> tuple[Path, Path]:

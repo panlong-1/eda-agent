@@ -112,7 +112,6 @@ cursor:pointer;margin-top:8px}
 PILL = {"fatal": "p-fatal", "error": "p-error", "warning": "p-warning", "ok": "p-ok", "bad": "p-bad",
         "warn": "p-warning",
         "info": "p-info", "lvl": "p-muted", "muted": "p-muted"}
-LEVEL_BADGE = {"fatal": "fatal", "error": "error", "warning": "warning"}
 VERDICT_CLASS = {"accept": "ok", "accept_with_findings": "warning", "reject": "bad"}
 SEV_CLASS = {"high": "error", "medium": "error", "low": "muted", "info": "muted"}
 _NUMERIC = re.compile(r"^[+-]?[\d,]+(?:\.\d+)?(?: ns)?$|^—$")
