@@ -345,7 +345,7 @@ def test_flow_command_runs_librelane_without_network_on_the_copy(tmp_path):
     p = load_project(cfg)
     work = tmp_path / "work" / "t_x"
     cmd, run_dir = flow_command(p, work, "x", {"FP_CORE_UTIL": 45})
-    assert cmd[:6] == ["docker", "run", "--rm", "--network", "none", "-u"]
+    assert cmd[:3] == ["docker", "run", "--rm"] and cmd[cmd.index("--network") + 1] == "none" and "-u" in cmd
     i = cmd.index("ghcr.io/librelane/librelane:3.0.16")
     assert cmd[i + 1:i + 3] == ["librelane", "--manual-pdk"] and "FP_CORE_UTIL=45" in cmd
     assert cmd[-1] == str(work / "src" / "librelane" / "config.yaml")

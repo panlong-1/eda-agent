@@ -123,3 +123,20 @@ def test_docker_command_allowlist():
     assert isinstance(docker_command("my/img:2", ["yosys"], [], extra_images=("my/img",)), list)
     assert image_repo("ghcr.io/librelane/librelane@sha256:ab") == "ghcr.io/librelane/librelane"
     assert image_repo("localhost:5000/a/b:1") == "localhost:5000/a/b"
+
+
+def test_docker_command_names_the_container_and_timeout_kills_it(monkeypatch, tmp_path):
+    from eda_agent.core import proc
+    cmd = docker_command("ghcr.io/librelane/librelane:3.0.16", ["sta", "-exit", "x.tcl"], [])
+    name = cmd[cmd.index("--name") + 1]
+    assert name.startswith("eda_agent_")
+    assert name != docker_command("ghcr.io/librelane/librelane:3.0.16", ["sta"], [])[cmd.index("--name") + 1]
+    killed = []
+    real = proc.subprocess.run
+    monkeypatch.setattr(proc.subprocess, "run", lambda c, **kw: killed.append(c) if c[:2] == ["docker", "kill"]
+                        else real(c, **kw))
+    proc._kill_container(cmd)
+    proc._kill_container(["make", "-C", "x"])
+    assert killed == [["docker", "kill", name]]
+    res = proc.run(["sleep", "5"], tmp_path, {"PATH": "/usr/bin:/bin"}, 1)
+    assert res.returncode is None and killed == [["docker", "kill", name]]

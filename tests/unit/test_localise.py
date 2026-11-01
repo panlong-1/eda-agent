@@ -170,7 +170,18 @@ def test_waves_files_finds_the_case_waveform(tmp_path, project):
     (tmp_path / "c1" / "c1.vcd").write_text("x")
     cfg = replace(project.regress, waves_flag="--waves", waves_file="{case_dir}/{name}.vcd")
     logs = {"c1": str(tmp_path / "c1" / "c1.sim.log"), "c2": str(tmp_path / "c2" / "c2.sim.log")}
-    assert waves_files(cfg, logs, ["c1", "c2", "c3"]) == {"c1": str(tmp_path / "c1" / "c1.vcd")}
+    assert waves_files(cfg, logs, ["c1", "c2", "c3"], tmp_path) == {"c1": str(tmp_path / "c1" / "c1.vcd")}
+
+
+def test_waves_file_relative_to_the_design_root(tmp_path, project):
+    # secworks/aes: each testbench always writes toolruns/<tb>.vcd in the design, whatever the log dir
+    from dataclasses import replace
+    (tmp_path / "toolruns").mkdir()
+    (tmp_path / "toolruns" / "tb_aes.vcd").write_text("x")
+    cfg = replace(project.regress, waves_flag="WAVES=1", waves_file="toolruns/{name}.vcd")
+    logs = {"tb_aes": "/elsewhere/runs/logs/aes_tb_aes.log"}
+    assert waves_files(cfg, logs, ["tb_aes", "tb_aes_core"], tmp_path) == \
+        {"tb_aes": str(tmp_path / "toolruns" / "tb_aes.vcd")}
 
 
 # ---------------------------------------------------------------- gate rule R10
