@@ -140,7 +140,7 @@ def test_score_dir_consistency_and_protocol(tmp_path):
 
 def test_contamination_flag(tmp_path):
     ev = tmp_path / "events.jsonl"
-    _stream_json(ev, ["cat /home/panlong/project/eda-agent-f/eval/truth.json"], ["Bash"], "x")
+    _stream_json(ev, ["cat /home/user/project/eda-agent/eval/truth.json"], ["Bash"], "x")
     notes = score.arm_checks("A", score.evidence_from_events(ev), score.load_truth())
     assert any("truth leak" in n for n in notes)
 

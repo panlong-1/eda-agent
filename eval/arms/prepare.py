@@ -27,8 +27,8 @@ def main() -> None:
     ap.add_argument("--rep", type=int, required=True)
     ap.add_argument("--tasks", default="T2,T4,T3,T1")
     ap.add_argument("--dest", default="~/project/eval-f")
-    ap.add_argument("--win-dir", default="/mnt/c/Users/19114/eval-f-subjects",
-                    help="where the subject session's (empty) Windows working directory is made")
+    ap.add_argument("--win-dir", required=True,
+                    help="where the subject session's (empty) Windows working directory is made, e.g. /mnt/c/Users/<you>/eval-f-subjects")
     args = ap.parse_args()
 
     spec = {t["id"]: t for t in json.loads((EVAL / "tasks.json").read_text())["tasks"]}

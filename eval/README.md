@@ -84,7 +84,7 @@ D 用 `--no-learn`，避免第 1 遍学到的经验影响第 2 遍（一致性�
 wsl -d Ubuntu-24.04 -- bash -lc 'cd ~/project/eda-agent-f && .venv/bin/python eval/arms/prepare.py --arm A --rep 1'
 ```
 
-`--arm A|B`、`--rep 1|2`，共 4 次。输出里的 `session_cwd`（Windows 路径 `C:\Users\19114\eval-f-subjects\<A_r1>`）是被测会话的工作目录：
+`--arm A|B`、`--rep 1|2`，共 4 次。输出里的 `session_cwd`（Windows 路径 `C:\Users\<you>\eval-f-subjects\<A_r1>`）是被测会话的工作目录：
 里面有 `prompt.md`，B 还有只含 4 个 eda-mcp 服务器的 `.mcp.json`。
 
 **2. A、B：开被测会话（共 4 个）**
