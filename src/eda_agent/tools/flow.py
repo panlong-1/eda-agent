@@ -453,10 +453,15 @@ def resolve_run(project: Project, run_ref: str) -> Path | str:
     p = (p if p.is_absolute() else Path.cwd() / p).resolve()
     allowed = [project.root.resolve(), Path(pnr.work_dir).resolve()]
     # runs flow_run made for this design (its eda_agent table), wherever their work directory was
-    recorded = {Path(rec["run_dir"]).resolve() for rec in experience.eda_records(project)}
+    records = experience.eda_records(project)
+    recorded = {Path(rec["run_dir"]).resolve() for rec in records}
+    be = backend_of(project)
+    if "/" not in run_ref and not be.is_run(p):
+        # a bare name that is not under runs_dir: a run id of the eda_agent table (e.g. m4_e5_1)
+        by_id = [Path(rec["run_dir"]).resolve() for rec in records if rec.get("run_id") == run_ref]
+        p = by_id[-1] if by_id else p
     if not any(p.is_relative_to(a) for a in allowed) and p not in recorded:
         return f"run {run_ref!r} is outside the project root and the flow work directory"
-    be = backend_of(project)
     if not be.is_run(p):
         known = sorted(d.name for d in base.iterdir() if be.is_run(d)) if base.is_dir() else []
         return f"no {be.name} run at {p} (runs under {base}: {', '.join(known) or 'none'})"
