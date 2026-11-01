@@ -64,6 +64,8 @@ RULES = [
     ("the model-written summary was rejected by the gate", "warning"),
     ("import: input files the report names were not found here; waived items; the tool was not run by "
      "eda-agent", "warning"),
+    ("a decision made with eda-agent code older than the receipt's own, or that does not meet the approval "
+     "policy of the current code (e.g. Fatal approved without --override and a reason)", "warning"),
 ]
 
 FINDING_LEVEL = {"high": "error", "medium": "error", "low": "warning", "info": "warning"}
@@ -209,6 +211,34 @@ def _assess_import(r: dict, add) -> None:
                    "the report", source="import")
 
 
+def _assess_decision(r: dict, issues: list[Issue], add) -> None:
+    """A decision made with older code, or one the current approval policy would not have allowed.
+    Decisions are final and stay as they are; this only tells the reader."""
+    from .human_gate import POLICY
+    from ..core.version import label, older
+    a = r.get("approval") or {}
+    if a.get("status") not in ("approved", "rejected"):
+        return
+    if older(a.get("code_version"), r.get("code_version")):
+        add("warning", "The decision was made with eda-agent code older than the code that wrote this receipt",
+            quote=f"decided with {label(a.get('code_version'))}; receipt written by {label(r.get('code_version'))}",
+            source="approval")
+    if a.get("status") != "approved" or a.get("policy") == POLICY:
+        return
+    # Without a recorded policy: judge by the levels at the decision if recorded, else by today's levels
+    # (not counting what the decision itself or a later change of the receipt caused).
+    c = a.get("levels") or counts([i for i in issues if i.source not in ("approval", "receipt")])
+    missing = [x for x, needed in (("an override", c["fatal"] and not (a.get("override") or a.get("overrode_gate"))),
+                                   ("a reason", (c["fatal"] or c["error"]) and not a.get("reason"))) if needed]
+    if missing:
+        needs = "--override and a reason" if c["fatal"] else "a reason"
+        add("warning", f"The approval does not meet the current approval policy: with {counts_line(c)} it needs "
+                       f"{needs}, but the decision records no {' and no '.join(m.split(' ', 1)[1] for m in missing)} "
+                       "(it was made under older rules)",
+            quote=f"decided by {a.get('by')} at {a.get('at')}; eda-agent code version: {label(a.get('code_version'))}",
+            source="approval")
+
+
 def assess(r: dict) -> list[Issue]:
     """All issues of a receipt, Fatal first, then Error, then Warning."""
     from .human_gate import content_sha256  # human_gate uses assess() for its policy
@@ -220,6 +250,8 @@ def assess(r: dict) -> list[Issue]:
     kind = receipt_kind(r)
     if kind in ("testgen", "import"):
         (_assess_testgen if kind == "testgen" else _assess_import)(r, add)
+        if kind == "testgen":
+            _assess_decision(r, list(out), add)
         return sorted(out, key=lambda i: LEVELS.index(i.level))
 
     # the run and the gate
@@ -359,6 +391,7 @@ def assess(r: dict) -> list[Issue]:
     if n and not n["gate"]["passed"]:
         add("warning", "The model-written summary was rejected by the evidence gate; rely on the tables",
             source="summary")
+    _assess_decision(r, list(out), add)
     return sorted(out, key=lambda i: LEVELS.index(i.level))
 
 

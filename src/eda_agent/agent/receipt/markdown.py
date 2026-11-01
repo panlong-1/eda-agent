@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 
 from ...core.numbers import shorten
+from ...core.version import label as version_label
 from ..levels import TITLE, Issue, counts_line
 from .data import receipt_kind
 from .summary import GENERATED, SHORT, Summary, narrative_meta, summarize
@@ -188,6 +189,9 @@ def render_details(r: dict) -> str:
         if a["status"] != "pending":
             out += [f"- decided by **{a['by']}** at {a['at']}" + (f": {a['reason']}" if a.get("reason") else ""),
                     f"- receipt content sha256 at decision: `{a['receipt_sha256']}`"]
+            if a.get("code_version") or a.get("policy"):
+                out.append(f"- decided with eda-agent {version_label(a.get('code_version'))}; approval policy "
+                           f"{a.get('policy') or 'not recorded'}")
             if a.get("overrode_gate"):
                 out.append("- this approval overrode the evidence gate's rejection")
         else:

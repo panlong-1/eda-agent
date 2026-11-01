@@ -9,6 +9,7 @@ import html
 import json
 import re
 
+from ...core.version import label as version_label
 from ..levels import FINDING_LEVEL, LEVELS, TITLE, Issue, counts_line, first_sentence
 from .data import receipt_kind
 from .markdown import details_md
@@ -456,6 +457,9 @@ def _details_html(r: dict, link=plain_link) -> list[str]:
                      f"receipt content sha256 at decision: <code>{e(a['receipt_sha256'])}</code>"]
             if a.get("levels"):
                 rows.append(f"levels at the decision: {e(counts_line(a['levels']))}")
+            if a.get("code_version") or a.get("policy"):
+                rows.append(f"decided with eda-agent {e(version_label(a.get('code_version')))}; approval policy "
+                            f"{e(a.get('policy') or 'not recorded')}")
             if a.get("overrode_gate") or a.get("override"):
                 rows.append("this approval overrode a Fatal item or the evidence gate's rejection")
         out.append(sec("Human approval", ul(rows)))

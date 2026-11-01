@@ -17,6 +17,7 @@ import json
 from pathlib import Path
 
 from ...core.envelope import EVIDENCE_LEVELS
+from ...core.version import code_version
 from ...core.snapshot import consistency
 from ..gate import described_cases, executed_cases, split_residual, timing_results
 from ..loop import RunReport
@@ -62,6 +63,7 @@ def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, p
         "prompt": prompt,
         "project": project,
         **({"project_root": project_root} if project_root else {}),
+        "code_version": code_version(),
         "stop_reason": report.stop_reason,
         "status": report.status,
         "gate": {"status": gate_status, "rewrites": max(0, len(report.gate) - 1), "decisions": report.gate},
@@ -183,7 +185,7 @@ def testgen_receipt(*, run_id: str, project: str, provider: str, model: str, pro
     test review, and the report the code wrote from them with the gate's decision on it."""
     return {
         "kind": "testgen", "run_id": run_id, "project": project, "provider": provider,
-        "model": model, "prompt": prompt, "review_prompt": review_prompt,
+        "model": model, "prompt": prompt, "review_prompt": review_prompt, "code_version": code_version(),
         "mutate_run": mutate_run, "targets": targets,
         "results": results, "gate": gate, "final_claims": gate["report"],
         "usage": usage, "wall_s": wall_s,

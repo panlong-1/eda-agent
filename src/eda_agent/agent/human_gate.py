@@ -26,8 +26,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..core import hashing
+from ..core.version import code_version
 
 AWAITING = "awaiting_approval"
+# The approval policy decide() enforces (module docstring); recorded with every decision, so a
+# decision made under other rules can be recognised later (levels.py warns about it).
+POLICY = "levels.v1: Fatal needs --override and --reason, Error needs --reason, Warnings a plain approve"
 # Fields left out of the decided content: what the decision itself writes, plus derived or
 # advisory data that may be (re)written later (issue levels, the model-written summary).
 NOT_HASHED = ("approval", "status", "agent_status", "levels", "narrative", "narratives")
@@ -116,6 +120,8 @@ def decide(receipt: dict, decision: str, by: str, reason: str = "", override_gat
         "overrode_gate": status == "pending" and decision == "approve",
         "override": decision == "approve" and bool(c["fatal"] or status == "pending"),
         "levels": c,
+        "policy": POLICY,
+        "code_version": code_version(),
         "receipt_sha256": content_sha256(receipt),
     })
     receipt.setdefault("agent_status", status)
