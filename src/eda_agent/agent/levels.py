@@ -258,9 +258,13 @@ def assess(r: dict) -> list[Issue]:
         out.append(Issue(level, text, shorten(quote, 400), source))
     a = r.get("approval") or {}
     kind = receipt_kind(r)
-    if kind in ("testgen", "import"):
-        (_assess_testgen if kind == "testgen" else _assess_import)(r, add)
-        if kind == "testgen":
+    if kind in ("testgen", "import", "tune"):
+        if kind == "tune":
+            from .receipt.tune import assess_tune
+            assess_tune(r, add)
+        else:
+            (_assess_testgen if kind == "testgen" else _assess_import)(r, add)
+        if kind in ("testgen", "tune"):
             _assess_decision(r, list(out), add)
         return sorted(out, key=lambda i: LEVELS.index(i.level))
 

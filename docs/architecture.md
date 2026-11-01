@@ -6,6 +6,7 @@ src/eda_agent/
     envelope.py          ToolResult: status, evidence_level, claim_scope, metrics, diagnostics, sha256
     project.py           per-design TOML: env script, filelists, regression entry point, case list
     pnr.py               [pnr]: the project's RTL-to-GDS flow; settings no run may override
+    knobs.py             the flow knobs tuning may change and the ones it never may (SDC, clock, checks)
     proc.py              subprocess with a hard timeout that also kills child processes; allowlist
     flow_sources.py      [flow] from a LibreLane config; PDK presets (IHP SG13G2)
     settings.py          finds eda-agent.toml; personal defaults in ~/.config/eda-agent/config.toml
@@ -69,6 +70,8 @@ src/eda_agent/
                          write-tests, the receipt summary)
     reviewer.py          independent review I0-I3 (context assembled by code) + rule-based reviewer
     testgen.py           write-tests: the fixed loop in which a model writes tests against mutants
+    tuning.py            back-end tuning (tuning.md): cited lessons from the experience tables; the
+                         propose -> check -> flow_run -> compare -> lesson loop (flow tools passed in by cli)
     levels.py            Fatal / Error / Warning: every rule in one table, used everywhere
     human_gate.py        awaiting_approval / approve / reject / pending, recorded in the receipt
     receipt/             one pipeline for every receipt (agent runs, write-tests, imports):
@@ -80,6 +83,7 @@ src/eda_agent/
       files.py           writes the .json (with its levels) and both pages
       narrative.py       optional model-written summary, checked by the evidence gate
       localise.py        failure localisation: the trace-chain table and an inline-SVG waveform snippet
+      tune.py            the tune receipt: proposals, knob policy, runs, verdicts, lesson updates, patch
     sources.py           file references in a receipt, and which ones the review page may show
     mcp_client.py        connects the loop to the MCP server
   cli/                   eda-agent: one module per subcommand (run.py: run and check; decide.py:
@@ -87,7 +91,7 @@ src/eda_agent/
                          standard; ...), common.py for what they share
   review_ui.py           eda-agent review-ui: the receipts in a local page, decide by clicking
   prompts/               system.v3.md (default: v2 plus localising a failure; v1, v2 kept), reviewer.v1.md, testgen.v3.md,
-                         testgen-review.v1.md, receipt_summary.v1.md, presets.v1.toml (the fixed
+                         testgen-review.v1.md, tune-lessons.v1.md, tune-propose.v1.md, receipt_summary.v1.md, presets.v1.toml (the fixed
                          tasks of `check`); names and versions are recorded in every receipt
 projects/torv.toml       TORV rv32m SoC (format torv)
 projects/picorv32.toml   YosysHQ PicoRV32 (format exitcode + pass/fail regex)

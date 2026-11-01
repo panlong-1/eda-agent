@@ -33,9 +33,12 @@ class PnrConfig:
             raise ValueError("[pnr] needs config (the flow's config file)")
         if self.timeout_s < 1:
             raise ValueError("[pnr] timeout_s must be positive")
-        if bad := set(self.allowed_overrides) & set(NEVER_OVERRIDE.get(self.backend, ())):
-            raise ValueError(f"[pnr] allowed_overrides may not include {sorted(bad)}: the SDC and clock "
-                             "belong to the design team")
+        from .knobs import forbidden_name
+        bad = set(self.allowed_overrides) & set(NEVER_OVERRIDE.get(self.backend, ()))
+        bad |= {k for k in self.allowed_overrides if forbidden_name(k, self.backend)}
+        if bad:
+            raise ValueError(f"[pnr] allowed_overrides may not include {sorted(bad)}: the SDC, the clock, the "
+                             "signoff corners and the checks belong to the design team (core/knobs.py)")
 
 
 def load_pnr(data: dict | None) -> PnrConfig | None:

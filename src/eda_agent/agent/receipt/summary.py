@@ -91,6 +91,9 @@ def summarize(r: dict) -> Summary:
         return _summarize_testgen(r)
     if kind == "import":
         return _summarize_import(r)
+    if kind == "tune":
+        from .tune import summarize_tune
+        return summarize_tune(r)
     a = r.get("approval") or {}
     issues = assess(r)
     s = Summary(run_id=r["run_id"], task=r["task"],

@@ -89,3 +89,7 @@ tested (the key never changed).
 read-only and only the copy writable, writes the image digest, SDC sha256 and source commit
 next to the run, and reports it. One flow at a time (a lock file). Config overrides are limited
 to `allowed_overrides`; the SDC, clock port and period can never be overridden.
+
+**Tuning.** `eda-agent tune` proposes knob patches from the run history and the lessons, checks them
+against the forbidden-knob list in `core/knobs.py`, runs them with `flow_run` within a budget and
+waits for a person with the patch: [tuning.md](tuning.md).

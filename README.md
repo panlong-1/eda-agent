@@ -71,6 +71,7 @@ trace) and a receipt `runs/<id>.receipt.json`, rendered as `.html` and `.md`.
 - [docs/mutation-and-tests.md](docs/mutation-and-tests.md): `mutate`, `write-tests`, `perf`
 - [docs/failure-localisation.md](docs/failure-localisation.md): `hierarchy`, `trace_driver`, `trace_load`, `waveform_query`; the trace chain and waveform in the review page
 - [docs/flow-signoff.md](docs/flow-signoff.md): `flow_report`, `flow_run`, signoff rules, run history, flow adapters
+- [docs/tuning.md](docs/tuning.md): lessons from the run history with checked citations; `tune`: propose, check (forbidden knobs in code), run on a copy, compare, verify or refute, patch for approval
 - [docs/lineage.md](docs/lineage.md): design snapshots and flow lineage
 - [docs/plugins.md](docs/plugins.md): importers and flow adapters
 - [docs/architecture.md](docs/architecture.md): source layout and the one-way layers
@@ -83,7 +84,8 @@ Done: M1 (case descriptions, regression formats, evidence gate, receipts), M1.1 
 command allowlist), M1.2 (`init`, `doctor`, `check`, FuseSoC/LibreLane inputs), M2 (synthesis and
 pre-PnR STA, `check_sdc`, reviewers, human gate), M2.5 (mutation, `perf`, `write-tests`, gates
 R6/R7), M4 step 1 (LibreLane `flow_report`/`flow_run`, signoff rules, gate R8, lineage, run
-history, flow adapters), plug-ins (importers, gate R9).
+history, flow adapters), plug-ins (importers, gate R9), M4.1 steps 2-3 (cited flow lessons, `tune`
+under a run budget with the forbidden-knob list in code).
 
 Next: setup diagnosis and failure localisation (logs, waveforms), a lessons store; a vertical acceptance run on TORV; a comparison
 experiment; later gate-level simulation for a full E5, more PDKs and simulators, and commercial

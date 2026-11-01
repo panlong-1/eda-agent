@@ -35,6 +35,9 @@ Where lessons come from:
 - **runs**: a report may end with a section `## Lessons (hypotheses)` of at most 3 items. When the gate
   passed, each item is recorded as a hypothesis sourced to the run id and its trace's sha256
   (`--no-learn` turns this off). A person verifies or voids it later;
+- **the experience tables**: `eda-agent lessons propose` (a model proposes, code checks every cited
+  number against the tables; hypotheses only) and `eda-agent tune` (each tuning run verifies or refutes
+  the lesson it tested, citing the run): [tuning.md](tuning.md);
 - **a person**: `eda-agent lessons add | refute | verify | void` (the person is git `user.name`, as for
   approvals). `void` is the human gate for memory.
 

@@ -1,10 +1,11 @@
 """Layer 1, data: what a receipt records, built from the run report and the tool envelopes.
 
-Three kinds of receipt share the tables and pages built on top of this layer:
+Four kinds of receipt share the tables and pages built on top of this layer:
 
     run       an agent run (eda-agent run / check): runs/<id>.receipt.json, built by build_receipt
     testgen   new tests against surviving mutants (eda-agent write-tests): testgen_receipt
     import    a report made elsewhere (eda-agent import): the record tools/importing.py writes
+    tune      back-end tuning (eda-agent tune): receipt/tune.py, all its layers in one module
 
 Nothing here is re-derived by a model. Receipts written before the per-check numbers were kept
 get them, for display only, from the run's own trace (`with_trace_data`); the .json is never

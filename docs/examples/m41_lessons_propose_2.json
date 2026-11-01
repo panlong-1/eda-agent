@@ -1,0 +1,349 @@
+{
+ "project": "torv",
+ "provider": "deepseek",
+ "model": "deepseek-v4-pro",
+ "prompt": "tune-lessons.v1",
+ "usage": {
+  "input_tokens": 5460,
+  "output_tokens": 10426,
+  "cache_read_input_tokens": 5248,
+  "cache_creation_input_tokens": 0
+ },
+ "dry_run": false,
+ "accepted": [
+  {
+   "lesson": {
+    "text": "Refines lesson-torv-004: in the imported isolated pair p7_nobooth -> p7_booth (SYNTH_MUL_BOOTH False -> True), synthesis area falls 8.43% (267887 -> 245314 um2) while pre-PnR setup WNS changes are small: fast +0.015 ns (1.514 -> 1.529), slow +0.280 ns (-2.934 -> -2.654), typ +0.151 ns (-0.162 -> -0.011). This is one imported pair, so treat the WNS deltas as a hypothesis.",
+    "knob": "SYNTH_MUL_BOOTH",
+    "cites": [
+     "p7_nobooth:synth_area_um2",
+     "p7_booth:synth_area_um2",
+     "p7_nobooth:pre_setup_wns_fast",
+     "p7_booth:pre_setup_wns_fast",
+     "p7_nobooth:pre_setup_wns_slow",
+     "p7_booth:pre_setup_wns_slow",
+     "p7_nobooth:pre_setup_wns_typ",
+     "p7_booth:pre_setup_wns_typ"
+    ]
+   },
+   "entry": {
+    "id": "lesson-torv-012",
+    "design": "torv",
+    "kind": "lesson",
+    "text": "Refines lesson-torv-004: in the imported isolated pair p7_nobooth -> p7_booth (SYNTH_MUL_BOOTH False -> True), synthesis area falls 8.43% (267887 -> 245314 um2) while pre-PnR setup WNS changes are small: fast +0.015 ns (1.514 -> 1.529), slow +0.280 ns (-2.934 -> -2.654), typ +0.151 ns (-0.162 -> -0.011). This is one imported pair, so treat the WNS deltas as a hypothesis.",
+    "scope": {
+     "design": "torv",
+     "tool": "librelane",
+     "pdk": "ihp-sg13g2",
+     "corner": "fast,slow,typ",
+     "problem": "SYNTH_MUL_BOOTH"
+    },
+    "status": "hypothesis",
+    "sources": [
+     {
+      "run_id": "p7_nobooth",
+      "note": "imported table: synth_area_um2 = 267887.0",
+      "sha256": "d0f6f82c831142e41ad12d274ec1b6dcbba476f41781605960baae9fc4664759",
+      "file": "p7_nobooth metrics/STA summary"
+     },
+     {
+      "run_id": "p7_booth",
+      "note": "imported table: synth_area_um2 = 245314.0",
+      "sha256": "573ade0a4ffc72c9d9b46a6a95f2ce4e3544b891212f7bf02ec07a603ee095ad",
+      "file": "p7_booth metrics/STA summary"
+     },
+     {
+      "run_id": "p7_nobooth",
+      "note": "imported table: pre_setup_wns_fast = 1.514",
+      "sha256": "d0f6f82c831142e41ad12d274ec1b6dcbba476f41781605960baae9fc4664759",
+      "file": "p7_nobooth metrics/STA summary"
+     },
+     {
+      "run_id": "p7_booth",
+      "note": "imported table: pre_setup_wns_fast = 1.529",
+      "sha256": "573ade0a4ffc72c9d9b46a6a95f2ce4e3544b891212f7bf02ec07a603ee095ad",
+      "file": "p7_booth metrics/STA summary"
+     },
+     {
+      "run_id": "p7_nobooth",
+      "note": "imported table: pre_setup_wns_slow = -2.934",
+      "sha256": "d0f6f82c831142e41ad12d274ec1b6dcbba476f41781605960baae9fc4664759",
+      "file": "p7_nobooth metrics/STA summary"
+     },
+     {
+      "run_id": "p7_booth",
+      "note": "imported table: pre_setup_wns_slow = -2.654",
+      "sha256": "573ade0a4ffc72c9d9b46a6a95f2ce4e3544b891212f7bf02ec07a603ee095ad",
+      "file": "p7_booth metrics/STA summary"
+     },
+     {
+      "run_id": "p7_nobooth",
+      "note": "imported table: pre_setup_wns_typ = -0.162",
+      "sha256": "d0f6f82c831142e41ad12d274ec1b6dcbba476f41781605960baae9fc4664759",
+      "file": "p7_nobooth metrics/STA summary"
+     },
+     {
+      "run_id": "p7_booth",
+      "note": "imported table: pre_setup_wns_typ = -0.011",
+      "sha256": "573ade0a4ffc72c9d9b46a6a95f2ce4e3544b891212f7bf02ec07a603ee095ad",
+      "file": "p7_booth metrics/STA summary"
+     }
+    ],
+    "refers_to": null,
+    "by": "agent (deepseek-v4-pro)",
+    "origin": "model proposal (tune-lessons.v1) from the experience tables, checked by code",
+    "reason": "cites: p7_nobooth:synth_area_um2, p7_booth:synth_area_um2, p7_nobooth:pre_setup_wns_fast, p7_booth:pre_setup_wns_fast, p7_nobooth:pre_setup_wns_slow, p7_booth:pre_setup_wns_slow, p7_nobooth:pre_setup_wns_typ, p7_booth:pre_setup_wns_typ",
+    "at": "2026-11-01T02:41:12+01:00"
+   }
+  },
+  {
+   "lesson": {
+    "text": "Imported isolated pair synth -> hier changes SYNTH_HIERARCHY_MODE from flatten to keep and shows no measurable difference: synthesis area 278675 -> 278675 um2, pre-PnR setup WNS fast 0.864 -> 0.864 ns, slow -4.433 -> -4.433 ns, typ -1.132 -> -1.132 ns. Treat this as one imported pair, so the lack of effect is a hypothesis.",
+    "knob": "SYNTH_HIERARCHY_MODE",
+    "cites": [
+     "synth:synth_area_um2",
+     "hier:synth_area_um2",
+     "synth:pre_setup_wns_fast",
+     "hier:pre_setup_wns_fast",
+     "synth:pre_setup_wns_slow",
+     "hier:pre_setup_wns_slow",
+     "synth:pre_setup_wns_typ",
+     "hier:pre_setup_wns_typ"
+    ]
+   },
+   "entry": {
+    "id": "lesson-torv-013",
+    "design": "torv",
+    "kind": "lesson",
+    "text": "Imported isolated pair synth -> hier changes SYNTH_HIERARCHY_MODE from flatten to keep and shows no measurable difference: synthesis area 278675 -> 278675 um2, pre-PnR setup WNS fast 0.864 -> 0.864 ns, slow -4.433 -> -4.433 ns, typ -1.132 -> -1.132 ns. Treat this as one imported pair, so the lack of effect is a hypothesis.",
+    "scope": {
+     "design": "torv",
+     "tool": "librelane",
+     "pdk": "ihp-sg13g2",
+     "corner": "fast,slow,typ",
+     "problem": "SYNTH_HIERARCHY_MODE"
+    },
+    "status": "hypothesis",
+    "sources": [
+     {
+      "run_id": "synth",
+      "note": "imported table: synth_area_um2 = 278675.0",
+      "sha256": "7f6fcd0631054d39ec75f0af7ba243c75f317ba4fc168f07f6ba61c3f6e8e61f",
+      "file": "synth metrics/STA summary"
+     },
+     {
+      "run_id": "hier",
+      "note": "imported table: synth_area_um2 = 278675.0",
+      "sha256": "8c74915f8edcbebe9dec60a5534deb03a36df5f60dc541040a45352fb29c6d8f",
+      "file": "hier metrics/STA summary"
+     },
+     {
+      "run_id": "synth",
+      "note": "imported table: pre_setup_wns_fast = 0.864",
+      "sha256": "7f6fcd0631054d39ec75f0af7ba243c75f317ba4fc168f07f6ba61c3f6e8e61f",
+      "file": "synth metrics/STA summary"
+     },
+     {
+      "run_id": "hier",
+      "note": "imported table: pre_setup_wns_fast = 0.864",
+      "sha256": "8c74915f8edcbebe9dec60a5534deb03a36df5f60dc541040a45352fb29c6d8f",
+      "file": "hier metrics/STA summary"
+     },
+     {
+      "run_id": "synth",
+      "note": "imported table: pre_setup_wns_slow = -4.433",
+      "sha256": "7f6fcd0631054d39ec75f0af7ba243c75f317ba4fc168f07f6ba61c3f6e8e61f",
+      "file": "synth metrics/STA summary"
+     },
+     {
+      "run_id": "hier",
+      "note": "imported table: pre_setup_wns_slow = -4.433",
+      "sha256": "8c74915f8edcbebe9dec60a5534deb03a36df5f60dc541040a45352fb29c6d8f",
+      "file": "hier metrics/STA summary"
+     },
+     {
+      "run_id": "synth",
+      "note": "imported table: pre_setup_wns_typ = -1.132",
+      "sha256": "7f6fcd0631054d39ec75f0af7ba243c75f317ba4fc168f07f6ba61c3f6e8e61f",
+      "file": "synth metrics/STA summary"
+     },
+     {
+      "run_id": "hier",
+      "note": "imported table: pre_setup_wns_typ = -1.132",
+      "sha256": "8c74915f8edcbebe9dec60a5534deb03a36df5f60dc541040a45352fb29c6d8f",
+      "file": "hier metrics/STA summary"
+     }
+    ],
+    "refers_to": null,
+    "by": "agent (deepseek-v4-pro)",
+    "origin": "model proposal (tune-lessons.v1) from the experience tables, checked by code",
+    "reason": "cites: synth:synth_area_um2, hier:synth_area_um2, synth:pre_setup_wns_fast, hier:pre_setup_wns_fast, synth:pre_setup_wns_slow, hier:pre_setup_wns_slow, synth:pre_setup_wns_typ, hier:pre_setup_wns_typ",
+    "at": "2026-11-01T02:41:12+01:00"
+   }
+  },
+  {
+   "lesson": {
+    "text": "The eda-agent run m4_e5_1 reproduces imported full_p10_fwd exactly for post-route slow setup WNS (-0.725 ns), slow violating endpoints (26), die area (508267 um2), and wirelength (1011089 um), so full_p10_fwd's post-PnR results are corroborated by an in-flow run.",
+    "knob": "",
+    "cites": [
+     "m4_e5_1:post_setup_wns_slow",
+     "full_p10_fwd:post_setup_wns_slow",
+     "m4_e5_1:post_setup_violations_slow",
+     "full_p10_fwd:post_setup_violations_slow",
+     "m4_e5_1:die_area_um2",
+     "full_p10_fwd:die_area_um2",
+     "m4_e5_1:wirelength_um",
+     "full_p10_fwd:wirelength_um"
+    ]
+   },
+   "entry": {
+    "id": "lesson-torv-014",
+    "design": "torv",
+    "kind": "lesson",
+    "text": "The eda-agent run m4_e5_1 reproduces imported full_p10_fwd exactly for post-route slow setup WNS (-0.725 ns), slow violating endpoints (26), die area (508267 um2), and wirelength (1011089 um), so full_p10_fwd's post-PnR results are corroborated by an in-flow run.",
+    "scope": {
+     "design": "torv",
+     "tool": "librelane",
+     "pdk": "ihp-sg13g2",
+     "corner": "slow",
+     "problem": ""
+    },
+    "status": "hypothesis",
+    "sources": [
+     {
+      "run_id": "m4_e5_1",
+      "note": "eda_agent table: post_setup_wns_slow = -0.725",
+      "sha256": "3b7b83261fc313ffb34b03196b5d8a6fdf2790ace7af60123973040d92b848f5",
+      "file": "m4_e5_1 metrics/STA summary"
+     },
+     {
+      "run_id": "full_p10_fwd",
+      "note": "imported table: post_setup_wns_slow = -0.725",
+      "sha256": "3b7b83261fc313ffb34b03196b5d8a6fdf2790ace7af60123973040d92b848f5",
+      "file": "full_p10_fwd metrics/STA summary"
+     },
+     {
+      "run_id": "m4_e5_1",
+      "note": "eda_agent table: post_setup_violations_slow = 26",
+      "sha256": "3b7b83261fc313ffb34b03196b5d8a6fdf2790ace7af60123973040d92b848f5",
+      "file": "m4_e5_1 metrics/STA summary"
+     },
+     {
+      "run_id": "full_p10_fwd",
+      "note": "imported table: post_setup_violations_slow = 26",
+      "sha256": "3b7b83261fc313ffb34b03196b5d8a6fdf2790ace7af60123973040d92b848f5",
+      "file": "full_p10_fwd metrics/STA summary"
+     },
+     {
+      "run_id": "m4_e5_1",
+      "note": "eda_agent table: die_area_um2 = 508267",
+      "sha256": "3b7b83261fc313ffb34b03196b5d8a6fdf2790ace7af60123973040d92b848f5",
+      "file": "m4_e5_1 metrics/STA summary"
+     },
+     {
+      "run_id": "full_p10_fwd",
+      "note": "imported table: die_area_um2 = 508267",
+      "sha256": "3b7b83261fc313ffb34b03196b5d8a6fdf2790ace7af60123973040d92b848f5",
+      "file": "full_p10_fwd metrics/STA summary"
+     },
+     {
+      "run_id": "m4_e5_1",
+      "note": "eda_agent table: wirelength_um = 1011089",
+      "sha256": "3b7b83261fc313ffb34b03196b5d8a6fdf2790ace7af60123973040d92b848f5",
+      "file": "m4_e5_1 metrics/STA summary"
+     },
+     {
+      "run_id": "full_p10_fwd",
+      "note": "imported table: wirelength_um = 1011089",
+      "sha256": "3b7b83261fc313ffb34b03196b5d8a6fdf2790ace7af60123973040d92b848f5",
+      "file": "full_p10_fwd metrics/STA summary"
+     }
+    ],
+    "refers_to": null,
+    "by": "agent (deepseek-v4-pro)",
+    "origin": "model proposal (tune-lessons.v1) from the experience tables, checked by code",
+    "reason": "cites: m4_e5_1:post_setup_wns_slow, full_p10_fwd:post_setup_wns_slow, m4_e5_1:post_setup_violations_slow, full_p10_fwd:post_setup_violations_slow, m4_e5_1:die_area_um2, full_p10_fwd:die_area_um2, m4_e5_1:wirelength_um, full_p10_fwd:wirelength_um",
+    "at": "2026-11-01T02:41:12+01:00"
+   }
+  },
+  {
+   "lesson": {
+    "text": "Refines lesson-torv-011: imported full_p10 -> full_p10_booth is also confounded because both RUN_POST_GRT_RESIZER_TIMING and SYNTH_MUL_BOOTH change, so the slow post-route setup WNS improvement from -4.35 ns to -0.763 ns cannot be assigned to RUN_POST_GRT_RESIZER_TIMING alone.",
+    "knob": "RUN_POST_GRT_RESIZER_TIMING",
+    "cites": [
+     "full_p10:post_setup_wns_slow",
+     "full_p10_booth:post_setup_wns_slow"
+    ]
+   },
+   "entry": {
+    "id": "lesson-torv-015",
+    "design": "torv",
+    "kind": "lesson",
+    "text": "Refines lesson-torv-011: imported full_p10 -> full_p10_booth is also confounded because both RUN_POST_GRT_RESIZER_TIMING and SYNTH_MUL_BOOTH change, so the slow post-route setup WNS improvement from -4.35 ns to -0.763 ns cannot be assigned to RUN_POST_GRT_RESIZER_TIMING alone.",
+    "scope": {
+     "design": "torv",
+     "tool": "librelane",
+     "pdk": "ihp-sg13g2",
+     "corner": "slow",
+     "problem": "RUN_POST_GRT_RESIZER_TIMING"
+    },
+    "status": "hypothesis",
+    "sources": [
+     {
+      "run_id": "full_p10",
+      "note": "imported table: post_setup_wns_slow = -4.35",
+      "sha256": "ca89bd8e6f509b2f426e587eef5d7ff84d806414739096d371b7192aaa605a1e",
+      "file": "full_p10 metrics/STA summary"
+     },
+     {
+      "run_id": "full_p10_booth",
+      "note": "imported table: post_setup_wns_slow = -0.763",
+      "sha256": "d8c8f8547d961af51b88d7f5745131d618caa7902fe1ea37835baf3344f3c48e",
+      "file": "full_p10_booth metrics/STA summary"
+     }
+    ],
+    "refers_to": null,
+    "by": "agent (deepseek-v4-pro)",
+    "origin": "model proposal (tune-lessons.v1) from the experience tables, checked by code",
+    "reason": "cites: full_p10:post_setup_wns_slow, full_p10_booth:post_setup_wns_slow",
+    "at": "2026-11-01T02:41:12+01:00"
+   }
+  }
+ ],
+ "rejected": [
+  {
+   "lesson": {
+    "text": "Imported runs full_p10 and full_p10_tfix both record the same config as full_p10, but they did not reproduce each other: synthesis area 264188 -> 267887 um2, synth cells 20088 -> 20321, and post-route slow setup WNS -4.35 -> -2.436 ns. Since they differ outside the recorded knobs and are imported, treat this same-config pair as evidence of unrecorded run-to-run variation, not a tuned effect.",
+    "knob": "",
+    "cites": [
+     "full_p10:synth_area_um2",
+     "full_p10_tfix:synth_area_um2",
+     "full_p10:synth_cells",
+     "full_p10_tfix:synth_cells",
+     "full_p10:post_setup_wns_slow",
+     "full_p10_tfix:post_setup_wns_slow"
+    ]
+   },
+   "reasons": [
+    "(R1) names run synth but cites none of its numbers"
+   ]
+  },
+  {
+   "lesson": {
+    "text": "Imported full_p10_booth and full_p10_fwd have the same config changes vs full_p10 (RUN_POST_GRT_RESIZER_TIMING=True, SYNTH_MUL_BOOTH=True), yet their synthesis results differ materially (area 245314 -> 239469 um2, cells 18022 -> 16389), so there is an unrecorded difference between these two imported runs and they should not be treated as replicates of one knob setting.",
+    "knob": "",
+    "cites": [
+     "full_p10_booth:synth_area_um2",
+     "full_p10_fwd:synth_area_um2",
+     "full_p10_booth:synth_cells",
+     "full_p10_fwd:synth_cells"
+    ]
+   },
+   "reasons": [
+    "(R1) names run full_p10 but cites none of its numbers"
+   ]
+  }
+ ],
+ "reply_tail": "\": \"Imported full_p10_booth and full_p10_fwd have the same config changes vs full_p10 (RUN_POST_GRT_RESIZER_TIMING=True, SYNTH_MUL_BOOTH=True), yet their synthesis results differ materially (area 245314 -> 239469 um2, cells 18022 -> 16389), so there is an unrecorded difference between these two imported runs and they should not be treated as replicates of one knob setting.\", \"knob\": \"\", \"cites\": [\"full_p10_booth:synth_area_um2\", \"full_p10_fwd:synth_area_um2\", \"full_p10_booth:synth_cells\", \"full_p10_fwd:synth_cells\"]},\n  {\"text\": \"The eda-agent run m4_e5_1 reproduces imported full_p10_fwd exactly for post-route slow setup WNS (-0.725 ns), slow violating endpoints (26), die area (508267 um2), and wirelength (1011089 um), so full_p10_fwd's post-PnR results are corroborated by an in-flow run.\", \"knob\": \"\", \"cites\": [\"m4_e5_1:post_setup_wns_slow\", \"full_p10_fwd:post_setup_wns_slow\", \"m4_e5_1:post_setup_violations_slow\", \"full_p10_fwd:post_setup_violations_slow\", \"m4_e5_1:die_area_um2\", \"full_p10_fwd:die_area_um2\", \"m4_e5_1:wirelength_um\", \"full_p10_fwd:wirelength_um\"]},\n  {\"text\": \"Refines lesson-torv-011: imported full_p10 -> full_p10_booth is also confounded because both RUN_POST_GRT_RESIZER_TIMING and SYNTH_MUL_BOOTH change, so the slow post-route setup WNS improvement from -4.35 ns to -0.763 ns cannot be assigned to RUN_POST_GRT_RESIZER_TIMING alone.\", \"knob\": \"RUN_POST_GRT_RESIZER_TIMING\", \"cites\": [\"full_p10:post_setup_wns_slow\", \"full_p10_booth:post_setup_wns_slow\"]}\n]}\n```",
+ "parsed": true
+}
