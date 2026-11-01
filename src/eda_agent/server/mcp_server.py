@@ -16,7 +16,7 @@ from ..tools.flow_history import run_flow_history
 from ..tools.lint import run_lint
 from ..tools.mutate import run_mutate
 from ..tools.perf import run_perf
-from ..tools.testcase import run_score_tests, run_test_context, run_write_case
+from ..tools.testcase import run_mutate_result, run_score_tests, run_test_context, run_write_case
 from ..tools.regress import run_regress
 from ..tools.rtl_trace import run_hierarchy, run_trace_driver, run_trace_load
 from ..tools.waves import run_waveform_query
@@ -217,6 +217,16 @@ def build_server(project: Project) -> MCPServer:
                seed: int = 1, confirm_full: bool = False) -> dict:
         return attach(run_mutate(project, file, count=count, types=types, cases=cases, seed=seed,
                                  confirm_full=confirm_full), project).to_dict()
+
+    @server.tool(description=(
+        "Read back a finished mutate run (its directory name under runs/work/, e.g. torv_mutate_<time>): which "
+        "mutants the cases killed, survivors, kill rate, as recorded. Nothing is run. Says whether the mutated "
+        "file is still the same as in the project root; if it changed since, the facts are about the earlier "
+        "version and do not cover the change. Evidence level E0 (facts). A fresh mutate needs the current "
+        "design to pass its cases."
+    ))
+    def mutate_result(mutate_run: str) -> dict:
+        return run_mutate_result(project, mutate_run)
 
     pnr = project.pnr
     pnr_what = (f"LibreLane config {pnr.config}, default baseline run '{pnr.baseline or 'none'}'" if pnr else

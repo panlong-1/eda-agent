@@ -315,6 +315,18 @@ def test_run_outside_the_project_is_refused(tmp_path):
     assert r.status == "error" and r.error_class == "bad_config"
 
 
+def test_a_bare_name_finds_a_run_of_the_eda_agent_table(tmp_path, monkeypatch):
+    """m4_e5_1 lives in another work directory; the baseline name alone must find it (not only a path)."""
+    cfg, _ = _project(tmp_path, runs=())
+    elsewhere = tmp_path / "other" / "runs" / "m4_e5_1"
+    shutil.copytree(FIXTURE, elsewhere)
+    from eda_agent.tools import flow as F
+    monkeypatch.setattr(F.experience, "eda_records", lambda project: [{"run_id": "m4_e5_1", "run_dir": str(elsewhere)}])
+    p = load_project(cfg)
+    assert resolve_run(p, "m4_e5_1") == elsewhere.resolve()
+    assert "no librelane run" in resolve_run(p, "nope")
+
+
 def test_project_without_pnr_is_refused(tmp_path):
     cfg = tmp_path / "p.toml"
     cfg.write_text(f'name = "t"\nroot = "{tmp_path}"\n[lint]\ntop = "x"\n[regress]\ncmd = ["true"]\n')
