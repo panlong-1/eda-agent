@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import os
 
+from .base import StateFn
+
 from .base import Stop, ToolCall, ToolOutcome, ToolSpec, Turn
 
 _STOP_MAP: dict[str, Stop] = {
@@ -17,6 +19,11 @@ class OpenAICompatAdapter:
     DeepSeek in thinking mode returns `reasoning_content`, and with tools present it
     must be sent back on every later request or the API answers 400. Keeping the
     assistant message as returned (append-only) covers that.
+
+    Compaction therefore replaces whole turns only: the system message stays, the task message
+    becomes "task + run-state table", and the newest `keep_turns` turns (each assistant message with
+    its reasoning_content and tool calls, then its tool messages) follow unchanged. No tool message
+    is left without the assistant message that called it.
     """
 
     def __init__(self, model: str = "deepseek-v4-pro", effort: str = "high",
@@ -33,11 +40,14 @@ class OpenAICompatAdapter:
         self.client = client
         self.tools: list[dict] = []
         self.messages: list[dict] = []
+        self.task = ""
+        self.replaced = 0  # turns replaced so far by compaction
 
     def start(self, system: str, tools: list[ToolSpec], task: str) -> None:
         self.tools = [{"type": "function", "function": {
             "name": t.name, "description": t.description, "parameters": t.input_schema}} for t in tools]
         self.messages = [{"role": "system", "content": system}, {"role": "user", "content": task}]
+        self.task, self.replaced = task, 0
 
     async def step(self) -> Turn:
         resp = await self.client.chat.completions.create(
@@ -83,3 +93,18 @@ class OpenAICompatAdapter:
 
     def add_user_message(self, text: str) -> None:
         self.messages.append({"role": "user", "content": text})
+
+    def compact(self, state: StateFn, keep_turns: int) -> dict | None:
+        turns = [i for i, m in enumerate(self.messages) if m.get("role") == "assistant"]
+        if len(turns) <= keep_turns or self.messages[0].get("role") != "system":
+            return None
+        first, last = self.replaced + 1, self.replaced + len(turns) - keep_turns
+        before, chars = len(self.messages), len(json.dumps(self.messages, default=str))
+        task = {"role": "user", "content": f"{self.task}\n\n{state(first, last)}"}
+        self.messages = [self.messages[0], task] + self.messages[turns[-keep_turns]:]
+        self.replaced = last
+        return {"replaced_turns": [first, last], "kept_turns": keep_turns, "messages_before": before,
+                "messages_after": len(self.messages), "chars_before": chars,
+                "chars_after": len(json.dumps(self.messages, default=str)),
+                "method": "whole turns replaced: task message + run-state table; kept turns unchanged "
+                          "(reasoning_content and tool calls included)"}

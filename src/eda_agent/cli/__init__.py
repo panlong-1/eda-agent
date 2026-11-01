@@ -19,6 +19,7 @@
     eda-agent pending <run_id> --note "..."                             (decide later; the run stays open)
     eda-agent review-ui [--port 8799]                                   (decide by clicking, on localhost)
     eda-agent receipt <run_id> [--narrate]                              (re-render .md/.html [+ model summary])
+    eda-agent lessons list|search|add|refute|verify|void|seed           (the design's lessons store)
 
 --project may be left out when the current directory (or a parent) has eda-agent.toml.
 Personal defaults (provider, model, effort, review, narrate) live in ~/.config/eda-agent/config.toml.
@@ -30,8 +31,8 @@ import asyncio
 import sys
 
 from ..core.settings import user_defaults
-from . import (decide, doctor, flow, init, mutate, perf, perf_baseline, plugins, receipt, review, review_ui, run,
-               write_tests)
+from . import (decide, doctor, flow, init, lessons, mutate, perf, perf_baseline, plugins, receipt, review,
+               review_ui, run, write_tests)
 from .common import (DEFAULT_MODELS, DEFAULT_PROMPT, I3_ALTERNATIVE, PRESETS, REVIEW_CHOICES,  # noqa: F401
                      REVIEW_PROMPT, load_preset, load_prompt, make_model, resolve_project,
                      review_model_choice)
@@ -52,6 +53,7 @@ def main() -> None:
     review.add_parser(sub)
     receipt.add_parser(sub)
     review_ui.add_parser(sub)
+    lessons.add_parser(sub)
 
     # Personal defaults apply to run and check; anything on the command line wins.
     try:
@@ -75,6 +77,9 @@ def main() -> None:
         sys.exit(receipt._receipt(args))
     if args.cmd == "review-ui":
         sys.exit(review_ui._review_ui(args))
+    if args.cmd == "lessons":
+        args.project = resolve_project(args.project)
+        sys.exit(lessons.lessons(args))
     if args.cmd == "mutate":
         sys.exit(mutate._mutate(args))
     if args.cmd == "perf":

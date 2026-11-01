@@ -140,6 +140,16 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--narrate", action="store_true",
                    help="add a model-written summary to the receipt (same provider and model; checked by "
                         "the evidence gate; the tables stay the record)")
+    p.add_argument("--no-memory", action="store_true",
+                   help="no lesson/document hints and no search_memory tool (plan §0.16)")
+    p.add_argument("--no-learn", action="store_true", help="do not record the report's proposed lessons")
+    p.add_argument("--no-compaction", action="store_true", help="never compact the context (no get_result tool)")
+    p.add_argument("--compact-at", type=float, help="compact when a turn's tokens pass this share of the "
+                                                   "context window (default [memory] compact_at, 0.6)")
+    p.add_argument("--compact-after-turns", type=int,
+                   help="also compact every N turns (default [memory] compact_after_turns, 0 = off)")
+    p.add_argument("--context-window", type=int, help="model context window in tokens (default 128000)")
+    p.add_argument("--keep-turns", type=int, help="newest turns kept verbatim when compacting (default 2)")
     _add_review_args(p, "none")
 
 

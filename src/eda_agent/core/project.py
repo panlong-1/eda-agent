@@ -15,6 +15,7 @@ from functools import cache
 from pathlib import Path
 
 from .flow_sources import resolve_flow
+from .memory import MemoryConfig, load_memory
 from .pnr import PnrConfig, load_pnr
 
 
@@ -231,6 +232,7 @@ class Project:
     pnr: PnrConfig | None = None            # None: flow_report and flow_run refuse (no [pnr] section)
     tests: NewTestsConfig | None = None     # None: write_case / score_tests refuse (no [tests])
     setup: SetupConfig = field(default_factory=SetupConfig)  # no [setup]: no step may run
+    memory: MemoryConfig = field(default_factory=MemoryConfig, hash=False, compare=False)  # [memory]: docs, hints, compaction
 
 
 def _setup(data: dict | None) -> SetupConfig:
@@ -309,6 +311,7 @@ def load_project(path: str | Path) -> Project:
         pnr=load_pnr(data.get("pnr")),
         tests=_tests(data.get("tests")),
         setup=_setup(data.get("setup")),
+        memory=load_memory(data.get("memory")),
         lint=LintConfig(
             top=lint["top"],
             filelists=tuple(lint.get("filelists", ())),

@@ -4,6 +4,8 @@
     run page  the receipt, with Approve / Pending / Reject under the decision card
     source    a file the receipt refers to (a finding's file:line, a lint location, an artifact,
               the SDC, the trace, a case's source), read only, the line highlighted
+    lessons   every design's lessons (plan §0.16), searchable; a person may void an entry (the void
+              is itself an append-only entry, with who, when and the reason)
 
 A click calls the same human_gate functions as the command line, with the same rules: Warnings
 only, one click; Error items, tick each one you accept (or write a reason); Fatal items, tick
@@ -34,6 +36,7 @@ from .agent.receipt import with_trace_data, write_receipt
 from .agent.receipt.page import CSS, _badge, _level_badge, e, render_html
 from .agent.receipt.summary import RUN_CLASS
 from .agent.sources import Refused, Sources, project_roots, split_ref
+from .core.memory import LESSONS_FILE, LessonStore, source_text
 
 RUN_ID = re.compile(r"^[A-Za-z0-9_.-]{1,200}$")
 SRC_CSS = """
@@ -52,8 +55,9 @@ class ReviewApp:
     """The pages and the decisions, without the HTTP part (so tests can call it directly)."""
 
     def __init__(self, runs_dir: Path, token: str | None = None, by: str | None = None,
-                 projects_dir: Path | None = None):
+                 projects_dir: Path | None = None, experience_dir: Path | None = None):
         self.runs_dir = runs_dir
+        self.experience_dir = experience_dir or runs_dir / "experience"
         self.token = token or secrets.token_urlsafe(18)
         self.by = by or human_gate.default_approver()
         self.sources = Sources(runs_dir, project_roots([projects_dir, runs_dir.parent / "projects"]))
@@ -100,7 +104,65 @@ class ReviewApp:
                  + "<th>task</th><th>decided / notes</th></tr>" + "".join(body) + "</table></div>") if body \
             else f'<p class="muted">No receipts in {e(self.runs_dir)}.</p>'
         return self._page("Runs to review", f'<h1>Runs to review</h1><p class="note">{e(self.runs_dir.resolve())} · '
-                                            f"deciding as {e(self.by)} (via review-ui)</p>{table}")
+                                            f"deciding as {e(self.by)} (via review-ui) · "
+                                            f'<a href="{e(self.link("/lessons"))}">lessons</a></p>{table}')
+
+    # ---------------------------------------------------------------- lessons
+
+    def _stores(self) -> list[LessonStore]:
+        base = self.experience_dir
+        return [LessonStore(base, d.name) for d in sorted(base.iterdir())
+                if (d / LESSONS_FILE).is_file()] if base.is_dir() else []
+
+    def lessons_page(self, query: str = "", message: str = "", ok: bool = True) -> str:
+        terms = [t.lower() for t in query.split()]
+        rows = []
+        for st in self._stores():
+            for x in st.current().values():
+                hay = " ".join(str(v) for v in (x["id"], x["kind"], x.get("status"), x["text"], x.get("reason"),
+                                                json.dumps(x.get("scope")), source_text(x.get("sources")))).lower()
+                if all(t in hay for t in terms):
+                    rows.append(x)
+        msg = f'<div class="msg {"ok" if ok else "bad"}">{e(message)}</div>' if message else ""
+        body = []
+        for x in rows:
+            st_cls = {"verified": "pass", "hypothesis": "warning", "refuted": "fatal", "void": "muted"}.get(
+                x.get("status") or "", "muted")
+            void = ""
+            if x["kind"] in ("lesson", "refute") and x.get("status") != "void":
+                void = (f'<form method="post" action="/lessons/void"><input type="hidden" name="token" '
+                        f'value="{e(self.token)}"><input type="hidden" name="id" value="{e(x["id"])}">'
+                        f'<input type="hidden" name="design" value="{e(x["design"])}">'
+                        f'<input name="reason" placeholder="reason (required)" size="18"> '
+                        f'<button>Void</button></form>')
+            what = x["text"] or (f'{x["kind"]} of {x.get("refers_to")}: {x.get("reason") or ""}')
+            scope = ", ".join(f"{k}={v}" for k, v in (x.get("scope") or {}).items() if v and k != "design")
+            body.append(f'<tr><td><code>{e(x["id"])}</code></td><td>{e(x["kind"])}</td>'
+                        f'<td>{_badge(x.get("status") or "-", st_cls)}</td><td>{e(what)}</td>'
+                        f'<td class="small">{e(scope)}</td><td class="small">{e(source_text(x.get("sources")))}</td>'
+                        f'<td class="small muted">{e(x.get("by"))} {e(x.get("at"))}</td><td>{void}</td></tr>')
+        table = ('<div class="tbl"><table class="wide"><tr><th>id</th><th>kind</th><th>status</th><th>text</th>'
+                 '<th>scope</th><th>sources</th><th>by / at</th><th></th></tr>' + "".join(body) + "</table></div>") \
+            if body else f'<p class="muted">No lessons{" match" if terms else ""} in {e(self.experience_dir)}.</p>'
+        form = (f'<form method="get" action="/lessons"><input type="hidden" name="t" value="{e(self.token)}">'
+                f'<input name="q" value="{e(query)}" placeholder="search lessons" size="40"> <button>Search</button></form>')
+        return self._page("Lessons", f'<p><a href="{e(self.link("/"))}">← all runs</a></p><h1>Lessons</h1>'
+                                     '<p class="note">Hints from earlier runs and seeded data, never evidence. '
+                                     'Append-only: voiding adds an entry.</p>' + msg + form + table)
+
+    def void_lesson(self, form: dict[str, list[str]]) -> tuple[str, bool]:
+        lid, design = (form.get("id") or [""])[0], (form.get("design") or [""])[0]
+        reason = (form.get("reason") or [""])[0].strip()
+        if not RUN_ID.match(design or "-") or not any(st.design == design for st in self._stores()):
+            return "Not recorded: no such design", False
+        try:
+            with self.lock:
+                entry = LessonStore(self.experience_dir, design).add(
+                    "", kind="void", refers_to=lid, by=f"{self.by} (via review-ui)", origin="person (human gate)",
+                    reason=reason)
+        except ValueError as err:
+            return f"Not recorded: {err}", False
+        return f"Recorded: {entry['id']} voids {lid}.", True
 
     def run_page(self, run_id: str, message: str = "", ok: bool = True) -> str:
         receipt = self._load(run_id)
@@ -270,6 +332,9 @@ def make_handler(app: ReviewApp):
                 return self._send(403, "forbidden: open the URL printed by eda-agent review-ui")
             if url.path == "/":
                 return self._send(200, app.index())
+            if url.path == "/lessons":
+                return self._send(200, app.lessons_page((q.get("q") or [""])[0], (q.get("msg") or [""])[0],
+                                                        ok=(q.get("ok") or ["1"])[0] == "1"))
             if url.path == "/source":
                 try:
                     code, page = app.source_page((q.get("run") or [""])[0], (q.get("ref") or [""])[0],
@@ -294,6 +359,9 @@ def make_handler(app: ReviewApp):
             form = parse_qs(self.rfile.read(length).decode("utf-8", "replace"), keep_blank_values=True)
             if not app.check_token((form.get("token") or [None])[0]):
                 return self._send(403, "forbidden: bad or missing token")
+            if url.path == "/lessons/void":
+                message, ok = app.void_lesson(form)
+                return self._send(303, "", location=app.link("/lessons", msg=message, ok="1" if ok else "0"))
             m = re.fullmatch(r"/run/([^/]+)/decide", url.path)
             if not m:
                 return self._send(404, "not found")

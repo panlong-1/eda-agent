@@ -12,6 +12,7 @@ src/eda_agent/
     snapshot.py          design snapshots and lineage consistency: do results describe one design?
     categories.py        check categories of imported results (CDC, DFT, ...): their rules and numbers
     standards.py         human-set waivers and targets for imported checks
+    memory.py            lessons store per design (append-only), project documents, FTS5 retrieval (memory.md)
     hashing.py           sha256 of a file, of bytes, of JSON data (receipt content, snapshot)
     numbers.py           parsing numbers from tool output, ranking levels, shortening text
     setup_issues.py      setup diagnosis: the rule table on tool output per stage (sim/synth/pnr), file
@@ -57,9 +58,12 @@ src/eda_agent/
   agent/                 the agent runtime; reaches the tools only through MCP
     models/              base.py (ModelAdapter protocol), anthropic.py, openai_compat.py (DeepSeek),
                          scripted.py (for tests)
-    loop.py              tool loop with budgets: turns, tool calls, 2-strike retry stop; JSONL trace
+    loop.py              tool loop with budgets: turns, tool calls, 2-strike retry stop; JSONL trace;
+                         result ids, compaction requests, get_result / search_memory answered locally
+    memory.py            hints of a run, get_result and search_memory specs, compaction settings
+    runstate.py          the run-state table that replaces compacted turns (built by code)
     gate/                evidence gate on the final report (no LLM), up to 2 rewrites: one module
-                         per rule, r1_citations.py .. r10_localise.py, common.py, and __init__.py
+                         per rule, r1_citations.py .. r11_memory.py, common.py, and __init__.py
                          (check_report runs them all)
     model_output.py      a model's reply -> structured fields -> the evidence gate (reviewer,
                          write-tests, the receipt summary)

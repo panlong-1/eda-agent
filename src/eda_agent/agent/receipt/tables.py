@@ -56,6 +56,11 @@ TT = {
     # findings, gate, cost
     "findings": "Reviewer findings", "reviewer": "reviewer", "finding": "finding",
     "no_findings": "no findings",
+    "mem_hints": "Memory used as hints (not evidence)", "mem_id": "id", "mem_kind": "kind",
+    "mem_status": "status", "mem_how": "how", "mem_cited": "cited in report", "mem_source": "source",
+    "compactions": "Context compactions (run-state table built by code)", "number": "#",
+    "at_turn": "at turn", "replaced": "turns replaced", "reason": "why", "method": "how",
+    "fetches": "get_result fetches (raw results read back from the trace)", "turn": "turn", "found": "found",
     "gate": "Evidence gate decisions", "attempt": "attempt", "result": "result",
     "best_level": "best passing evidence", "reasons": "reasons",
     "pass": "pass", "reject": "reject",
@@ -439,6 +444,30 @@ def import_tables(r: dict) -> list[Table]:
     return out
 
 
+def memory_tables(r: dict) -> list[Table]:
+    m = r.get("memory") or {}
+    out = []
+    if m.get("used_as_hints"):
+        t = Table(tt("mem_hints"), [tt(k) for k in ("mem_id", "mem_kind", "mem_status", "mem_how", "mem_cited",
+                                                     "mem_source")], note=m.get("note", ""))
+        for u in m["used_as_hints"]:
+            t.rows.append([u["id"], u.get("kind", ""), (u.get("status") or "") + (f" ({u['note']})" if u.get("note")
+                                                                                 else ""),
+                           u.get("how", ""), tt("yes") if u.get("cited") else "no", u.get("source", "")])
+        out.append(t)
+    if m.get("compactions"):
+        t = Table(tt("compactions"), [tt(k) for k in ("number", "at_turn", "replaced", "reason", "method")])
+        for c in m["compactions"]:
+            a, b = c.get("replaced_turns") or ["?", "?"]
+            t.rows.append([c.get("number"), c.get("at_turn"), f"{a}-{b}", c.get("reason", ""), c.get("method", "")])
+        out.append(t)
+    if m.get("fetches"):
+        t = Table(tt("fetches"), [tt(k) for k in ("turn", "mem_id", "found")])
+        t.rows = [[f.get("turn"), f.get("id"), tt("yes") if f.get("found") else "no"] for f in m["fetches"]]
+        out.append(t)
+    return out
+
+
 # ---------------------------------------------------------------- all
 
 def data_tables(r: dict) -> list[Table]:
@@ -449,7 +478,8 @@ def data_tables(r: dict) -> list[Table]:
         return import_tables(r)
     from .localise import localise_tables  # it builds on Table
     return (regress_tables(r) + case_tables(r) + lint_tables(r) + synth_tables(r) + sdc_tables(r)
-            + localise_tables(r) + other_tables(r) + findings_table(r) + gate_table(r) + cost_table(r))
+            + localise_tables(r) + other_tables(r) + findings_table(r) + gate_table(r) + memory_tables(r)
+            + cost_table(r))
 
 
 def trace_note(r: dict) -> str:
