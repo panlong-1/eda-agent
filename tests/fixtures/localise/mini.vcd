@@ -1,0 +1,70 @@
+$comment Synthetic waveform for the localisation tests (hand-written; Verilator-style scopes) $end
+$timescale 1ns $end
+$scope module TOP $end
+$var wire 1 ! clk $end
+$scope module tb $end
+$var wire 1 ! clk $end
+$var wire 1 " rst $end
+$scope module dut $end
+$var wire 1 ! clk $end
+$var wire 1 " rst $end
+$var wire 1 # en $end
+$var wire 1 $ ben $end
+$var wire 4 % out [3:0] $end
+$var wire 4 & cnt [3:0] $end
+$var wire 4 % sum [3:0] $end
+$scope module u_sel $end
+$var wire 1 # a_en $end
+$var wire 1 $ b_en $end
+$var wire 4 & a [3:0] $end
+$var wire 4 ' b [3:0] $end
+$var wire 4 % y [3:0] $end
+$upscope $end
+$upscope $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+#0
+0!
+1"
+0#
+0$
+b0000 %
+b0000 &
+b0011 '
+#5
+1!
+#10
+0!
+0"
+1#
+#15
+1!
+b0001 &
+b0001 %
+#20
+0!
+0#
+1$
+b0000 %
+#25
+1!
+b0010 &
+#30
+0!
+#35
+1!
+b0011 &
+#40
+0!
+#45
+1!
+b0100 &
+#50
+0!
+#55
+1!
+b0101 &
+#60
+0!
+bx1x0 '

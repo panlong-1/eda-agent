@@ -270,7 +270,7 @@ def sdc_tables(r: dict) -> list[Table]:
     return out
 
 
-KNOWN = ("regress", "lint", "synth", "check_sdc")
+KNOWN = ("regress", "lint", "synth", "check_sdc", "hierarchy", "trace_driver", "trace_load", "waveform_query")
 
 
 def _plain_rows(m: dict) -> list[list]:
@@ -447,8 +447,9 @@ def data_tables(r: dict) -> list[Table]:
         return testgen_tables(r)
     if kind == "import":
         return import_tables(r)
+    from .localise import localise_tables  # it builds on Table
     return (regress_tables(r) + case_tables(r) + lint_tables(r) + synth_tables(r) + sdc_tables(r)
-            + other_tables(r) + findings_table(r) + gate_table(r) + cost_table(r))
+            + localise_tables(r) + other_tables(r) + findings_table(r) + gate_table(r) + cost_table(r))
 
 
 def trace_note(r: dict) -> str:

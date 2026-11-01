@@ -22,7 +22,7 @@ I3_ALTERNATIVE = {"deepseek-v4-pro": "deepseek-v4-flash", "deepseek-v4-flash": "
                   "claude-opus-5-5": "claude-sonnet-5-5"}
 # System prompts ship in the package (eda_agent/prompts/<name>.md); the name, with its version,
 # goes into the receipt. A path to any .md file works too, for trying a draft prompt.
-DEFAULT_PROMPT = "system.v2"  # v2 (M2): the timing rule; system.v1 stays loadable by name
+DEFAULT_PROMPT = "system.v3"  # v3: localising a failure; v2 (M2, the timing rule) and v1 stay loadable by name
 REVIEW_PROMPT = "reviewer.v1"
 REVIEW_CHOICES = ("none", "rules", *LEVELS)
 PRESETS = "presets.v1"  # fixed tasks for `eda-agent check`

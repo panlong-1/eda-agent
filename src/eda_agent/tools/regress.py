@@ -35,8 +35,23 @@ def _case_args(cfg: RegressConfig, spec: CaseSpec) -> list[str]:
     return [cfg.case_flag, spec.name] if cfg.case_flag else []
 
 
+MAX_WAVE_CASES = 2  # waveforms are large: dump them for the failing case(s) only
+
+
+def waves_files(cfg: RegressConfig, logs: dict[str, str], names: list[str]) -> dict[str, str]:
+    """Case -> waveform file the regression wrote for it (only files that exist)."""
+    out = {}
+    for name in names:
+        case_dir = str(Path(logs[name]).parent) if name in logs else ""
+        p = Path(cfg.waves_file.format(name=name, case_dir=case_dir))
+        if case_dir or p.is_absolute():
+            if p.is_file():
+                out[name] = str(p)
+    return out
+
+
 def run_regress(project: Project, cases: list[str] | None = None, max_diagnostics: int = 10,
-                log_dir: Path = LOG_DIR) -> ToolResult:
+                log_dir: Path = LOG_DIR, waves: bool = False) -> ToolResult:
     cfg = project.regress
     scope = claim_scope(cfg)
     specs = {s.name: s for s in case_specs(project)}
@@ -46,6 +61,12 @@ def run_regress(project: Project, cases: list[str] | None = None, max_diagnostic
         return ToolResult("regress", "error", "E2", scope,
                           summary=f"unknown case(s) {bad}; call list_regress_cases first",
                           error_class="bad_request")
+    if waves and not (cfg.waves_flag and cfg.waves_file):
+        return ToolResult("regress", "error", "E2", scope, error_class="not_configured",
+                          summary="this project's [regress] has no waves_flag/waves_file: waveforms cannot be dumped")
+    if waves and not 1 <= len(cases) <= MAX_WAVE_CASES:
+        return ToolResult("regress", "error", "E2", scope, error_class="bad_request",
+                          summary=f"waves=true needs the failing case(s) by name, at most {MAX_WAVE_CASES}")
 
     if refused := check_allowed(list(cfg.cmd), project.root, project.allowed_commands):
         return ToolResult("regress", "error", "E2", scope, summary=refused, error_class="not_allowed")
@@ -53,10 +74,11 @@ def run_regress(project: Project, cases: list[str] | None = None, max_diagnostic
     versions = project_versions(project)
     if cfg.format == "exitcode":
         # No "run everything" switch to rely on: run each case on its own.
-        cmds = {c: [*cfg.cmd, *_case_args(cfg, specs[c])] for c in cases or specs}
+        cmds = {c: [*cfg.cmd, *([cfg.waves_flag] if waves else []), *_case_args(cfg, specs[c])]
+                for c in cases or specs}
         outcome = exitcode.run_cases(project, cmds, env, log_dir)
     else:
-        cmd = [*cfg.cmd]
+        cmd = [*cfg.cmd, *([cfg.waves_flag] if waves else [])]
         for c in cases:
             cmd += _case_args(cfg, specs[c])
         outcome = FORMATS[cfg.format].run_cases(project, cmd, env)
@@ -78,6 +100,8 @@ def run_regress(project: Project, cases: list[str] | None = None, max_diagnostic
     metrics = {"passed": len(passed), "failed": len(failed), "cases": len(rows),
                "passed_cases": [r[0] for r in passed], "failed_cases": [r[0] for r in failed],
                "format": cfg.format, "case_logs": outcome.logs}
+    if waves:
+        metrics["waves"] = waves_files(cfg, outcome.logs, [r[0] for r in rows])
     sub_text = ""
     if outcome.subtests:
         totals = {k: sum(s.get(k, 0) for s in outcome.subtests.values()) for k in ("passed", "failed", "total")}

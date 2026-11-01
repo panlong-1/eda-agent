@@ -18,6 +18,8 @@ from ..tools.mutate import run_mutate
 from ..tools.perf import run_perf
 from ..tools.testcase import run_score_tests, run_test_context, run_write_case
 from ..tools.regress import run_regress
+from ..tools.rtl_trace import run_hierarchy, run_trace_driver, run_trace_load
+from ..tools.waves import run_waveform_query
 from ..tools.rtl_rules import run_rtl_rules
 from ..tools.synth import run_check_sdc, run_synth
 
@@ -56,9 +58,52 @@ def build_server(project: Project) -> MCPServer:
         "Run the project's regression on the given case names (all cases if omitted; the "
         "full list may take several minutes). Returns pass/fail (per case where the project's "
         f"'{project.regress.format}' result format allows) and failing log tails. Evidence level E2."
+        + (" waves=true also dumps a waveform per case (name at most 2 failing cases) and returns its path in "
+           "metrics.waves, for waveform_query and trace_* (localising a failure)." if project.regress.waves_flag
+           else "")
     ))
-    def regress(cases: list[str] | None = None) -> dict:
-        return attach(run_regress(project, cases), project).to_dict()
+    def regress(cases: list[str] | None = None, waves: bool = False) -> dict:
+        return attach(run_regress(project, cases, waves=waves), project).to_dict()
+
+    def _out(res) -> dict:
+        return res if isinstance(res, dict) else attach(res, project).to_dict()
+
+    @server.tool(description=(
+        f"The elaborated design's instance tree (slang, the lint file set, top '{project.lint.top}'): module, "
+        "where each instance is made and defined (file:line). With signals=true, the ports and signals of "
+        "`instance` with direction, width and how many drivers/loads each has. Diagnostic facts (E0)."
+    ))
+    def hierarchy(instance: str | None = None, depth: int = 3, signals: bool = False) -> dict:
+        return _out(run_hierarchy(project, instance, depth=depth, signals=signals))
+
+    @server.tool(description=(
+        "Trace what drives a signal, back through assignments, always blocks (each assignment with the if/case "
+        "conditions it sits under) and instance ports, each step with file:line and its source text. Give a "
+        "slang path (from hierarchy) or the waveform's path. With waveform (a file regress waves=true returned) "
+        "and time, every signal in the chain gets its value at that time. Diagnostic facts (E0): a cause found "
+        "with it is a hypothesis; cite this result for any 'the bug is in ...' or 'caused by line N' statement."
+    ))
+    def trace_driver(signal: str, depth: int = 3, max_steps: int = 25, waveform: str | None = None,
+                     time: int | None = None) -> dict:
+        return _out(run_trace_driver(project, signal, depth=depth, max_steps=max_steps, waveform=waveform, time=time))
+
+    @server.tool(description=(
+        "Trace what reads a signal (its loads), forward through assignments and ports, each step with file:line; "
+        "with waveform and time, values at that time. Diagnostic facts (E0)."
+    ))
+    def trace_load(signal: str, depth: int = 2, max_steps: int = 25, waveform: str | None = None,
+                   time: int | None = None) -> dict:
+        return _out(run_trace_load(project, signal, depth=depth, max_steps=max_steps, waveform=waveform, time=time))
+
+    @server.tool(description=(
+        "Values and changes of a few signals (at most 16; slang paths, waveform paths, or patterns with *) in "
+        "the time window [start, end] of a waveform the regression wrote (regress waves=true). Times are in the "
+        "waveform's timescale units (returned). Changes per signal are capped. Use it to find the first time a "
+        "signal goes wrong. Diagnostic facts (E0)."
+    ))
+    def waveform_query(waveform: str, signals: list[str], start: int, end: int | None = None,
+                       max_changes: int = 40) -> dict:
+        return _out(run_waveform_query(project, waveform, signals, start, end, max_changes=max_changes))
 
     @server.tool(description=(
         "Fixed RTL rule checks, no model: blocking assignments in clocked blocks, non-blocking in "

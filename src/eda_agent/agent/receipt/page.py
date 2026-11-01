@@ -12,6 +12,7 @@ import re
 from ...core.version import label as version_label
 from ..levels import FINDING_LEVEL, LEVELS, TITLE, Issue, counts_line, first_sentence
 from .data import receipt_kind
+from .localise import localise_html, localise_tables
 from .markdown import details_md
 from .summary import GENERATED, STATUS_CLASS, narrative_meta, summarize
 from .tables import Table, cell_text, data_tables, fmt_secs, trace_note
@@ -317,6 +318,8 @@ def render_html(r: dict, panel: str = "", link=plain_link) -> str:
     else:
         h.append('<p class="muted">No check ran.</p>')
 
+    loc_html = localise_html(r, link)
+    h.append(loc_html)
     h.append('<div class="grid"><div><h2>What the evidence allows</h2><ul>'
              + "".join(f"<li>{e(x)}</li>" for x in s.evidence) + "</ul></div>")
     h.append("<div><h2>Not checked</h2><ul>" + "".join(f"<li>{e(x)}</li>" for x in s.not_checked)
@@ -347,7 +350,8 @@ def render_html(r: dict, panel: str = "", link=plain_link) -> str:
     h.append("<h2>Data</h2>")
     if trace_note(r):
         h.append(f'<p class="note">{e(trace_note(r))}</p>')
-    h += [table_html(tb, link) for tb in data_tables(r)]
+    shown = localise_tables(r) if loc_html else []  # already in the localisation section
+    h += [table_html(tb, link) for tb in data_tables(r) if tb not in shown]
     h.append("<h2>Details (full receipt)</h2>")
     h += _details_html(r, link)
     h.append("</main></body></html>")
