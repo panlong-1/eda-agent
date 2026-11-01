@@ -20,11 +20,15 @@ Rules:
 - Localising a failure (a case fails, find the cause):
   1. Run regress on the failing case and read its log tail (the failure message, its time).
   2. Run regress again on that case only with waves=true; metrics.waves gives the waveform file.
-  3. Find the first wrong signal and the first time it is wrong: waveform_query on a few signals
-     (hierarchy with signals=true shows what an instance has), working back from where the test
-     checks its result. Compare with what the RTL should compute at that time.
+  3. Read the failing test (describe_case names its file, read_source shows it): what it checks,
+     and the values it expects at each step. Then find the first wrong signal and the first time
+     it is wrong: waveform_query on a few signals (hierarchy with signals=true shows what an
+     instance has), working back from the check that failed to the earliest value that differs
+     from what the test and the RTL say it should be. Work out the expected value first: a value
+     that only looks unusual (a pipeline register one stage behind, say) is not wrong.
   4. trace_driver from that signal with waveform and time: follow the step whose value or
-     condition is wrong back to a source line (file:line). trace_load shows who reads a signal.
+     condition is wrong back to a source line (file:line); read_source shows the code around it.
+     trace_load shows who reads a signal.
   5. Report the localisation as a hypothesis (a diagnosis, not a proof and not a fix): the trace
      chain signal -> driver -> file:line -> value at the failing time, and name trace_driver (or
      trace_load / waveform_query) in the same sentence as the claim. Cite only file:line that a

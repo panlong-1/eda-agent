@@ -11,7 +11,7 @@ pip install -e ".[debug]"      # pyslang (slang's Python bindings) and pywellen 
 
 ## Tools (MCP)
 
-All four report facts only. Their envelopes have evidence level E0 and `"diagnostic": true`: they
+All of them report facts only. Their envelopes have evidence level E0 and `"diagnostic": true`: they
 never raise the evidence level, and a cause found with them is a hypothesis.
 
 | tool | library | what it returns |
@@ -20,6 +20,7 @@ never raise the evidence level, and a cause found with them is a hypothesis.
 | `trace_driver` | pyslang | what writes a signal, back step by step: continuous assigns, always blocks (one step per assignment, with the if/case conditions it sits under, each with `file:line` and text) and instance ports; with `waveform` and `time` every signal in the chain gets its value at that time |
 | `trace_load` | pyslang | what reads a signal, forward, in the same form |
 | `waveform_query` | pywellen | values and changes of at most 16 signals in a time window, at most 60 changes each |
+| `read_source` | (plain file read) | numbered lines (at most 200) of one file under the project root: the failing test program, the RTL around a traced line; no envelope |
 
 `regress` takes `waves=true` for at most two named cases, when the project config says how its
 regression dumps waveforms (`[regress] waves_flag`, `waves_file`, e.g. TORV's `--waves` and
@@ -29,8 +30,8 @@ Waveforms are read only from under the project root or eda-agent's `runs/` folde
 
 ## How the agent uses them (prompt `system.v3`)
 
-1. the failing case and its log tail; 2. waves for that case only; 3. the first wrong signal and
-time (`waveform_query`, `hierarchy`); 4. `trace_driver` from it, with the waveform and time, back
+1. the failing case and its log tail; 2. waves for that case only; 3. read the test (`read_source`)
+for what it checks and expects, then the first wrong signal and time (`waveform_query`, `hierarchy`); 4. `trace_driver` from it, with the waveform and time, back
 to a source line; 5. the localisation reported as a hypothesis with its trace chain.
 
 ## Gate and levels

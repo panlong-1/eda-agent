@@ -38,6 +38,7 @@ src/eda_agent/
                          the if/case conditions of each assignment (diagnostic facts, E0)
     waves.py             waveform_query: values and changes in a time window of a VCD/FST (pywellen,
                          in-process, capped); maps waveform scope names to slang paths (diagnostic, E0)
+    source.py            read_source: numbered lines of a project file (the test, RTL around a trace)
     perf.py              cycle counts and other testbench counters per case, against the
                          person-approved baseline (E2); recording that baseline (CLI only)
     flow.py              flow_report: a flow run judged by fixed signoff rules, compared with a

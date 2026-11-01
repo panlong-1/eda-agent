@@ -21,6 +21,7 @@ from ..tools.regress import run_regress
 from ..tools.rtl_trace import run_hierarchy, run_trace_driver, run_trace_load
 from ..tools.waves import run_waveform_query
 from ..tools.rtl_rules import run_rtl_rules
+from ..tools.source import run_read_source
 from ..tools.synth import run_check_sdc, run_synth
 
 INSTRUCTIONS = (
@@ -75,6 +76,15 @@ def build_server(project: Project) -> MCPServer:
     ))
     def hierarchy(instance: str | None = None, depth: int = 3, signals: bool = False) -> dict:
         return _out(run_hierarchy(project, instance, depth=depth, signals=signals))
+
+    @server.tool(description=(
+        "Numbered lines of one text file under the project root: a test program (describe_case names it) to "
+        "see what it checks and the values it expects, or the RTL around a traced file:line. At most 200 "
+        "lines: give line (and context) or start/end."
+    ))
+    def read_source(file: str, line: int | None = None, context: int = 40, start: int | None = None,
+                    end: int | None = None) -> dict:
+        return run_read_source(project, file, line=line, context=context, start=start, end=end)
 
     @server.tool(description=(
         "Trace what drives a signal, back through assignments, always blocks (each assignment with the if/case "

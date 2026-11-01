@@ -140,6 +140,15 @@ def test_waveform_query_refuses_files_outside_the_project(project, tmp_path):
     assert r.status == "error" and "not a waveform" in r.summary
 
 
+def test_read_source_numbers_lines_and_stays_in_the_project(project, tmp_path):
+    from eda_agent.tools.source import run_read_source
+    out = run_read_source(project, "mini.sv", line=BUG_LINE, context=1)
+    assert out["lines"] == ["   14        y = a;", "   15      else if (1'b0)", "   16        y = b;"]
+    assert out["first_line"] == 14 and out["total_lines"] == 35 and out["truncated"]
+    assert "error" in run_read_source(project, str(tmp_path / "x.sv"))
+    assert "error" in run_read_source(project, "../../unit/test_localise.py")
+
+
 def test_value_format():
     assert fmt(1, 1) == "1" and fmt(10, 8) == "8'ha" and fmt("x1", 2) == "2'bx1" and fmt(None, 4) is None
 
