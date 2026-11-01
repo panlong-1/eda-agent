@@ -117,6 +117,9 @@ def details_md(r: dict) -> str:
         return testgen_details_md(r)
     if kind == "import":
         return import_details_md(r)
+    if kind == "tune":
+        from .tune import tune_details_md
+        return tune_details_md(r)
     return render_details(r)
 
 

@@ -10,6 +10,11 @@
         lessons from the flow config's comments and the imported experience table (flow_history:
         hypotheses), and from flow receipts (verified only if a person approved the receipt and the
         run is in this design's eda_agent table). Seeding twice adds nothing new.
+    eda-agent lessons propose [--provider deepseek] [--dry-run]
+        a model proposes lessons from the experience tables (flow_history) and the config comments;
+        each must cite fact ids (<run>:<metric>) whose numbers code checks (R1) and may name only lessons
+        that exist (R11); the ones that pass are stored as hypotheses (plan §0.15 step 2). The proposal
+        and the code's verdict on each lesson go to runs/lessons_<time>.json.
 
 Entries are append-only; who did it is git user.name (the same as approvals).
 """
@@ -27,8 +32,9 @@ from ..core.project import load_project
 
 
 def add_parser(sub) -> argparse.ArgumentParser:
-    p = sub.add_parser("lessons", help="the design's lessons store: list, search, add, refute, verify, void, seed")
-    p.add_argument("action", choices=["list", "search", "add", "refute", "verify", "void", "seed"])
+    p = sub.add_parser("lessons", help="the design's lessons store: list, search, add, refute, verify, void, seed, "
+                                       "propose")
+    p.add_argument("action", choices=["list", "search", "add", "refute", "verify", "void", "seed", "propose"])
     p.add_argument("args", nargs="*", help="search: query; add: text; refute: id text; verify/void: id")
     p.add_argument("--project")
     p.add_argument("--all", action="store_true", help="list: also voided, refuted and marker entries")
@@ -38,6 +44,10 @@ def add_parser(sub) -> argparse.ArgumentParser:
                    help="key=value[,key=value]: run_id, receipt, receipt_sha256, file, sha256, note")
     p.add_argument("--reason", default="")
     p.add_argument("--receipt", action="append", default=[], help="seed: a flow receipt to learn from")
+    p.add_argument("--provider", default="deepseek", choices=["anthropic", "deepseek"], help="propose: the model")
+    p.add_argument("--model")
+    p.add_argument("--effort", default="high", choices=["low", "medium", "high", "xhigh", "max"])
+    p.add_argument("--dry-run", action="store_true", help="propose: check the lessons, store none")
     return p
 
 
@@ -96,6 +106,8 @@ def lessons(args: argparse.Namespace) -> int:
                 raise ValueError("verify needs --source: the run or receipt that verifies it here")
             _print(store.add("", kind="verify", refers_to=a[0], sources=_sources(args.source), by=by,
                              origin="person", reason=args.reason))
+        elif args.action == "propose":
+            return _propose(project, args, by)
         elif args.action == "void":
             _print(store.add("", kind="void", refers_to=a[0], by=by, origin="person (human gate)", reason=args.reason))
         else:
@@ -105,6 +117,35 @@ def lessons(args: argparse.Namespace) -> int:
     except (ValueError, IndexError) as e:
         print(f"error: {e}")
         return 2
+    return 0
+
+
+def _propose(project, args, by: str) -> int:
+    import asyncio
+    from datetime import datetime
+
+    from ..agent.tuning import LESSONS_PROMPT, propose_lessons
+    from ..tools.flow_history import run_flow_history
+    from .common import DEFAULT_MODELS, load_prompt, make_model
+    name = args.model or DEFAULT_MODELS[args.provider]
+    history = run_flow_history(project).to_dict()
+    if history["status"] != "pass":
+        print(f"error: flow_history: {history.get('summary')}")
+        return 2
+    usage: dict = {}
+    out = asyncio.run(propose_lessons(project, make_model(args.provider, name, args.effort), load_prompt(LESSONS_PROMPT),
+                                      history["metrics"], usage=usage, write=not args.dry_run,
+                                      by=f"agent ({name})"))
+    for x in out["accepted"]:
+        print(f"STORED   {x['entry']['id'] if x['entry'] else '(dry run)'}  {x['lesson']['text']}")
+    for x in out["rejected"]:
+        print(f"REJECTED {x['lesson'].get('text')}\n         " + "\n         ".join(x["reasons"]))
+    rec = Path("runs") / f"lessons_{datetime.now():%Y%m%d_%H%M%S}.json"
+    rec.parent.mkdir(parents=True, exist_ok=True)
+    rec.write_text(json.dumps({"project": project.name, "provider": args.provider, "model": name,
+                               "prompt": LESSONS_PROMPT, "usage": usage, "dry_run": args.dry_run, **out},
+                              indent=1, ensure_ascii=False), encoding="utf-8")
+    print(f"{len(out['accepted'])} stored, {len(out['rejected'])} rejected; record {rec}")
     return 0
 
 

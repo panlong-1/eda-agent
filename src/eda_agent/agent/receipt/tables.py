@@ -476,6 +476,9 @@ def data_tables(r: dict) -> list[Table]:
         return testgen_tables(r)
     if kind == "import":
         return import_tables(r)
+    if kind == "tune":
+        from .tune import tune_tables  # it builds on Table
+        return tune_tables(r)
     from .localise import localise_tables  # it builds on Table
     return (regress_tables(r) + case_tables(r) + lint_tables(r) + synth_tables(r) + sdc_tables(r)
             + localise_tables(r) + other_tables(r) + findings_table(r) + gate_table(r) + memory_tables(r)

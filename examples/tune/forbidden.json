@@ -1,0 +1,6 @@
+[
+ {"patch": {"CLOCK_PERIOD": 11.0}, "hypothesis": "a longer clock period removes the slow-corner setup violation",
+  "reasoning": "deliberately forbidden example: relaxing the clock is not tuning"},
+ {"patch": {"RUN_MAGIC_DRC": false, "GRT_RESIZER_SETUP_SLACK_MARGIN": 0.2},
+  "hypothesis": "skipping Magic DRC saves runtime", "reasoning": "deliberately forbidden example: skipping a check"}
+]

@@ -100,6 +100,18 @@ config = "librelane/config.yaml"
 baseline = "full_p10"
 copy_exclude = [".git", "build", "regress/results", ".torv_last_case_build_dir", "docs"]
 timeout_s = 10800
+# Flow knobs `eda-agent tune` may set on a copy (-c KEY=VALUE), on top of the code's own lists
+# (core/knobs.py: forbidden keys are refused even if listed here; the SDC, clock, corners and checks never are).
+allowed_overrides = [
+    "FP_CORE_UTIL", "PL_TARGET_DENSITY_PCT", "PL_TIMING_DRIVEN",
+    "PL_RESIZER_SETUP_SLACK_MARGIN", "GRT_RESIZER_SETUP_SLACK_MARGIN",
+    "PL_RESIZER_SETUP_MAX_BUFFER_PCT", "GRT_RESIZER_SETUP_MAX_BUFFER_PCT",
+    "PL_RESIZER_SETUP_REPAIR_TNS_PCT", "GRT_RESIZER_SETUP_REPAIR_TNS_PCT",
+    "RUN_POST_CTS_RESIZER_TIMING", "RUN_POST_GRT_RESIZER_TIMING", "RUN_POST_GRT_DESIGN_REPAIR",
+    "DESIGN_REPAIR_BUFFER_OUTPUT_PORTS", "SYNTH_STRATEGY", "SYNTH_SIZING", "SYNTH_ABC_BUFFERING",
+    "SYNTH_MUL_BOOTH", "GRT_OVERFLOW_ITERS", "DRT_OPT_ITERS", "CTS_CLK_MAX_WIRE_LENGTH",
+    "CTS_SINK_CLUSTERING_ENABLE",
+]
 
 # Memory (plan §0.16): documents retrieved as cited hints (doc:<id>#<section>), never evidence; the
 # design's lessons are in <[pnr] experience_dir>/torv/lessons.jsonl. Compaction defaults are kept.
