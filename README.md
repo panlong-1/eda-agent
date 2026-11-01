@@ -65,7 +65,8 @@ trace) and a receipt `runs/<id>.receipt.json`, rendered as `.html` and `.md`.
 
 - [docs/usage.md](docs/usage.md): every command, a second design, adding a project
 - [docs/project-config.md](docs/project-config.md): the project TOML, incl. `[flow]`, with links for `[mutation]`, `[tests]`, `[perf]`, `[pnr]`
-- [docs/evidence-gate.md](docs/evidence-gate.md): evidence levels E0–E5 and gate rules R1–R9
+- [docs/evidence-gate.md](docs/evidence-gate.md): evidence levels E0–E5 and gate rules R1–R10
+- [docs/memory.md](docs/memory.md): lessons store and cited retrieval (hints, never evidence), context compaction
 - [docs/review-and-approval.md](docs/review-and-approval.md): reviewers I0–I3, the human gate, Fatal / Error / Warning, `review-ui`, reading a receipt
 - [docs/mutation-and-tests.md](docs/mutation-and-tests.md): `mutate`, `write-tests`, `perf`
 - [docs/flow-signoff.md](docs/flow-signoff.md): `flow_report`, `flow_run`, signoff rules, run history, flow adapters

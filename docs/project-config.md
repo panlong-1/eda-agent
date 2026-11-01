@@ -10,6 +10,7 @@ A project is one TOML file (`projects/<name>.toml`, or `eda-agent.toml` in the d
 | `[tests]` | new tests against surviving mutants | [mutation-and-tests.md](mutation-and-tests.md#new-tests-against-surviving-mutants-tests-write-tests) |
 | `[perf]` | cycle counts against a person-approved baseline | [mutation-and-tests.md](mutation-and-tests.md#performance-perf) |
 | `[pnr]` | the RTL-to-GDS flow (LibreLane) | [flow-signoff.md](flow-signoff.md#rtl-to-gds-pnr) |
+| `[memory]` | documents retrieved as cited hints; how many hints; context compaction | [memory.md](memory.md) |
 
 ## Design, lint and regression
 

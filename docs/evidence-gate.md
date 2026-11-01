@@ -12,10 +12,10 @@ Every tool result carries one level; what it lets a reader conclude, and what it
 | E3 | bit-exact / mutation evidence | outputs match a reference bit for bit, or the tests kill injected bugs | timing, power or anything after layout |
 | E4 | synthesis estimate | area and timing as estimated before placement and routing, under this SDC | function, or signoff timing after placement and routing |
 | E5 | signoff | post-route multi-corner timing, DRC/LVS and gate-level checks passed | anything outside the signed-off corners and modes |
-## The gate (R1-R9)
+## The gate (R1-R10)
 
 When the model ends its turn, `agent/gate/` checks the report against the tool
-results of this run. One module per rule (`r1_citations.py` .. `r9_categories.py`):
+results of this run. One module per rule (`r1_citations.py` .. `r10_memory.py`):
 
 - **R1 citations.** Every status/evidence-level pair the report cites ("regress: pass (E2)")
   and every "N passed / N failed" count must come from a tool result of this run. A level
@@ -58,6 +58,13 @@ results of this run. One module per rule (`r1_citations.py` .. `r9_categories.py
 - **R9 category** (`agent/gate/r9_categories.py`). "lint/CDC/RDC clean", "DFT passed", "test coverage
   N%", "formally equivalent" cite a result of that category with its numbers; categories never
   stand in for each other (imported results, [plugins.md](plugins.md)).
+- **R10 memory** (`agent/gate/r10_memory.py`, [memory.md](memory.md)). Lessons and documents are hints,
+  never evidence. Every lesson id (`lesson-<design>-NNN`) the report names must exist and must have been
+  retrieved in this run (a hint at the start, or returned by `search_memory`); a voided or refuted lesson
+  may not be cited. A document is cited with its section (`doc:<doc>#<section>`), which must exist and
+  have been retrieved. The sentence must mark the citation as a hint or source, and may not use it to
+  confirm, prove or verify anything unless it names a tool result of this run. Items of a
+  `## Lessons (hypotheses)` section are new lessons, not citations: only the existence checks apply.
 
 A rejected report goes back to the model with the reasons, at most twice; then the run
 stops with `stop_reason: gate_rejected` and `status: pending` for a human to judge. The
