@@ -14,6 +14,8 @@ dependencies = ["anthropic>=2", "mcp>=2", "openai>=1.40", "pyyaml>=6"]
 dev = ["pytest>=8", "pytest-asyncio>=0.23"]
 # mutate: avl-core generates the source-level mutants (MIT; pulls in pyslang and cocotb)
 mutation = ["avl-core==1.2.0"]
+# failure localisation (hierarchy, trace_driver/trace_load, waveform_query): in-process libraries
+debug = ["pyslang>=10", "pywellen>=0.20"]
 
 [project.scripts]
 eda-mcp = "eda_agent.server.mcp_server:main"

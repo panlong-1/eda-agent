@@ -26,6 +26,9 @@ case_list = "regress/cases/soc.list"
 case_flag = "--case"
 summary_file = "summary.rpt"
 timeout_s = 1800
+# regress waves=true (localising a failure): run_regress.py --waves writes <case dir>/<case>.vcd
+waves_flag = "--waves"
+waves_file = "{case_dir}/{name}.vcd"
 
 # Mutation runs (mutate): mutants of these files, judged by these cases, each in a copy of the
 # checkout under runs/work/. Build and result directories are not copied and are emptied per mutant.

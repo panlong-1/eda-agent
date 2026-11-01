@@ -38,6 +38,12 @@ src/eda_agent/
     mutate.py            mutants (avl-core) of one RTL file, each run in a copy of the design
                          against regression cases: kill matrix, survivors, perf_killed (E0)
     testcase.py          test_context, write_case, score_tests: new tests against surviving mutants (E3)
+    rtl_trace.py         hierarchy, trace_driver, trace_load: the design elaborated in-process by pyslang
+                         (lint file set), an index of who writes / reads each signal with file:line and
+                         the if/case conditions of each assignment (diagnostic facts, E0)
+    waves.py             waveform_query: values and changes in a time window of a VCD/FST (pywellen,
+                         in-process, capped); maps waveform scope names to slang paths (diagnostic, E0)
+    source.py            read_source: numbered lines of a project file (the test, RTL around a trace)
     perf.py              cycle counts and other testbench counters per case, against the
                          person-approved baseline (E2); recording that baseline (CLI only)
     flow.py              flow_report: a flow run judged by fixed signoff rules, compared with a
@@ -53,7 +59,7 @@ src/eda_agent/
                          scripted.py (for tests)
     loop.py              tool loop with budgets: turns, tool calls, 2-strike retry stop; JSONL trace
     gate/                evidence gate on the final report (no LLM), up to 2 rewrites: one module
-                         per rule, r1_citations.py .. r9_categories.py, common.py, and __init__.py
+                         per rule, r1_citations.py .. r10_localise.py, common.py, and __init__.py
                          (check_report runs them all)
     model_output.py      a model's reply -> structured fields -> the evidence gate (reviewer,
                          write-tests, the receipt summary)
@@ -69,13 +75,14 @@ src/eda_agent/
       page.py            layer 3, runs/<id>.receipt.html (self-contained)
       files.py           writes the .json (with its levels) and both pages
       narrative.py       optional model-written summary, checked by the evidence gate
+      localise.py        failure localisation: the trace-chain table and an inline-SVG waveform snippet
     sources.py           file references in a receipt, and which ones the review page may show
     mcp_client.py        connects the loop to the MCP server
   cli/                   eda-agent: one module per subcommand (run.py: run and check; decide.py:
                          approve, reject, pending; flow.py: flow-*; plugins.py: import, plugins,
                          standard; ...), common.py for what they share
   review_ui.py           eda-agent review-ui: the receipts in a local page, decide by clicking
-  prompts/               system.v2.md (default; v1 kept), reviewer.v1.md, testgen.v3.md,
+  prompts/               system.v3.md (default: v2 plus localising a failure; v1, v2 kept), reviewer.v1.md, testgen.v3.md,
                          testgen-review.v1.md, receipt_summary.v1.md, presets.v1.toml (the fixed
                          tasks of `check`); names and versions are recorded in every receipt
 projects/torv.toml       TORV rv32m SoC (format torv)

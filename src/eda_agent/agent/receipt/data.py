@@ -79,6 +79,7 @@ def build_receipt(report: RunReport, *, run_id: str, task: str, provider: str, p
                           for a in c["result"].get("artifacts", [])],
             "duration_s": c.get("duration_s"),
             "metrics": c["result"].get("metrics") or {},
+            **({"diagnostic": True} if c["result"].get("diagnostic") else {}),
             "diagnostics": (c["result"].get("diagnostics") or [])[:MAX_DIAGNOSTICS],
             "diagnostics_total": c["result"].get("diagnostics_total", 0),
             **_timing(c["result"], void),

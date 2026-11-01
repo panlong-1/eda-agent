@@ -46,13 +46,19 @@ class ToolResult:
     error_class: str | None = None
     residual_risk: list[str] = field(default_factory=list)
     snapshot: dict = field(default_factory=dict)  # core/snapshot.py: which design this result describes
+    # Diagnostic facts (hierarchy, trace_*, waveform_query): they help find a cause, never raise the
+    # evidence level, and a conclusion drawn from them is a hypothesis (gate rule R10).
+    diagnostic: bool = False
 
     def __post_init__(self) -> None:
         if self.evidence_level not in EVIDENCE_LEVELS:
             raise ValueError(f"unknown evidence level {self.evidence_level!r}")
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        d = asdict(self)
+        if not d["diagnostic"]:  # only diagnostic results carry the marker (older envelopes stay as they were)
+            del d["diagnostic"]
+        return d
 
 
 def not_configured(tool: str, level: str, scope: str, summary: str) -> ToolResult:

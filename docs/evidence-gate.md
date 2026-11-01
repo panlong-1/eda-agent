@@ -12,7 +12,7 @@ Every tool result carries one level; what it lets a reader conclude, and what it
 | E3 | bit-exact / mutation evidence | outputs match a reference bit for bit, or the tests kill injected bugs | timing, power or anything after layout |
 | E4 | synthesis estimate | area and timing as estimated before placement and routing, under this SDC | function, or signoff timing after placement and routing |
 | E5 | signoff | post-route multi-corner timing, DRC/LVS and gate-level checks passed | anything outside the signed-off corners and modes |
-## The gate (R1-R9)
+## The gate (R1-R10)
 
 When the model ends its turn, `agent/gate/` checks the report against the tool
 results of this run. One module per rule (`r1_citations.py` .. `r9_categories.py`):
@@ -58,6 +58,12 @@ results of this run. One module per rule (`r1_citations.py` .. `r9_categories.py
 - **R9 category** (`agent/gate/r9_categories.py`). "lint/CDC/RDC clean", "DFT passed", "test coverage
   N%", "formally equivalent" cite a result of that category with its numbers; categories never
   stand in for each other (imported results, [plugins.md](plugins.md)).
+- **R10 localisation** (`agent/gate/r10_localise.py`). "The bug is in X", "caused by line N", "root
+  cause", "localised to", 定位到 / 根因 place the cause of a failure: a diagnosis. The sentence must
+  name a `trace_driver` / `trace_load` / `waveform_query` result of this run, every `file:line` or
+  "line N" in it must be a line a trace result of this run reached, it must not present the
+  diagnosis as a proven fix ("fixed", "fix verified"), and the report must call it a hypothesis
+  or diagnosis somewhere. See [failure-localisation.md](failure-localisation.md).
 
 A rejected report goes back to the model with the reasons, at most twice; then the run
 stops with `stop_reason: gate_rejected` and `status: pending` for a human to judge. The

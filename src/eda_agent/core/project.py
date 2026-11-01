@@ -73,6 +73,10 @@ class RegressConfig:
     # e.g. "regress: (?P<passed>\d+)/(?P<total>\d+) cases ok". Its counts then decide too.
     summary_regex: str = ""
     timeout_s: int = 1800
+    # Waveforms for localising a failure (regress waves=true): the flag the regression takes to dump
+    # them, and where each case's file lands ({name}; {case_dir}: the folder of the case's own log).
+    waves_flag: str = ""
+    waves_file: str = ""
 
     def __post_init__(self) -> None:
         if self.summary_regex:
@@ -330,6 +334,8 @@ def load_project(path: str | Path) -> Project:
             fail_regex=regress.get("fail_regex", ""),
             summary_regex=regress.get("summary_regex", ""),
             timeout_s=int(regress.get("timeout_s", 1800)),
+            waves_flag=regress.get("waves_flag", ""),
+            waves_file=regress.get("waves_file", ""),
         ),
     )
 

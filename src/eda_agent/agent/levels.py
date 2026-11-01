@@ -65,6 +65,8 @@ RULES = [
     ("timing is a pre-PnR estimate only", "warning"),
     ("a non-blocking setup finding, e.g. a behavioural memory synthesized to flip-flops", "warning"),
     ("mutation: surviving or likely-equivalent mutants", "warning"),
+    ("a failure localisation (trace_driver / trace_load / waveform_query): a diagnosis, a hypothesis about "
+     "the cause; not a proof and not a fix", "warning"),
     ("the model-written summary was rejected by the gate", "warning"),
     ("import: input files the report names were not found here; waived items; the tool was not run by "
      "eda-agent", "warning"),
@@ -368,6 +370,13 @@ def assess(r: dict) -> list[Issue]:
             if m.get("likely_equivalent"):
                 add("warning", f"mutate: {m['likely_equivalent']} mutant(s) likely equivalent (not a proof)",
                     source=tool)
+    diag = [c for c in r["checks_run"] if c.get("diagnostic") or c["tool"] in ("trace_driver", "trace_load",
+                                                                              "waveform_query", "hierarchy")]
+    traced = [c for c in diag if c["tool"] in ("trace_driver", "trace_load")]
+    if traced:
+        locs = list(dict.fromkeys(x for c in traced for x in (c.get("metrics") or {}).get("locations", [])))
+        add("warning", "Failure localisation is a diagnosis: a hypothesis about the cause from trace and waveform "
+                       "facts, not a proof and not a fix", quote=", ".join(locs[:8]), source="localisation")
     # A check that stopped on a setup problem ran no tool, so it has no version to record.
     missing = [c["tool"] for c in r["checks_run"] if not c.get("tool_versions")
                and not (c["status"] in ("error", "timeout") and (c.get("metrics") or {}).get("setup_issues"))]
