@@ -1,0 +1,183 @@
+{
+  "kind": "tune",
+  "run_id": "tune_forbidden_example",
+  "project": "torv",
+  "provider": "person",
+  "model": "(proposal file)",
+  "prompt": "examples/tune/forbidden.json",
+  "code_version": {
+    "commit": "a320f2358ee7cf3f4e2dfddc141cb89de5f62811",
+    "commit_time": "2026-11-01T02:21:17+01:00",
+    "dirty": true,
+    "package": "0.0.1"
+  },
+  "goal": "slow-corner setup slack (post-route)",
+  "metric": "setup_wns_slow",
+  "budget_runs": 2,
+  "runs_used": 0,
+  "start_best": {
+    "run": "m4_e5_1",
+    "run_dir": "/home/panlong/project/eda-agent-m4/runs/pnr/torv_m4_e5_1/src/librelane/runs/m4_e5_1",
+    "numbers": {
+      "slow_corner": "nom_slow_1p08V_125C",
+      "setup_wns": -0.7254481665165831,
+      "setup_tns": -7.845814886514664,
+      "hold_wns": 0.10087869713992108,
+      "setup_wns_slow": -0.7254481665165831,
+      "setup_tns_slow": -7.845814886514664,
+      "setup_violations_slow": 26,
+      "drc": 0,
+      "lvs_errors": 0,
+      "antenna_nets": 0,
+      "die_area_um2": 508267,
+      "stdcell_count": 18824,
+      "power_w": 0.013677507638931274,
+      "runtime_s": 3411.9,
+      "signoff_passed": false,
+      "complete": true
+    },
+    "summary": "m4_e5_1 (torv_cpu): signoff FAIL [E5-partial]; setup WNS -0.725 ns (nom_slow_1p08V_125C), hold WNS +0.101 ns; DRC Magic 0, KLayout 0; LVS errors 0; antenna nets 0; die 508267 um2, util 0.557351, 18824 cells"
+  },
+  "best": {
+    "run": "m4_e5_1",
+    "run_dir": "/home/panlong/project/eda-agent-m4/runs/pnr/torv_m4_e5_1/src/librelane/runs/m4_e5_1",
+    "numbers": {
+      "slow_corner": "nom_slow_1p08V_125C",
+      "setup_wns": -0.7254481665165831,
+      "setup_tns": -7.845814886514664,
+      "hold_wns": 0.10087869713992108,
+      "setup_wns_slow": -0.7254481665165831,
+      "setup_tns_slow": -7.845814886514664,
+      "setup_violations_slow": 26,
+      "drc": 0,
+      "lvs_errors": 0,
+      "antenna_nets": 0,
+      "die_area_um2": 508267,
+      "stdcell_count": 18824,
+      "power_w": 0.013677507638931274,
+      "runtime_s": 3411.9,
+      "signoff_passed": false,
+      "complete": true
+    },
+    "summary": "m4_e5_1 (torv_cpu): signoff FAIL [E5-partial]; setup WNS -0.725 ns (nom_slow_1p08V_125C), hold WNS +0.101 ns; DRC Magic 0, KLayout 0; LVS errors 0; antenna nets 0; die 508267 um2, util 0.557351, 18824 cells"
+  },
+  "best_patch": {},
+  "attempts": [
+    {
+      "n": 1,
+      "round": 1,
+      "source": "file",
+      "proposal": {
+        "patch": {
+          "CLOCK_PERIOD": 11.0
+        },
+        "hypothesis": "a longer clock period removes the slow-corner setup violation",
+        "reasoning": "deliberately forbidden example: relaxing the clock is not tuning"
+      },
+      "policy": [
+        {
+          "level": "fatal",
+          "key": "CLOCK_PERIOD",
+          "value": 11.0,
+          "reason": "never changed by the agent: the SDC, the clock and the signoff corners belong to the design team"
+        }
+      ],
+      "reasons": [],
+      "decision": "rejected",
+      "hypothesis_lesson": null,
+      "run": {},
+      "comparison": {},
+      "verdict": "",
+      "verdict_detail": "",
+      "lesson_update": {}
+    },
+    {
+      "n": 2,
+      "round": 2,
+      "source": "file",
+      "proposal": {
+        "patch": {
+          "RUN_MAGIC_DRC": false,
+          "GRT_RESIZER_SETUP_SLACK_MARGIN": 0.2
+        },
+        "hypothesis": "skipping Magic DRC saves runtime",
+        "reasoning": "deliberately forbidden example: skipping a check"
+      },
+      "policy": [
+        {
+          "level": "fatal",
+          "key": "RUN_MAGIC_DRC",
+          "value": false,
+          "reason": "turning off a check (or not stopping on its errors) weakens the check"
+        }
+      ],
+      "reasons": [],
+      "decision": "rejected",
+      "hypothesis_lesson": null,
+      "run": {},
+      "comparison": {},
+      "verdict": "",
+      "verdict_detail": "",
+      "lesson_update": {}
+    }
+  ],
+  "patch_files": {},
+  "final_claims": "Tuning run tune_forbidden_example.\nGoal: slow-corner setup slack (post-route).\nBudget: 2 flow run(s); 0 used.\nStart: the best run of the eda_agent table, m4_e5_1 (flow_report, SDC recorded): setup WNS at nom_slow_1p08V_125C -0.725 ns, 26 violating endpoint(s).\n\n- Attempt 1 (file): patch {\"CLOCK_PERIOD\": 11.0}: rejected before running (fatal CLOCK_PERIOD: never changed by the agent: the SDC, the clock and the signoff corners belong to the design team).\n- Attempt 2 (file): patch {\"RUN_MAGIC_DRC\": false, \"GRT_RESIZER_SETUP_SLACK_MARGIN\": 0.2}: rejected before running (fatal RUN_MAGIC_DRC: turning off a check (or not stopping on its errors) weakens the check).\n\nBest run now: m4_e5_1 (no change kept); the patch is not applied to the design.\n\n## Residual risk\n\n- single run per setting: the effect of the knob cannot be told apart from run-to-run noise (placement and routing react chaotically to any change); repeat the run before relying on it.\n- Signoff still fails while any corner has negative setup slack; the verdict reads slow-corner setup only.\n- E5-partial at most: no gate-level simulation of the routed netlist, vectorless power.",
+  "gate": {
+    "decision": {
+      "passed": true,
+      "reasons": [],
+      "max_level": ""
+    }
+  },
+  "residual_risk": [
+    "single run per setting: a knob's effect cannot be told apart from run-to-run noise (placement and routing react chaotically to any change); an identical config was reproduced exactly once (m4_e5_1 = full_p10_fwd), which says nothing about the noise a changed knob brings",
+    "the verdict reads one goal metric (slow-corner setup WNS) and the signoff counts; area, power and runtime are listed but not judged",
+    "post-route STA, DRC, LVS and antenna only (E5-partial): no gate-level simulation of the routed netlist, vectorless power",
+    "the patch is for this design, this PDK, this clock period and this flow version; it is not a general rule"
+  ],
+  "usage": {},
+  "wall_s": 4.2,
+  "applied_to_design": false,
+  "status": "awaiting_approval",
+  "dry_run": false,
+  "agent_status": "done",
+  "approval": {
+    "status": "pending",
+    "step": "flow config patch and lesson updates",
+    "why": "a person decides whether the patch goes into the design's flow config and whether the verified/refuted lessons stand (eda-agent lessons void otherwise)",
+    "requested_at": "2026-11-01T02:37:01+01:00",
+    "by": null,
+    "at": null,
+    "reason": null,
+    "receipt_sha256": null
+  },
+  "levels": {
+    "counts": {
+      "fatal": 2,
+      "error": 0,
+      "warning": 0
+    },
+    "items": [
+      {
+        "level": "fatal",
+        "text": "Attempt 1 proposed a forbidden change (rejected by core/knobs.py, not run)",
+        "quote": "CLOCK_PERIOD=11.0: never changed by the agent: the SDC, the clock and the signoff corners belong to the design team",
+        "source": "knobs",
+        "location": "",
+        "details": [],
+        "id": "3f1c5f01d4"
+      },
+      {
+        "level": "fatal",
+        "text": "Attempt 2 proposed a forbidden change (rejected by core/knobs.py, not run)",
+        "quote": "RUN_MAGIC_DRC=False: turning off a check (or not stopping on its errors) weakens the check",
+        "source": "knobs",
+        "location": "",
+        "details": [],
+        "id": "393a2c4ce0"
+      }
+    ],
+    "rules": "eda_agent/agent/levels.py"
+  }
+}

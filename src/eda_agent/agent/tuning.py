@@ -357,6 +357,7 @@ def config_diff(config_file: Path, rel: str, patch: dict, note: str) -> str:
     """A unified diff (git apply) of the design's flow config with the patch's keys set."""
     old = config_file.read_text(encoding="utf-8").splitlines(keepends=True)
     new = list(old)
+    noted = False
     for k, v in patch.items():
         line = f"{k}: {yaml_value(v)}\n"
         idx = next((i for i, ln in enumerate(new) if re.match(rf"^{re.escape(k)}\s*:", ln)), None)
@@ -365,7 +366,8 @@ def config_diff(config_file: Path, rel: str, patch: dict, note: str) -> str:
         else:
             if new and not new[-1].endswith("\n"):
                 new[-1] += "\n"
-            new += [f"# {note}\n", line]
+            new += ([] if noted else [f"# {note}\n"]) + [line]
+            noted = True
     return "".join(difflib.unified_diff(old, new, f"a/{rel}", f"b/{rel}"))
 
 

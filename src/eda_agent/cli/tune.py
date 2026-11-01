@@ -106,10 +106,11 @@ def report_text(body: dict) -> str:
                    f"{a['comparison'].get('baseline') or 'the best run'}; verdict (code) {a['verdict']}: "
                    f"{a['verdict_detail']}.")
         if lu.get("kind") in ("verify", "refute"):
-            # "supports"/"contradicts": the gate reads "verified" as a claim of functional correctness (R2)
+            # "supports"/"contradicts", no "verified": R2 reads it as a functional-correctness claim, R11 as
+            # memory confirming something
             out.append(f"  Lesson store (source: flow_run {r['tag']}): this run "
                        f"{'supports' if lu['kind'] == 'verify' else 'contradicts'} {lu['lesson']}; new entry "
-                       f"{lu['entry']} (kind {lu['kind']}, single run).")
+                       f"{lu['entry']} (single run).")
     b = body["best"]
     out += ["", f"Best run now: {b['run']}" + (f" with knobs {json.dumps(body['best_patch'])}" if body["best_patch"]
                                                else " (no change kept)") + "; the patch is not applied to the design.",
@@ -147,14 +148,21 @@ def _rereport(args: argparse.Namespace) -> int:
     body = {k: r[k] for k in ("goal", "metric", "budget_runs", "runs_used", "start_best", "best", "best_patch",
                               "attempts")}
     body["run_id"] = r["run_id"]
+    # the tuning runs were made by flow_run: their results, read again, keep that tool name
     body["results"] = [flow.report(r["start_best"]["run_dir"])] + [
-        flow.report(a["run"]["run_dir"]) for a in r["attempts"] if a["decision"] == "ran" and a["run"].get("run_dir")]
+        {**flow.report(a["run"]["run_dir"]), "tool": "flow_run"} for a in r["attempts"]
+        if a["decision"] == "ran" and a["run"].get("run_dir")]
     report = report_text(body)
     gate = _gate(body, report, project)
     r.setdefault("rereports", []).append({"at": datetime.now().astimezone().isoformat(timespec="seconds"),
                                          "by": human_gate.default_approver(), "reason": args.reason,
                                          "previous_report": r["final_claims"], "previous_gate": r["gate"]["decision"]})
     r["final_claims"], r["gate"] = report, {"decision": gate}
+    pf = r.get("patch_files") or {}
+    if pf.get("diff"):   # the same knobs, the diff written by this code
+        pf["diff_text"] = config_diff(Path(project.root) / project.pnr.config, project.pnr.config, r["best_patch"],
+                                      f"eda-agent tune {r['run_id']}: best run {r['best']['run']} (awaiting approval)")
+        Path(pf["diff"]).write_text(pf["diff_text"], encoding="utf-8")
     ran = any(a["decision"] == "ran" for a in r["attempts"])
     r["agent_status"] = "done" if gate.get("passed") and (ran or r["attempts"]) else "failed"
     js, md = write_receipt(r, Path("runs"))

@@ -1,0 +1,119 @@
+{
+ "project": "torv",
+ "provider": "deepseek",
+ "model": "deepseek-v4-pro",
+ "prompt": "tune-lessons.v1",
+ "usage": {
+  "input_tokens": 5355,
+  "output_tokens": 14814,
+  "cache_read_input_tokens": 0,
+  "cache_creation_input_tokens": 0
+ },
+ "dry_run": false,
+ "accepted": [
+  {
+   "lesson": {
+    "text": "In the imported confounded pair full_p10 -> full_p10_fwd, both RUN_POST_GRT_RESIZER_TIMING and SYNTH_MUL_BOOTH change, so the post-PnR slow setup WNS improvement from -4.35 ns to -0.725 ns (+3.625 ns) cannot be assigned to RUN_POST_GRT_RESIZER_TIMING alone; this refines lesson-torv-005.",
+    "knob": "RUN_POST_GRT_RESIZER_TIMING",
+    "cites": [
+     "full_p10:post_setup_wns_slow",
+     "full_p10_fwd:post_setup_wns_slow"
+    ]
+   },
+   "entry": {
+    "id": "lesson-torv-011",
+    "design": "torv",
+    "kind": "lesson",
+    "text": "In the imported confounded pair full_p10 -> full_p10_fwd, both RUN_POST_GRT_RESIZER_TIMING and SYNTH_MUL_BOOTH change, so the post-PnR slow setup WNS improvement from -4.35 ns to -0.725 ns (+3.625 ns) cannot be assigned to RUN_POST_GRT_RESIZER_TIMING alone; this refines lesson-torv-005.",
+    "scope": {
+     "design": "torv",
+     "tool": "librelane",
+     "pdk": "ihp-sg13g2",
+     "corner": "slow",
+     "problem": "RUN_POST_GRT_RESIZER_TIMING"
+    },
+    "status": "hypothesis",
+    "sources": [
+     {
+      "run_id": "full_p10",
+      "note": "imported table: post_setup_wns_slow = -4.35",
+      "sha256": "ca89bd8e6f509b2f426e587eef5d7ff84d806414739096d371b7192aaa605a1e",
+      "file": "full_p10 metrics/STA summary"
+     },
+     {
+      "run_id": "full_p10_fwd",
+      "note": "imported table: post_setup_wns_slow = -0.725",
+      "sha256": "3b7b83261fc313ffb34b03196b5d8a6fdf2790ace7af60123973040d92b848f5",
+      "file": "full_p10_fwd metrics/STA summary"
+     }
+    ],
+    "refers_to": null,
+    "by": "agent (deepseek-v4-pro)",
+    "origin": "model proposal (tune-lessons.v1) from the experience tables, checked by code",
+    "reason": "cites: full_p10:post_setup_wns_slow, full_p10_fwd:post_setup_wns_slow",
+    "at": "2026-11-01T02:39:23+01:00"
+   }
+  }
+ ],
+ "rejected": [
+  {
+   "lesson": {
+    "text": "In the imported isolated pair p7_nobooth -> p7_booth (SYNTH_MUL_BOOTH False -> True at 7 ns), synthesis cell area drops from 267887 to 245314 um2 (-8.43%), while pre-PnR setup WNS changes by +0.015 ns fast, +0.280 ns slow, and +0.151 ns typ. This refines lesson-torv-004 by adding the WNS shifts.",
+    "knob": "SYNTH_MUL_BOOTH",
+    "cites": [
+     "p7_nobooth:synth_area_um2",
+     "p7_booth:synth_area_um2",
+     "p7_nobooth:pre_setup_wns_fast",
+     "p7_booth:pre_setup_wns_fast",
+     "p7_nobooth:pre_setup_wns_slow",
+     "p7_booth:pre_setup_wns_slow",
+     "p7_nobooth:pre_setup_wns_typ",
+     "p7_booth:pre_setup_wns_typ"
+    ]
+   },
+   "reasons": [
+    "(R1) the number 7 is not a cited value (nor the difference or percent change of two cited values of one metric): 'In the imported isolated pair p7_nobooth -> p7_booth (SYNTH_MUL_BOOTH False -> True at 7 ns), synthesis cell area drops from 267887 to 245314 um2 (-8.43%), while pre-PnR setup WNS changes by +0.015 ns fast, +0.280 ns slow, and +0.151 ns typ. This refines lesson-torv-004 by adding the WNS shifts.'"
+   ]
+  },
+  {
+   "lesson": {
+    "text": "In the imported isolated pair synth -> hier (SYNTH_HIERARCHY_MODE flatten -> keep at 5 ns), synthesis cell area is unchanged (+0.00%) and pre-PnR setup WNS is unchanged (+0.000 ns fast, +0.000 ns slow, +0.000 ns typ), so keep mode gave no measured benefit on these metrics in this pair.",
+    "knob": "SYNTH_HIERARCHY_MODE",
+    "cites": [
+     "synth:synth_area_um2",
+     "hier:synth_area_um2",
+     "synth:pre_setup_wns_fast",
+     "hier:pre_setup_wns_fast",
+     "synth:pre_setup_wns_slow",
+     "hier:pre_setup_wns_slow",
+     "synth:pre_setup_wns_typ",
+     "hier:pre_setup_wns_typ"
+    ]
+   },
+   "reasons": [
+    "(R1) the number 5 is not a cited value (nor the difference or percent change of two cited values of one metric): 'In the imported isolated pair synth -> hier (SYNTH_HIERARCHY_MODE flatten -> keep at 5 ns), synthesis cell area is unchanged (+0.00%) and pre-PnR setup WNS is unchanged (+0.000 ns fast, +0.000 ns slow, +0.000 ns typ), so keep mode gave no measured benefit on these metrics in this pair.'",
+    "(R1) the number 0 is not a cited value (nor the difference or percent change of two cited values of one metric): 'In the imported isolated pair synth -> hier (SYNTH_HIERARCHY_MODE flatten -> keep at 5 ns), synthesis cell area is unchanged (+0.00%) and pre-PnR setup WNS is unchanged (+0.000 ns fast, +0.000 ns slow, +0.000 ns typ), so keep mode gave no measured benefit on these metrics in this pair.'",
+    "(R1) the number 0 is not a cited value (nor the difference or percent change of two cited values of one metric): 'In the imported isolated pair synth -> hier (SYNTH_HIERARCHY_MODE flatten -> keep at 5 ns), synthesis cell area is unchanged (+0.00%) and pre-PnR setup WNS is unchanged (+0.000 ns fast, +0.000 ns slow, +0.000 ns typ), so keep mode gave no measured benefit on these metrics in this pair.'",
+    "(R1) the number 0 is not a cited value (nor the difference or percent change of two cited values of one metric): 'In the imported isolated pair synth -> hier (SYNTH_HIERARCHY_MODE flatten -> keep at 5 ns), synthesis cell area is unchanged (+0.00%) and pre-PnR setup WNS is unchanged (+0.000 ns fast, +0.000 ns slow, +0.000 ns typ), so keep mode gave no measured benefit on these metrics in this pair.'",
+    "(R1) the number 0 is not a cited value (nor the difference or percent change of two cited values of one metric): 'In the imported isolated pair synth -> hier (SYNTH_HIERARCHY_MODE flatten -> keep at 5 ns), synthesis cell area is unchanged (+0.00%) and pre-PnR setup WNS is unchanged (+0.000 ns fast, +0.000 ns slow, +0.000 ns typ), so keep mode gave no measured benefit on these metrics in this pair.'"
+   ]
+  },
+  {
+   "lesson": {
+    "text": "full_p10_booth and full_p10_fwd are imported runs with the same listed config vs full_p10 (RUN_POST_GRT_RESIZER_TIMING=True, SYNTH_MUL_BOOTH=True), but they differ in synthesis cell area (245314 vs 239469 um2, -2.38%) and pre-PnR setup WNS slow (0.346 vs 0.906 ns, +0.560 ns). With no isolated knob difference, this pair only shows run-to-run noise or unrecorded changes, not a knob effect.",
+    "knob": "",
+    "cites": [
+     "full_p10_booth:synth_area_um2",
+     "full_p10_fwd:synth_area_um2",
+     "full_p10_booth:pre_setup_wns_slow",
+     "full_p10_fwd:pre_setup_wns_slow"
+    ]
+   },
+   "reasons": [
+    "(R1) names run full_p10 but cites none of its numbers"
+   ]
+  }
+ ],
+ "reply_tail": " fast, +0.000 ns slow, +0.000 ns typ), so keep mode gave no measured benefit on these metrics in this pair.\",\n    \"knob\": \"SYNTH_HIERARCHY_MODE\",\n    \"cites\": [\n      \"synth:synth_area_um2\",\n      \"hier:synth_area_um2\",\n      \"synth:pre_setup_wns_fast\",\n      \"hier:pre_setup_wns_fast\",\n      \"synth:pre_setup_wns_slow\",\n      \"hier:pre_setup_wns_slow\",\n      \"synth:pre_setup_wns_typ\",\n      \"hier:pre_setup_wns_typ\"\n    ]\n  },\n  {\n    \"text\": \"In the imported confounded pair full_p10 -> full_p10_fwd, both RUN_POST_GRT_RESIZER_TIMING and SYNTH_MUL_BOOTH change, so the post-PnR slow setup WNS improvement from -4.35 ns to -0.725 ns (+3.625 ns) cannot be assigned to RUN_POST_GRT_RESIZER_TIMING alone; this refines lesson-torv-005.\",\n    \"knob\": \"RUN_POST_GRT_RESIZER_TIMING\",\n    \"cites\": [\n      \"full_p10:post_setup_wns_slow\",\n      \"full_p10_fwd:post_setup_wns_slow\"\n    ]\n  },\n  {\n    \"text\": \"full_p10_booth and full_p10_fwd are imported runs with the same listed config vs full_p10 (RUN_POST_GRT_RESIZER_TIMING=True, SYNTH_MUL_BOOTH=True), but they differ in synthesis cell area (245314 vs 239469 um2, -2.38%) and pre-PnR setup WNS slow (0.346 vs 0.906 ns, +0.560 ns). With no isolated knob difference, this pair only shows run-to-run noise or unrecorded changes, not a knob effect.\",\n    \"knob\": \"\",\n    \"cites\": [\n      \"full_p10_booth:synth_area_um2\",\n      \"full_p10_fwd:synth_area_um2\",\n      \"full_p10_booth:pre_setup_wns_slow\",\n      \"full_p10_fwd:pre_setup_wns_slow\"\n    ]\n  }\n]}\n```",
+ "parsed": true
+}
